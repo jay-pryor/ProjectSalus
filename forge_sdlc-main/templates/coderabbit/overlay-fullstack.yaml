@@ -1,0 +1,19 @@
+# =============================================================================
+# CodeRabbit Overlay — Full-Stack (Python + Next.js)
+# =============================================================================
+# This file is a merge marker. It does not contain standalone configuration.
+#
+# The deploy script combines overlay-python.yaml and overlay-nextjs.yaml into
+# a single .coderabbit.yaml when provisioning a full-stack project. Both
+# overlays are merged on top of base.yaml, with project-specific invariants
+# (from projects/<name>.yaml) applied last.
+#
+# Merge order:
+#   1. base.yaml              — universal Forge SDLC rules
+#   2. overlay-python.yaml    — Python/FastAPI backend rules
+#   3. overlay-nextjs.yaml    — Next.js/TypeScript frontend rules
+#   4. projects/<name>.yaml   — project-specific invariants (optional)
+#
+# The merge is a deep merge: path_instructions arrays are concatenated,
+# scalar values are overwritten by later files, and path_filters are unioned.
+# =============================================================================

@@ -1,0 +1,90 @@
+# Forge Action Catalog — Failure class to remediation action mapping
+version: "1.0.0"
+
+actions:
+  import_error:
+    primary_action: "Add missing dependency to requirements.txt and reinstall, or fix import path"
+    fallback_action: "Pin dependency version from working lockfile and rebuild virtualenv"
+    verification: "Run pytest smoke tests and verify import succeeds"
+    max_attempts: 3
+
+  type_error:
+    primary_action: "Add type guard, fix argument types, or add missing attribute"
+    fallback_action: "Add defensive type coercion with explicit error handling"
+    verification: "Run affected test suite and confirm no TypeError in logs"
+    max_attempts: 3
+
+  key_error:
+    primary_action: "Add missing key to config or use .get() with sensible default"
+    fallback_action: "Add key existence check with descriptive error message"
+    verification: "Run config validation and affected endpoint tests"
+    max_attempts: 3
+
+  value_error:
+    primary_action: "Fix validation logic or add input sanitization"
+    fallback_action: "Add try/except with descriptive error response and logging"
+    verification: "Run validation tests with edge-case inputs"
+    max_attempts: 3
+
+  file_not_found:
+    primary_action: "Fix file path or ensure file is included in deployment artifacts"
+    fallback_action: "Add path existence check with graceful fallback"
+    verification: "Verify file exists on target and affected code path succeeds"
+    max_attempts: 2
+
+  connection_error:
+    primary_action: "Add retry logic with exponential backoff, verify service health"
+    fallback_action: "Add circuit breaker pattern and degrade gracefully"
+    verification: "Health check all dependent services and run integration tests"
+    max_attempts: 2
+
+  auth_error:
+    primary_action: "ESCALATE — do not auto-fix auth issues. Alert via Telegram."
+    fallback_action: "ESCALATE — human review mandatory for all auth changes"
+    verification: "Manual verification by approver required"
+    max_attempts: 1
+
+  api_contract:
+    primary_action: "Update response parser to handle new schema, add version check"
+    fallback_action: "Pin API version and add response validation with fallback"
+    verification: "Run contract tests against live API and verify response parsing"
+    max_attempts: 3
+
+  data_integrity:
+    primary_action: "ESCALATE — identify root cause of constraint violation, propose migration"
+    fallback_action: "ESCALATE — do not auto-fix data integrity issues"
+    verification: "Manual DB inspection and data validation required"
+    max_attempts: 1
+
+  resource_exhaustion:
+    primary_action: "Identify memory leak or resource hog, add limits and cleanup"
+    fallback_action: "Scale resource allocation or add queue-based throttling"
+    verification: "Monitor resource usage for 30 minutes post-fix"
+    max_attempts: 2
+
+  deployment:
+    primary_action: "Check container logs, fix startup sequence, verify port availability"
+    fallback_action: "Rollback to last known good image and investigate offline"
+    verification: "Health check passes and service responds within timeout"
+    max_attempts: 2
+
+  security:
+    primary_action: "ESCALATE — do not auto-fix security issues. Alert immediately."
+    fallback_action: "ESCALATE — human review mandatory for all security changes"
+    verification: "Security audit by reviewer required before deploy"
+    max_attempts: 1
+
+  unknown:
+    primary_action: "Analyse stack trace, classify manually, then apply appropriate fix"
+    fallback_action: "Escalate to Tier 2 with full context dump"
+    verification: "Run full test suite and monitor error rate for 15 minutes"
+    max_attempts: 2
+
+# Actions that must never be automated
+never_automate:
+  - database_schema_changes
+  - auth_token_rotation
+  - payment_logic_changes
+  - data_deletion
+  - permission_model_changes
+  - encryption_key_operations

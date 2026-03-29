@@ -1,0 +1,59 @@
+# =============================================================================
+# CodeRabbit Project Overlay — Rubric Design System
+# =============================================================================
+# Project-specific invariants for the Rubric design system and any project
+# that consumes it. Merged last, after base + stack overlays.
+# =============================================================================
+
+reviews:
+  path_instructions:
+    # -------------------------------------------------------------------------
+    # Typography — approved font families
+    # -------------------------------------------------------------------------
+    - path: "**/*.{ts,tsx,css,scss}"
+      instructions: &rubric_design_rules |
+        ## Typography
+        - Only approved font families may be used: DM Sans (headings/UI), Inter (body text), JetBrains Mono (code/monospace).
+        - Flag any font-family declaration that references a font outside this set.
+        - Font weights and sizes should use design tokens (e.g., font-heading-lg, font-body-md) not raw values.
+
+        ## Colors
+        - All colors MUST use design tokens from the Rubric theme (e.g., color-primary-500, color-surface-elevated). No raw hex values (#fff, #1a1a2e, etc.), rgb(), or hsl() in component code.
+        - Opacity should also use tokens where available. Flag hardcoded opacity values on colored elements.
+
+        ## Spacing and Layout
+        - All spacing values MUST align to the 8px grid: 4px (half-step), 8px, 16px, 24px, 32px, 40px, 48px, etc.
+        - Flag any margin, padding, gap, or dimension that is not a multiple of 4px.
+        - Use spacing tokens (e.g., space-xs, space-sm, space-md) rather than raw pixel values where available.
+
+        ## Charts and Data Visualization
+        - Charts MUST use the Nivo library (@nivo/bar, @nivo/line, @nivo/heatmap, etc.). No other charting libraries (Chart.js, Recharts, D3 direct, Highcharts, etc.) are permitted.
+        - Pie charts and donut charts are NOT allowed in Rubric — use bar charts, treemaps, or stacked bars for part-to-whole relationships.
+        - Chart colors must use the Rubric palette tokens, not inline color definitions.
+
+    - path: "**/*.{js,jsx}"
+      instructions: *rubric_design_rules
+
+    # -------------------------------------------------------------------------
+    # Tailwind / CSS configuration
+    # -------------------------------------------------------------------------
+    - path: "**/tailwind.config.{js,ts,mjs}"
+      instructions: |
+        The Tailwind theme must extend (not replace) the Rubric design tokens.
+        Font families must map to DM Sans, Inter, and JetBrains Mono only.
+        Spacing scale must be based on 8px increments.
+        Color palette must reference Rubric token values — no arbitrary hex in the config.
+
+    - path: "**/globals.css"
+      instructions: |
+        CSS custom properties (--color-*, --font-*, --space-*) must align with Rubric token definitions.
+        Do not redefine tokens that are already provided by the Rubric design system package.
+
+    # -------------------------------------------------------------------------
+    # Component library
+    # -------------------------------------------------------------------------
+    - path: "**/components/**/*.{ts,tsx}"
+      instructions: |
+        Components must accept design token overrides via className or style props — no hardcoded visual values.
+        Storybook stories should exist for every exported component. Flag new components without a corresponding .stories.tsx file.
+        Components should be composable and follow the Rubric compound component pattern where applicable.

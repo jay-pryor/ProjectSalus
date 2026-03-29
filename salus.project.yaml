@@ -1,0 +1,73 @@
+# Salus Project Configuration
+# Configures quality gates, trust tier, and critical modules for this project.
+
+schema_version: "1.0"
+
+project:
+  name: salus
+  display_name: "Project Salus — cUAS Site Coverage Simulation"
+  owner: liam
+
+stack:
+  languages: [python]
+  frameworks: [click, pydantic, rasterio, gdal, numpy, matplotlib]
+  service_type: library_and_cli
+  python_version: "3.11"
+
+commands:
+  test: "pytest tests/ -v"
+  test_cov: "pytest tests/ --cov=src/salus --cov-fail-under=80 -q"
+  lint: "ruff check src/ tests/"
+  format_check: "ruff format --check src/ tests/"
+  type_check: "mypy src/salus/"
+  security: "python -m bandit -r src/ -ll -q"
+
+tools:
+  ruff:
+    enabled: true
+    select: [E, W, F, I, B, UP]
+  mypy:
+    enabled: true
+    strict: false
+  bandit:
+    enabled: true
+    level: low
+  detect_secrets:
+    enabled: false  # Not installed — enable with: pip install detect-secrets
+
+gates:
+  # Trust tier: 2 = supervised (human validates intent, AI executes)
+  # Upgrade to 1 (auto) once escaped defect rate < 2% over 30 days
+  trust_tier: 2
+
+  coverage_threshold: 80
+
+  # Modules requiring extra scrutiny at review time
+  critical_modules:
+    - src/salus/engine/   # Simulation correctness — wrong here = wrong proposal
+    - src/salus/report/   # Customer-facing output
+
+  phase_gate:
+    blocking:
+      critical: block
+      high: block
+      medium: track
+      low: ignore
+    max_review_rounds: 3
+
+  pr_gate:
+    blocking:
+      critical: block
+      high: block
+      medium: block
+      low: ignore
+    max_review_rounds: 3
+
+agents:
+  always:
+    - .claude/agents/silent-failure-hunter.md
+    - .claude/agents/spec-compliance.md
+  on_type_changes:
+    - .claude/agents/type-design-analyzer.md
+  on_existing_code_changes:
+    - .claude/agents/regression-reviewer.md

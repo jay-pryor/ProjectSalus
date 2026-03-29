@@ -1,0 +1,89 @@
+projects:
+  ers:
+    repo: liamonpulsesolutions/ers
+    workspace: /home/deploy/workspace/ers
+    deploy_target: ops_vps  # 5.161.221.12
+    port: 8002
+    depends_on: [postgres, redis]
+    api_consumers: [command-centre]
+
+  command-centre-backend:
+    repo: liamonpulsesolutions/command-centre
+    workspace: /home/deploy/workspace/command-centre
+    deploy_target: ops_vps
+    port: 8001
+    depends_on: [postgres, redis]
+    api_consumers: []
+
+  command-centre-frontend:
+    repo: liamonpulsesolutions/command-centre
+    workspace: /home/deploy/workspace/command-centre
+    deploy_target: ops_vps
+    port: 3001
+    depends_on: [command-centre-backend]
+    api_consumers: []
+
+  evgp-onboarding:
+    repo: liamonpulsesolutions/evgp-1-onboarding
+    workspace: /home/deploy/workspace/evgp-1-onboarding
+    deploy_target: ops_vps
+    port: 8003
+    depends_on: [postgres, redis]
+    api_consumers: [evgp-processing]
+
+  evgp-processing:
+    repo: liamonpulsesolutions/evgp-2-processing
+    workspace: /home/deploy/workspace/evgp-2-processing
+    deploy_target: ops_vps
+    port: 8004
+    depends_on: [postgres, redis]
+    api_consumers: []
+
+  outreach:
+    repo: liamonpulsesolutions/onpulse-revenue-intelligence
+    workspace: /home/deploy/workspace/onpulse-revenue-intelligence
+    deploy_target: ops_vps
+    port: 8005
+    depends_on: [postgres, redis]
+    api_consumers: [command-centre]
+
+  blog-automation:
+    repo: liamonpulsesolutions/blog-automation
+    workspace: /home/deploy/workspace/blog-automation
+    deploy_target: ops_vps
+    depends_on: [postgres]
+    api_consumers: []
+
+  onpulse-website:
+    repo: liamonpulsesolutions/onpulse-website
+    workspace: /home/deploy/workspace/onpulse-website
+    deploy_target: web_vps  # 178.156.219.236
+    port: 3000
+    depends_on: []
+    api_consumers: []
+
+  pulsity:
+    repo: liamonpulsesolutions/pulsity.io
+    workspace: /home/deploy/workspace/pulsity.io
+    deploy_target: azure  # future
+    depends_on: [pulsity_postgres]
+    api_consumers: []
+
+infrastructure:
+  ops_vps:
+    host: 5.161.221.12
+    user: deploy
+  web_vps:
+    host: 178.156.219.236
+    user: deploy
+  dev_vps:
+    host: 5.9.5.175
+    user: deploy
+
+shared_services:
+  postgres:
+    dev_host: localhost
+    dev_port: 5432  # dev_ops_postgres container
+  redis:
+    dev_host: localhost
+    dev_port: 6379  # dev_redis container

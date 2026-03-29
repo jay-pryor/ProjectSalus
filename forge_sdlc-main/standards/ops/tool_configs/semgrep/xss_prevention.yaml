@@ -1,0 +1,114 @@
+rules:
+  # APP-XSS-01: Flag dangerouslySetInnerHTML without DOMPurify
+  - id: react-dangerous-innerhtml-no-sanitize
+    patterns:
+      - pattern: "<$TAG dangerouslySetInnerHTML={{__html: $VALUE}} />"
+      - pattern-not: "<$TAG dangerouslySetInnerHTML={{__html: DOMPurify.sanitize($VALUE)}} />"
+      - pattern-not: "<$TAG dangerouslySetInnerHTML={{__html: DOMPurify.sanitize(...)}} />"
+    message: >
+      dangerouslySetInnerHTML used without DOMPurify.sanitize(). All
+      HTML injected via dangerouslySetInnerHTML must be sanitized with
+      DOMPurify first. Reference: OPS-STD-002 APP-XSS-01.
+    severity: ERROR
+    languages: [typescript, javascript]
+    metadata:
+      control_id: APP-XSS-01
+      standard: OPS-STD-002
+      category: security
+      subcategory: xss
+      confidence: HIGH
+
+  # APP-XSS-01: Flag innerHTML assignment without DOMPurify
+  - id: dom-innerhtml-no-sanitize
+    patterns:
+      - pattern: $EL.innerHTML = $VALUE
+      - pattern-not: $EL.innerHTML = DOMPurify.sanitize(...)
+    message: >
+      Direct innerHTML assignment without DOMPurify.sanitize(). Sanitize
+      all dynamic HTML content before DOM insertion.
+      Reference: OPS-STD-002 APP-XSS-01.
+    severity: ERROR
+    languages: [typescript, javascript]
+    metadata:
+      control_id: APP-XSS-01
+      standard: OPS-STD-002
+      category: security
+      subcategory: xss
+      confidence: HIGH
+
+  # APP-XSS-02: Flag user input in href without validation
+  - id: react-href-user-input
+    patterns:
+      - pattern-either:
+          - pattern: <a href={$VAR} ...>...</a>
+          - pattern: <a href={$VAR} />
+      - pattern-not: <a href={validate_url($VAR)} ...>...</a>
+      - pattern-not: <a href={validateUrl($VAR)} ...>...</a>
+    message: >
+      Dynamic value used in href attribute. Ensure URLs are validated
+      against an allowlist of schemes (https://, mailto:) to prevent
+      javascript: URI injection. Reference: OPS-STD-002 APP-XSS-02.
+    severity: WARNING
+    languages: [typescript, javascript]
+    metadata:
+      control_id: APP-XSS-02
+      standard: OPS-STD-002
+      category: security
+      subcategory: xss
+      confidence: MEDIUM
+
+  # APP-XSS-02: Flag user input in src without validation
+  - id: react-src-user-input
+    patterns:
+      - pattern-either:
+          - pattern: <img src={$VAR} .../>
+          - pattern: <iframe src={$VAR} .../>
+          - pattern: <script src={$VAR} .../>
+    message: >
+      Dynamic value used in src attribute. Validate source URLs against
+      a trusted domain allowlist to prevent content injection.
+      Reference: OPS-STD-002 APP-XSS-02.
+    severity: WARNING
+    languages: [typescript, javascript]
+    metadata:
+      control_id: APP-XSS-02
+      standard: OPS-STD-002
+      category: security
+      subcategory: xss
+      confidence: MEDIUM
+
+  # APP-XSS-03: Ban autoescape=False in Jinja2
+  - id: jinja2-autoescape-disabled
+    patterns:
+      - pattern-either:
+          - pattern: Environment(..., autoescape=False, ...)
+          - pattern: jinja2.Environment(..., autoescape=False, ...)
+    message: >
+      Jinja2 autoescape is disabled. This allows XSS via template
+      variables. Always set autoescape=True or use select_autoescape().
+      Reference: OPS-STD-002 APP-XSS-03.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      control_id: APP-XSS-03
+      standard: OPS-STD-002
+      category: security
+      subcategory: xss
+      confidence: HIGH
+
+  # APP-XSS-03: Ban render_template_string with user input
+  - id: flask-render-template-string
+    pattern: render_template_string(...)
+    message: >
+      render_template_string() compiles templates from strings at
+      runtime, enabling server-side template injection (SSTI). Use
+      render_template() with file-based templates instead.
+      Reference: OPS-STD-002 APP-XSS-03.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      control_id: APP-XSS-03
+      standard: OPS-STD-002
+      category: security
+      subcategory: xss
+      confidence: HIGH

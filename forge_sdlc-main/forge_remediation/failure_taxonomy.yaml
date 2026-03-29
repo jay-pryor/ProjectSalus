@@ -1,0 +1,166 @@
+# Forge Failure Taxonomy — Sentry error patterns to failure classes
+version: "1.0.0"
+
+failure_classes:
+  import_error:
+    description: "Missing or broken imports — usually a dependency or path issue"
+    example_patterns:
+      - "ImportError: .*"
+      - "ModuleNotFoundError: No module named '.*'"
+      - "cannot import name '.*' from '.*'"
+    default_tier: 1
+    blast_radius_hint: low
+
+  type_error:
+    description: "Type mismatches or missing attributes on objects"
+    example_patterns:
+      - "TypeError: .*"
+      - "AttributeError: '.*' object has no attribute '.*'"
+      - "AttributeError: module '.*' has no attribute '.*'"
+    default_tier: 1
+    blast_radius_hint: low
+
+  key_error:
+    description: "Missing dictionary keys or configuration values"
+    example_patterns:
+      - "KeyError: '.*'"
+      - "KeyError: \".*\""
+      - "missing required config.*"
+      - "config key .* not found"
+    default_tier: 1
+    blast_radius_hint: low
+
+  value_error:
+    description: "Invalid values, failed validation, or parsing errors"
+    example_patterns:
+      - "ValueError: .*"
+      - "ValidationError: .*"
+      - "pydantic.*validation error.*"
+      - "invalid literal for .*"
+    default_tier: 1
+    blast_radius_hint: low
+
+  file_not_found:
+    description: "Missing files, templates, or path resolution failures"
+    example_patterns:
+      - "FileNotFoundError: .*"
+      - "No such file or directory: '.*'"
+      - "PermissionError: .*"
+      - "IsADirectoryError: .*"
+    default_tier: 1
+    blast_radius_hint: low
+
+  connection_error:
+    description: "Network, database, or external service connectivity failures"
+    example_patterns:
+      - "ConnectionError: .*"
+      - "ConnectionRefusedError: .*"
+      - "TimeoutError: .*"
+      - "asyncio.TimeoutError"
+      - "psycopg2.OperationalError: .*connection.*"
+      - "redis.exceptions.ConnectionError: .*"
+      - "aiohttp.ClientConnectorError: .*"
+      - "ConnectionResetError: .*"
+    default_tier: 2
+    blast_radius_hint: medium
+
+  auth_error:
+    description: "Authentication or authorization failures — always high risk"
+    example_patterns:
+      - ".*401.*Unauthorized.*"
+      - ".*403.*Forbidden.*"
+      - ".*permission denied.*"
+      - ".*token expired.*"
+      - ".*invalid.*credentials.*"
+      - ".*JWT.*expired.*"
+      - ".*API key.*invalid.*"
+    default_tier: 3
+    blast_radius_hint: high
+
+  api_contract:
+    description: "Unexpected API response format or schema mismatch"
+    example_patterns:
+      - ".*unexpected response.*"
+      - ".*schema mismatch.*"
+      - ".*missing required field.*"
+      - ".*expected.*got.*"
+      - "JSONDecodeError: .*"
+      - ".*response.*not.*json.*"
+    default_tier: 2
+    blast_radius_hint: medium
+
+  data_integrity:
+    description: "Database constraint violations or data consistency issues"
+    example_patterns:
+      - "IntegrityError: .*"
+      - ".*duplicate key.*"
+      - ".*unique constraint.*"
+      - ".*null.*violation.*"
+      - ".*foreign key.*constraint.*"
+      - ".*check constraint.*"
+      - "DataIntegrityError: .*"
+    default_tier: 3
+    blast_radius_hint: high
+
+  resource_exhaustion:
+    description: "System resource limits hit — memory, disk, rate limits"
+    example_patterns:
+      - "MemoryError: .*"
+      - ".*OOM.*"
+      - ".*out of memory.*"
+      - ".*disk.*full.*"
+      - ".*No space left on device.*"
+      - ".*rate limit.*"
+      - ".*429.*Too Many Requests.*"
+      - ".*quota.*exceeded.*"
+    default_tier: 2
+    blast_radius_hint: high
+
+  deployment:
+    description: "Container, process, or startup failures during deployment"
+    example_patterns:
+      - ".*health check.*fail.*"
+      - ".*container.*crash.*"
+      - ".*startup.*error.*"
+      - ".*exit code [1-9].*"
+      - ".*OCI runtime.*"
+      - ".*port.*already.*in use.*"
+      - ".*gunicorn.*worker.*timeout.*"
+    default_tier: 2
+    blast_radius_hint: medium
+
+  security:
+    description: "Security-related errors — injection, XSS, unauthorized access"
+    example_patterns:
+      - ".*injection.*"
+      - ".*XSS.*"
+      - ".*CSRF.*"
+      - ".*unauthorized access.*"
+      - ".*path traversal.*"
+      - ".*directory traversal.*"
+      - ".*SSRF.*"
+    default_tier: 3
+    blast_radius_hint: high
+
+  unknown:
+    description: "Catch-all for unclassified errors"
+    example_patterns:
+      - ".*"
+    default_tier: 2
+    blast_radius_hint: medium
+
+# Classification priority — first match wins, order matters
+classification_order:
+  - security
+  - auth_error
+  - data_integrity
+  - resource_exhaustion
+  - deployment
+  - connection_error
+  - api_contract
+  - import_error
+  - type_error
+  - key_error
+  - value_error
+  - file_not_found
+  - unknown

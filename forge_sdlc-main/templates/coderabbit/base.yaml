@@ -1,0 +1,87 @@
+# =============================================================================
+# CodeRabbit Base Configuration — Forge SDLC Universal Standards
+# =============================================================================
+# This is the universal base config applied to ALL projects. Stack-specific
+# overlays (overlay-python.yaml, overlay-nextjs.yaml) are merged on top.
+# Project-specific invariants live in projects/<name>.yaml.
+# =============================================================================
+
+language: "en-US"
+
+reviews:
+  profile: "assertive"
+  auto_review:
+    enabled: true
+    drafts: false
+
+  path_filters:
+    - "!**/__pycache__/**"
+    - "!**/node_modules/**"
+    - "!**/.next/**"
+    - "!**/*.pyc"
+    - "!**/*.lock"
+    - "!**/package-lock.json"
+    - "!**/pnpm-lock.yaml"
+    - "!**/.env*"
+
+  path_instructions:
+    # -------------------------------------------------------------------------
+    # INF-DOCKER: Dockerfile standards
+    # -------------------------------------------------------------------------
+    - path: "**/Dockerfile*"
+      instructions: |
+        INF-DOCKER-01: Base image MUST use a pinned SHA digest or exact version tag — never :latest.
+        INF-DOCKER-02: The image MUST run as a non-root USER. Verify a USER directive exists after the final FROM.
+        INF-DOCKER-03: Use multi-stage builds. Build dependencies must NOT appear in the runtime stage.
+        INF-DOCKER-04: Each RUN directive must combine related commands with && to minimize layers. Temp files and caches (apt lists, pip cache) must be removed in the same RUN.
+        INF-DOCKER-05: COPY instructions should use --chown to avoid permission issues. Prefer COPY over ADD unless extracting a tarball.
+
+    # -------------------------------------------------------------------------
+    # INF-COMPOSE: docker-compose standards
+    # -------------------------------------------------------------------------
+    - path: "**/docker-compose*.{yml,yaml}"
+      instructions: |
+        Every service MUST declare mem_limit (or deploy.resources.limits.memory). Flag any service without a memory limit.
+        NEVER mount the Docker socket (/var/run/docker.sock) into a container — this is a critical security violation.
+        All services should declare restart policies (restart: unless-stopped or equivalent).
+        Healthchecks should be defined for every long-running service.
+
+    # -------------------------------------------------------------------------
+    # Database migrations
+    # -------------------------------------------------------------------------
+    - path: "**/migrations/**"
+      instructions: |
+        Every migration MUST be reversible. If a down/rollback is not possible, the migration must include a comment explaining why.
+        DROP TABLE or DROP COLUMN statements MUST include a comment explaining the rationale and confirming data has been migrated or is no longer needed.
+        Data migrations must be idempotent — running them twice should not corrupt data.
+        Large table alterations must consider locking implications and use online DDL where available.
+
+    - path: "**/alembic/versions/**"
+      instructions: |
+        The downgrade() function MUST be implemented — it must not be empty or contain only `pass`.
+        Verify the revision chain: down_revision must reference the correct parent.
+        Use op.batch_alter_table() for SQLite compatibility when altering columns.
+
+    # -------------------------------------------------------------------------
+    # Test files
+    # -------------------------------------------------------------------------
+    - path: "**/test_*.py"
+      instructions: &test_rules |
+        Tests MUST contain meaningful assertions — no bare `assert True` or tests that only check "no exception was raised."
+        Do NOT use MagicMock to mock Pydantic models — use model_construct() or factory fixtures instead.
+        Do NOT use time.sleep() in tests — use async waiters, polling helpers, or freezegun/time-machine.
+        Use datetime.now(timezone.utc) instead of datetime.utcnow() (deprecated since Python 3.12).
+        Each test should test ONE behavior. If a test name contains "and", consider splitting it.
+
+    - path: "**/tests/**/*.py"
+      instructions: *test_rules
+
+    - path: "**/*.test.{ts,tsx,js,jsx}"
+      instructions: |
+        Tests MUST contain meaningful assertions — no bare expect(true).toBe(true) or tests that only verify rendering without checking content.
+        Prefer userEvent over fireEvent for user interaction simulation.
+        Mock API calls at the network level (MSW) rather than mocking fetch/axios directly.
+        Async operations must use waitFor or findBy queries — never raw setTimeout.
+
+chat:
+  auto_reply: true

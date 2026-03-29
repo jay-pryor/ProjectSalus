@@ -1,0 +1,55 @@
+# =============================================================================
+# CodeRabbit Overlay — Next.js / TypeScript
+# =============================================================================
+# Merge on top of base.yaml for any project with a Next.js frontend.
+# Covers type safety, XSS prevention, React best practices, API client
+# patterns, and accessibility standards.
+# =============================================================================
+
+reviews:
+  path_instructions:
+    # -------------------------------------------------------------------------
+    # TypeScript / React source files
+    # -------------------------------------------------------------------------
+    - path: "**/frontend/**/*.{ts,tsx}"
+      instructions: &nextjs_rules |
+        ## Type Safety
+        - NEVER use `any` type. Use `unknown` and narrow with type guards, or define a proper interface.
+        - NEVER use @ts-ignore or @ts-expect-error without a comment explaining the reason and a tracking issue link.
+        - tsconfig.json must have strict: true. Flag any PR that loosens strict mode.
+        - All exported functions and components must have explicit return type annotations.
+        - Prefer discriminated unions over optional fields for state modeling.
+
+        ## XSS Prevention
+        - Any use of dangerouslySetInnerHTML MUST pass content through DOMPurify.sanitize() first. Flag any raw HTML injection.
+        - Validate href and src attributes against javascript: and data: URI schemes. User-provided URLs must be validated with a URL constructor and allowlisted protocol check.
+        - Never interpolate user input into script tags or dynamic code execution.
+
+        ## React Best Practices
+        - Hooks must follow the Rules of Hooks: no conditional calls, no calls inside loops or nested functions.
+        - All list-rendered elements MUST have a stable, unique key prop. Array index as key is only acceptable for static, non-reorderable lists.
+        - Components that can throw during render must be wrapped in an Error Boundary. Page-level and data-fetching components especially.
+        - Error boundaries should report errors to a monitoring service (Sentry, etc.), not just log to console.
+        - Avoid excessive useEffect — prefer derived state and event handlers. Flag useEffects that could be computed values.
+
+        ## API Client
+        - API calls must use typed request/response interfaces — no untyped fetch() calls.
+        - All API calls must include error handling (try/catch or .catch()) with user-visible error feedback.
+        - Use a shared API client wrapper (e.g., axios instance or fetch wrapper) with base URL, auth headers, and error interceptors. Flag direct fetch() calls outside the wrapper.
+        - Response data must be validated or typed before use — do not trust API responses blindly.
+
+        ## Accessibility
+        - Interactive elements (buttons, links, inputs) MUST have accessible names — via visible text, aria-label, or aria-labelledby.
+        - Use semantic HTML elements (nav, main, section, article, aside, header, footer) instead of generic divs with ARIA roles.
+        - Colors must use design tokens from the theme — no raw hex values (#fff, #333, etc.). This ensures contrast ratios are maintained centrally.
+        - Images must have meaningful alt text. Decorative images should use alt="" with role="presentation".
+        - Form inputs must have associated labels (htmlFor or aria-labelledby).
+
+    - path: "**/src/**/*.{ts,tsx}"
+      instructions: *nextjs_rules
+
+    - path: "**/pages/**/*.{ts,tsx}"
+      instructions: *nextjs_rules
+
+    - path: "**/app/**/*.{ts,tsx}"
+      instructions: *nextjs_rules

@@ -1,0 +1,97 @@
+---
+# Forge Agent Definition: Spec Compliance Reviewer
+# Reference: OPS-STD-004 (Gate Policy)
+
+agent:
+  name: forge_spec_compliance_reviewer
+  display_name: Spec Compliance Reviewer
+  version: "1.0.0"
+  description: >
+    Systematically compares implementation against specification acceptance
+    criteria. Reads the original build spec (feature requirements, user stories,
+    acceptance criteria) and traces each requirement to its implementation in
+    code. Identifies missing functionality, partial implementations, deviations
+    from spec intent, and untested acceptance criteria.
+
+  capability_tier: Frontier
+  gate_role: specialist
+  gate_weight: 1.0
+  confidence_threshold: 0.8
+
+context_inject:
+  - path: standards/agent_slices/spec_compliance_reviewer.md
+    format: markdown
+    description: Spec compliance review checklist and methodology
+
+  - path: /task/spec.md
+    format: markdown
+    description: Original build specification with acceptance criteria (mounted at runtime)
+
+tool_inputs:
+  - tool: grep
+    description: Search codebase for implementation of specified features
+    output_format: text
+
+  - tool: file_reader
+    description: Read implementation files to verify behaviour matches spec
+    output_format: text
+
+  - tool: test_runner
+    command: "pytest --co -q 2>/dev/null || true"
+    output_format: text
+    condition: "stack.language == 'python'"
+    description: List collected tests to verify acceptance criteria have test coverage
+
+review_methodology:
+  steps:
+    - extract_acceptance_criteria: >
+        Parse the build spec and extract every acceptance criterion,
+        user story, and functional requirement as a numbered checklist.
+    - trace_to_implementation: >
+        For each criterion, search the codebase to find the implementing
+        code. Record file paths, function names, and line numbers.
+    - verify_completeness: >
+        For each criterion, assess whether the implementation fully
+        satisfies the requirement. Flag partial implementations.
+    - check_test_coverage: >
+        For each criterion, verify that at least one test exercises
+        the acceptance condition. Flag untested criteria.
+    - identify_deviations: >
+        Flag any implementation behaviour that contradicts or extends
+        beyond what the spec requested (scope creep, altered semantics).
+
+verdict:
+  pass_criteria: >
+    All acceptance criteria have traceable implementations AND all
+    critical acceptance criteria have test coverage AND no deviations
+    from spec intent identified.
+  fail_criteria: >
+    Any acceptance criterion lacks implementation OR any critical
+    acceptance criterion lacks test coverage OR implementation
+    contradicts spec intent.
+  false_positive_handling: >
+    Document criterion ID, implementation evidence, and justification
+    for why the deviation is acceptable.
+
+output_format:
+  schema_ref: "OPS-STD-004 §9.2"
+  structure: finding_list
+  fields:
+    - finding_id
+    - tool
+    - agent
+    - criterion_id
+    - criterion_text
+    - kind
+    - severity
+    - confidence
+    - file
+    - line
+    - summary
+    - rationale
+    - suggested_fix
+    - first_seen_round
+    - last_seen_round
+    - status
+    - suppression
+  verdict: PASS | FAIL

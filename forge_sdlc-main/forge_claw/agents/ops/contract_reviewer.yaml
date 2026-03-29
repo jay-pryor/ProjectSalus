@@ -1,0 +1,68 @@
+---
+# Forge Agent Definition: Contract Reviewer
+# Reference: OPS-STD-004 (Gate Policy), OPS-STD-003 (API Contract Standard)
+
+agent:
+  name: forge_contract_reviewer
+  display_name: Contract Reviewer
+  version: "1.0.0"
+  description: >
+    Validates API contracts — FastAPI/Pydantic models vs OpenAPI spec
+    consistency, response shape stability, backward compatibility, naming
+    conventions, error format compliance (RFC 9457), and data boundary rules.
+
+  capability_tier: Frontier
+  gate_role: specialist
+  gate_weight: 0.9
+  confidence_threshold: 0.8
+
+context_inject:
+  - path: standards/agent_slices/contract_reviewer.md
+    format: markdown
+    description: Contract review rules covering spec consistency, breaking changes, naming, errors, pagination
+
+tool_inputs:
+  - tool: oasdiff
+    command: "oasdiff breaking --format json base.yaml current.yaml"
+    output_format: json
+    condition: "paths.openapi_spec is defined"
+    description: Breaking change report between base and current OpenAPI specs
+
+  - tool: schemathesis
+    command: "schemathesis run --checks all --format json"
+    output_format: json
+    condition: "paths.openapi_spec is defined and gates.contract_tests == true"
+    description: API contract testing — schema violations and response mismatches
+
+verdict:
+  pass_criteria: >
+    No breaking changes detected. Error responses conform to RFC 9457.
+    Naming conventions followed. OpenAPI spec is current.
+  fail_criteria: >
+    Breaking API change without major version bump, error response not
+    in RFC 9457 format, naming convention violation, stale OpenAPI spec,
+    or collection endpoint without pagination envelope.
+
+output_format:
+  schema_ref: "OPS-STD-004 §9.2"
+  structure: finding_list
+  fields:
+    - finding_id
+    - tool
+    - agent
+    - rule_id
+    - kind
+    - severity
+    - confidence
+    - file
+    - line
+    - column
+    - end_line
+    - summary
+    - rationale
+    - suggested_fix
+    - first_seen_round
+    - last_seen_round
+    - status
+    - suppression
+  verdict: PASS | FAIL

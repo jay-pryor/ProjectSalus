@@ -1,0 +1,28 @@
+# Demo scenario — synthetic 500m x 500m site
+# DEM: tests/fixtures/synthetic_site.tif
+#   Terrain: flat plateau (N), Gaussian hill (NE), E-W ridge (centre), valley (S-centre)
+#   CRS: EPSG:28354 (GDA94 / MGA Zone 54)
+#   Resolution: 1 m/cell
+
+site_dem_path: ../tests/fixtures/synthetic_site.tif
+
+sensor_placements:
+  # EO/IR camera on the southern flat base — 120° arc facing north
+  - sensor_name: Anduril WISP
+    position_x: 500250.0
+    position_y: 6100075.0   # row ~425, southern zone
+    bearing_deg: 0.0         # facing north
+    height_override_m: 6.0
+
+  # Radar on the western edge — wide arc, will be blocked by the ridge
+  - sensor_name: Echodyne EchoGuard
+    position_x: 500050.0
+    position_y: 6100075.0   # row ~425, SW corner
+    bearing_deg: 45.0        # facing NE
+    height_override_m: 5.0
+
+  # RF sensor — non-LOS, will be skipped by simulate (shown as a skip message)
+  - sensor_name: DroneShield RfOne Mk2
+    position_x: 500250.0
+    position_y: 6100075.0
+    bearing_deg: 0.0

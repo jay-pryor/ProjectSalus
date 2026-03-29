@@ -1,0 +1,38 @@
+# Forge Escalation Policy — Tier 3 handling
+version: "1.0.0"
+
+escalation:
+  tier_3:
+    notification: telegram
+    approval_required: true
+    approval_timeout_minutes: 60
+    timeout_action: pause
+    approvers:
+      - dave
+
+  tier_3_categories:
+    - auth_and_sso
+    - tenant_boundaries
+    - schema_migrations
+    - destructive_operations
+    - payment_processing
+    - data_export
+    - api_key_rotation
+
+  notification_config:
+    telegram:
+      alert_format: |
+        🚨 TIER 3 ESCALATION
+        Service: {service}
+        Issue: {issue_title}
+        Category: {category}
+        Sentry: {sentry_url}
+        
+        Reply APPROVE to proceed or REJECT to cancel.
+      reminder_interval_minutes: 15
+      max_reminders: 4
+
+  fallback:
+    if_no_response: pause_and_alert
+    pause_message: "Tier 3 issue awaiting human approval — system paused"
+    resume_on: manual_approval

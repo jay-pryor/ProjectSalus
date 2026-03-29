@@ -1,0 +1,98 @@
+# Forge Service Map — All deployable services across 3 VPSes
+version: "1.0.0"
+
+services:
+  ers:
+    repo: /home/deploy/workspace/ers
+    vps: ops
+    port: 8001
+    healthcheck: /health
+    deploy_method: ghcr
+    tier_default: 2
+    rollback_strategy: previous_sha
+    dependencies:
+      - postgresql
+      - redis
+
+  evgp-onboarding:
+    repo: /home/deploy/workspace/evgp-system
+    vps: ops
+    port: 8002
+    healthcheck: /health
+    deploy_method: ghcr
+    tier_default: 2
+    rollback_strategy: previous_sha
+    dependencies:
+      - postgresql
+      - stripe
+      - calcom
+
+  evgp-processing:
+    repo: /home/deploy/workspace/evgp-2-processing
+    vps: ops
+    port: 8003
+    healthcheck: /health
+    deploy_method: ghcr
+    tier_default: 2
+    rollback_strategy: previous_sha
+    dependencies:
+      - postgresql
+      - runpod
+
+  command-centre:
+    repo: /home/deploy/workspace/command-centre
+    vps: ops
+    port: 8010
+    healthcheck: /health
+    deploy_method: ghcr
+    tier_default: 2
+    rollback_strategy: previous_sha
+    dependencies:
+      - postgresql
+      - redis
+
+  outreach:
+    repo: /home/deploy/workspace/onpulse-revenue-intelligence
+    vps: ops
+    port: 8004
+    healthcheck: /health
+    deploy_method: ghcr
+    tier_default: 2
+    rollback_strategy: previous_sha
+    dependencies:
+      - postgresql
+      - redis
+
+  blog:
+    repo: /home/deploy/workspace/blog-automation
+    vps: web
+    port: 8080
+    healthcheck: /health
+    deploy_method: ghcr
+    tier_default: 1
+    rollback_strategy: previous_sha
+    dependencies: []
+
+  pulsity-website:
+    repo: /home/deploy/workspace/pulsity-website
+    vps: web
+    port: 3000
+    healthcheck: /
+    deploy_method: ghcr
+    tier_default: 1
+    rollback_strategy: previous_sha
+    dependencies: []
+
+vps_config:
+  ops:
+    host: 5.161.221.12
+    user: deploy
+    ssh_alias: ops-vps
+  web:
+    host: 178.156.219.236
+    user: deploy
+    ssh_alias: website-vps
+  dev:
+    host: 5.9.5.175
+    user: deploy
+    ssh_alias: dev-vps

@@ -1,0 +1,80 @@
+# =============================================================================
+# CodeRabbit Overlay — Python / FastAPI
+# =============================================================================
+# Merge on top of base.yaml for any project with a Python backend.
+# Covers OPS-STD-001 (Security), OPS-STD-002 (API Contracts),
+# OPS-STD-003 (Error Handling), plus type safety and config standards.
+# =============================================================================
+
+reviews:
+  path_instructions:
+    # -------------------------------------------------------------------------
+    # Python source files — security, API contracts, error handling, types
+    # -------------------------------------------------------------------------
+    - path: "**/src/**/*.py"
+      instructions: &python_rules |
+        ## Security (OPS-STD-001)
+        - Every FastAPI route MUST declare authentication via Depends() — flag any endpoint without auth dependency injection.
+        - Object-level authorization: after fetching a resource, verify the requesting user has access before returning it. Flag any route that returns a DB object without an ownership/permission check.
+        - All endpoints MUST declare a Pydantic response_model (or use return type annotation with a Pydantic model). Raw dict responses are not allowed.
+        - All user input must be validated through Pydantic models or Path/Query with constraints. No raw request.body() or request.json() without validation.
+        - File uploads MUST enforce size limits (UploadFile with validators or middleware). Flag uploads without max size checks.
+        - NEVER construct file paths with string concatenation or f-strings from user input. Use pathlib and validate against a base directory.
+        - ALL database queries MUST use parameterized queries or ORM methods. Flag any raw SQL string formatting or f-string interpolation in queries.
+        - CORS must use an explicit allowlist of origins. Flag allow_origins=["*"] in production code.
+        - JWT decoding MUST specify algorithms=["RS256"] (or the expected algorithm) explicitly. Flag any jwt.decode() call without the algorithms parameter.
+
+        ## API Contracts (OPS-STD-002)
+        - JSON response field names MUST use camelCase (configure via Pydantic model_config or alias_generator).
+        - List endpoints MUST return a pagination envelope: {"items": [...], "total": N, "page": N, "pageSize": N} or cursor-based equivalent.
+        - Error responses MUST follow RFC 9457 (Problem Details): {"type": "...", "title": "...", "status": N, "detail": "..."}.
+        - URL paths MUST use kebab-case (e.g., /api/v1/user-profiles, not /api/v1/user_profiles or /api/v1/userProfiles).
+
+        ## Error Handling (OPS-STD-003)
+        - No bare `except:` or `except Exception:` without re-raising or logging. Every catch must either handle specifically, log, or re-raise.
+        - No swallowed exceptions — every except block must do something meaningful (log, raise, return error response).
+        - Custom exceptions should inherit from a project-level base exception class, not directly from Exception.
+        - Use `raise NewException(...) from exc` to preserve exception chains. Flag bare `raise NewException(...)` inside except blocks.
+
+        ## Type Safety
+        - All public functions and methods MUST have type annotations on parameters and return values.
+        - Avoid `Any` type without a comment justifying why it is necessary.
+        - Use datetime.now(timezone.utc) instead of datetime.utcnow() — the latter is deprecated since Python 3.12.
+
+        ## Configuration
+        - No hardcoded configuration values (URLs, ports, secrets, feature flags). Use Pydantic BaseSettings with environment variable loading.
+        - Settings classes should use model_config with env_prefix for namespacing.
+
+    - path: "**/app/**/*.py"
+      instructions: *python_rules
+
+    - path: "**/backend/**/*.py"
+      instructions: *python_rules
+
+    # -------------------------------------------------------------------------
+    # Database / ORM layer
+    # -------------------------------------------------------------------------
+    - path: "**/db/**/*.py"
+      instructions: &db_rules |
+        All queries must use parameterized statements or ORM query builders — no string interpolation.
+        Sessions must be properly scoped and closed. Verify async sessions use `async with` context managers.
+        Bulk operations should use executemany or bulk_insert_mappings for performance.
+        N+1 query patterns: flag any loop that executes a query per iteration — use joinedload, selectinload, or subquery instead.
+        Migrations and schema changes must not appear in runtime code — they belong in the migrations directory.
+
+    - path: "**/models/**/*.py"
+      instructions: *db_rules
+
+    - path: "**/repositories/**/*.py"
+      instructions: *db_rules
+
+    # -------------------------------------------------------------------------
+    # LLM / prompt templates
+    # -------------------------------------------------------------------------
+    - path: "**/prompts/**"
+      instructions: |
+        Prompt templates must use named placeholders (e.g., {user_input}) — no positional formatting.
+        System prompts should be separate from user message templates.
+        Templates must not contain hardcoded PII, API keys, or secrets.
+        Version or tag prompt templates so changes can be tracked and rolled back.
+        Flag any prompt that injects raw user input without sanitization or length limits.

@@ -1,0 +1,112 @@
+# Forge Triage Rules — Sentry issue to tier classification
+version: "2.0.0"
+
+# Two-tier model (simplified 2026-03-28):
+# Tier 1 (auto): Auto-fix, auto-review, auto-deploy — all non-Tier-3 issues
+# Tier 3 (human-gated): Auto-fix, auto-review, PR only — human approval required
+# Tier 2 is deprecated — formerly used expensive models, now identical to Tier 1
+
+rules:
+  # Tier 1 (auto) — Low risk, auto-fixable
+  - name: unhandled_exception_simple
+    tier: 1
+    match:
+      - error_type: "TypeError"
+      - error_type: "AttributeError"
+      - error_type: "KeyError"
+    services: ["*"]
+    conditions:
+      - single_file_fix: true
+      - no_schema_change: true
+
+  - name: import_error
+    tier: 1
+    match:
+      - error_type: "ImportError"
+      - error_type: "ModuleNotFoundError"
+    services: ["*"]
+
+  - name: formatting_error
+    tier: 1
+    match:
+      - error_type: "ValidationError"
+      - message_contains: "format"
+    services: ["*"]
+
+  # Tier 1 (auto) — Medium complexity, formerly Tier 2
+  - name: database_error
+    tier: 1
+    match:
+      - error_type: "IntegrityError"
+      - error_type: "OperationalError"
+      - error_type: "ProgrammingError"
+    services: ["ers", "evgp-onboarding", "evgp-processing", "command-centre", "outreach"]
+
+  - name: api_error
+    tier: 1
+    match:
+      - error_type: "HTTPException"
+      - message_contains: "500"
+      - message_contains: "502"
+    services: ["*"]
+
+  - name: integration_error
+    tier: 1
+    match:
+      - error_type: "ConnectionError"
+      - error_type: "TimeoutError"
+    services: ["*"]
+
+  # Tier 3 (human-gated) — High risk, human approval required
+  - name: auth_security
+    tier: 3
+    match:
+      - message_contains: "auth"
+      - message_contains: "permission"
+      - message_contains: "unauthorized"
+      - error_type: "SecurityError"
+    services: ["*"]
+    escalation: immediate
+
+  - name: data_corruption
+    tier: 3
+    match:
+      - message_contains: "corrupt"
+      - message_contains: "inconsistent"
+      - error_type: "DataIntegrityError"
+    services: ["*"]
+    escalation: immediate
+
+  - name: payment_error
+    tier: 3
+    match:
+      - message_contains: "stripe"
+      - message_contains: "payment"
+      - message_contains: "billing"
+    services: ["evgp-onboarding"]
+    escalation: immediate
+
+default_tier: 1
+
+# CI Finding Rules — Semgrep and CodeRabbit severity-to-tier mapping
+ci_finding_rules:
+  semgrep:
+    security_error:
+      tier: 1
+      match_categories: ["security"]
+      match_severity: "error"
+    correctness_error:
+      tier: 1
+      match_categories: ["correctness", "performance", "best-practice"]
+      match_severity: "error"
+    warning:
+      tier: 1
+      match_severity: "warning"
+
+  coderabbit:
+    critical_high:
+      tier: 1
+      match_severity: ["critical", "high"]
+    medium:
+      tier: 1
+      match_severity: "medium"

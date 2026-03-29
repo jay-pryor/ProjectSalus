@@ -1,0 +1,101 @@
+# Forge Build Models v5.0.0 — Multi-runtime build model assignments
+# v5: Added Claude Code runtime alongside Cline. Opus orchestrates, Sonnet builds.
+# v4: DeepSeek V3 replaces MiniMax M2.5 as complex builder (3x faster, proven reliable)
+# MiniMax retained as last-resort escalation only
+version: "5.0.0"
+updated: "2026-03-16"
+
+# Runtime selection: "cline" or "claude" — overridable per-build via --runtime flag
+runtime: "claude"
+
+orchestrator:
+  model: "z-ai/glm-5"
+  provider: openrouter
+  max_tokens: 32768
+  temperature: 0.3
+  notes: "Planning, phase decomposition, gate evaluation, error recovery. Multi-turn conversation."
+
+builders:
+  routine:
+    model: "deepseek/deepseek-chat-v3-0324"
+    provider: openrouter
+    max_cost_usd: 0.20
+    max_tokens: 16384
+    timeout_minutes: 30
+    notes: "Fast, reliable for single-file straightforward tasks."
+
+  complex:
+    model: "deepseek/deepseek-chat-v3-0324"
+    provider: openrouter
+    max_cost_usd: 0.50
+    max_tokens: 32768
+    timeout_minutes: 45
+    notes: "Strong coding, fast throughput, reliable on OpenRouter. Replaces MiniMax M2.5."
+
+utility:
+  model: "deepseek/deepseek-chat-v3-0324"
+  provider: openrouter
+  max_tokens: 16384
+  temperature: 0.2
+  notes: "Context compression, log summarisation, evidence quality checks."
+
+fix:
+  tier1:
+    model: "deepseek/deepseek-chat-v3-0324"
+    max_cost_usd: 0.10
+    timeout_minutes: 15
+  tier2:
+    model: "deepseek/deepseek-chat-v3-0324"
+    max_cost_usd: 0.30
+    timeout_minutes: 30
+
+escalation_chain:
+  - "z-ai/glm-4.7-flash"
+  - "deepseek/deepseek-chat-v3-0324"
+  - "minimax/minimax-m2.5"
+
+fallback_chain:
+  - "deepseek/deepseek-chat-v3-0324"
+  - "z-ai/glm-4.7-flash"
+  - "minimax/minimax-m2.5"
+
+cost_limits:
+  daily_max_usd: 10.00
+  per_build_max_usd: 3.00
+  per_fix_max_usd: 2.00
+  alert_threshold_pct: 80
+
+# Claude Code runtime configuration (used when runtime: "claude" or --runtime claude)
+claude:
+  orchestrator:
+    model: "opus"
+    provider: anthropic
+    notes: "Planning, decomposition, gate evaluation, error recovery. Replaces GLM-5."
+
+  builders:
+    routine:
+      model: "sonnet"
+      provider: anthropic
+      max_budget_usd: 2.00
+      effort: "high"
+      timeout_minutes: 45
+      notes: "Sonnet for all build tasks. Fast, capable, cost-effective."
+
+    complex:
+      model: "sonnet"
+      provider: anthropic
+      max_budget_usd: 3.00
+      effort: "max"
+      timeout_minutes: 60
+      notes: "Same model, higher budget and effort for complex tasks."
+
+  reviewer:
+    model: "sonnet"
+    provider: anthropic
+    max_budget_usd: 0.50
+    effort: "medium"
+    notes: "Host-based reviewers using claude -p with --permission-mode plan (read-only)."
+
+  auditor:
+    notes: "Cross-phase audit still uses Codex CLI (independent architecture)."
+    use_codex: true

@@ -1,0 +1,85 @@
+name: CodeRabbit Review Gate
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  coderabbit-review:
+    name: CodeRabbit AI Review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install CodeRabbit CLI
+        run: npm install -g @coderabbit/cli@latest
+
+      - name: Run CodeRabbit review
+        id: review
+        env:
+          CODERABBIT_API_KEY: ${{ secrets.CODERABBIT_API_KEY }}
+        run: |
+          set +e
+          coderabbit review \
+            --base origin/main \
+            --plain \
+            --config .coderabbit.yaml \
+            > review-output.txt 2>&1
+          REVIEW_EXIT=$?
+          set -e
+
+          cat review-output.txt
+
+          # Parse Critical and High counts from output
+          CRITICAL=$(grep -oP 'Critical:\s*\K\d+' review-output.txt || echo "0")
+          HIGH=$(grep -oP 'High:\s*\K\d+' review-output.txt || echo "0")
+
+          echo "critical=${CRITICAL}" >> "$GITHUB_OUTPUT"
+          echo "high=${HIGH}" >> "$GITHUB_OUTPUT"
+
+          # Write summary
+          {
+            echo "## CodeRabbit Review Results"
+            echo ""
+            echo "| Severity | Count |"
+            echo "|----------|-------|"
+            echo "| Critical | ${CRITICAL} |"
+            echo "| High     | ${HIGH} |"
+            echo ""
+            if [[ "$CRITICAL" -gt 0 || "$HIGH" -gt 0 ]]; then
+              echo ":x: **Review failed** — Critical or High severity findings detected."
+            else
+              echo ":white_check_mark: **Review passed** — no Critical or High findings."
+            fi
+            echo ""
+            echo "<details><summary>Full output</summary>"
+            echo ""
+            echo '```'
+            cat review-output.txt
+            echo '```'
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail on Critical or High findings
+        if: steps.review.outputs.critical > 0 || steps.review.outputs.high > 0
+        run: |
+          echo "::error::CodeRabbit found Critical=${{ steps.review.outputs.critical }}, High=${{ steps.review.outputs.high }} findings"
+          exit 1
+
+      - name: Upload review findings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coderabbit-review-findings
+          path: review-output.txt
+          retention-days: 30

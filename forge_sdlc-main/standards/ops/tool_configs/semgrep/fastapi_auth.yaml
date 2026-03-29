@@ -1,0 +1,158 @@
+rules:
+  # APP-AC-01: FastAPI routes must have auth dependency
+  - id: fastapi-route-missing-auth
+    patterns:
+      - pattern: |
+          @$APP.$METHOD($PATH, ...)
+          def $FUNC(...):
+              ...
+      - metavariable-regex:
+          metavariable: $METHOD
+          regex: ^(get|post|put|patch|delete)$
+      - pattern-not: |
+          @$APP.$METHOD($PATH, ...)
+          def $FUNC(..., $AUTH: ... = Depends(verify_token), ...):
+              ...
+      - pattern-not: |
+          @$APP.$METHOD($PATH, ...)
+          def $FUNC(..., $AUTH: ... = Depends(get_current_user), ...):
+              ...
+      - pattern-not: |
+          @$APP.$METHOD($PATH, ...)
+          def $FUNC(..., $AUTH = Depends(verify_token), ...):
+              ...
+      - pattern-not: |
+          @$APP.$METHOD($PATH, ...)
+          def $FUNC(..., $AUTH = Depends(get_current_user), ...):
+              ...
+    message: >
+      Route handler '$FUNC' lacks authentication dependency.
+      All FastAPI routes must include Depends(verify_token) or
+      Depends(get_current_user) unless explicitly in the public allowlist.
+      Reference: OPS-STD-002 APP-AC-01.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      control_id: APP-AC-01
+      standard: OPS-STD-002
+      category: security
+      subcategory: authentication
+      confidence: MEDIUM
+
+  # APP-AC-02: Routes with path params must call authorize
+  - id: fastapi-missing-authorization-check
+    patterns:
+      - pattern: |
+          @$APP.$METHOD("$PATH", ...)
+          def $FUNC(..., $PARAM_ID: ..., ...):
+              ...
+      - metavariable-regex:
+          metavariable: $PATH
+          regex: .*\{.*_id\}.*
+      - metavariable-regex:
+          metavariable: $METHOD
+          regex: ^(get|post|put|patch|delete)$
+      - pattern-not: |
+          @$APP.$METHOD("$PATH", ...)
+          def $FUNC(..., $PARAM_ID: ..., ...):
+              ...
+              authorise(...)
+              ...
+      - pattern-not: |
+          @$APP.$METHOD("$PATH", ...)
+          def $FUNC(..., $PARAM_ID: ..., ...):
+              ...
+              authorize(...)
+              ...
+      - pattern-not: |
+          @$APP.$METHOD("$PATH", ...)
+          def $FUNC(..., $PARAM_ID: ..., ...):
+              ...
+              check_permission(...)
+              ...
+    message: >
+      Route '$FUNC' accesses a resource by ID but does not call
+      authorise(), authorize(), or check_permission(). Object-level
+      authorization is required for all resource access.
+      Reference: OPS-STD-002 APP-AC-02.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      control_id: APP-AC-02
+      standard: OPS-STD-002
+      category: security
+      subcategory: authorization
+      confidence: MEDIUM
+
+  # APP-AC-04: Ban returning raw model dicts without schema
+  - id: fastapi-raw-model-dict-response
+    patterns:
+      - pattern-either:
+          - pattern: return $MODEL.__dict__
+          - pattern: return jsonable_encoder($MODEL)
+    message: >
+      Do not return model.__dict__ or jsonable_encoder(model) directly.
+      Use an explicit Pydantic response_model schema to control which
+      fields are exposed. Reference: OPS-STD-002 APP-AC-04.
+    severity: WARNING
+    languages: [python]
+    metadata:
+      control_id: APP-AC-04
+      standard: OPS-STD-002
+      category: security
+      subcategory: data-exposure
+      confidence: HIGH
+
+  # APP-CRYPTO-04: Ban jwt.decode with verify=False
+  - id: jwt-decode-verify-disabled
+    pattern: jwt.decode(..., verify=False, ...)
+    message: >
+      JWT signature verification is disabled (verify=False). This allows
+      forged tokens. Always verify JWT signatures.
+      Reference: OPS-STD-002 APP-CRYPTO-04.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      control_id: APP-CRYPTO-04
+      standard: OPS-STD-002
+      category: security
+      subcategory: cryptography
+      confidence: HIGH
+
+  # APP-CRYPTO-04: Ban jwt.decode with options disabling verification
+  - id: jwt-decode-options-no-verify
+    patterns:
+      - pattern-either:
+          - pattern: 'jwt.decode(..., options={"verify_signature": False}, ...)'
+          - pattern: 'jwt.decode(..., options={"verify_exp": False, "verify_signature": False}, ...)'
+    message: >
+      JWT signature verification is disabled via options dict. This allows
+      forged tokens. Always verify JWT signatures.
+      Reference: OPS-STD-002 APP-CRYPTO-04.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      control_id: APP-CRYPTO-04
+      standard: OPS-STD-002
+      category: security
+      subcategory: cryptography
+      confidence: HIGH
+
+  # APP-CRYPTO-04: Ban algorithm "none" in JWT
+  - id: jwt-algorithm-none
+    patterns:
+      - pattern-either:
+          - pattern: 'jwt.decode(..., algorithms=["none"], ...)'
+          - pattern: jwt.encode(..., algorithm="none", ...)
+    message: >
+      JWT algorithm set to "none" allows unsigned tokens. Always use a
+      secure algorithm like HS256, RS256, or ES256.
+      Reference: OPS-STD-002 APP-CRYPTO-04.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      control_id: APP-CRYPTO-04
+      standard: OPS-STD-002
+      category: security
+      subcategory: cryptography
+      confidence: HIGH

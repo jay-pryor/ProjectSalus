@@ -1,0 +1,119 @@
+rules:
+  # APP-IV-04: Ban f-strings in SQLAlchemy text()/execute()
+  - id: sqlalchemy-fstring-in-text
+    patterns:
+      - pattern-either:
+          - pattern: text(f"...")
+          - pattern: text(f'...')
+    message: >
+      F-string used inside SQLAlchemy text(). This is a SQL injection
+      vector. Use parameterized queries with :param syntax and
+      bindparams instead. Reference: OPS-STD-002 APP-IV-04.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      control_id: APP-IV-04
+      standard: OPS-STD-002
+      category: security
+      subcategory: sql-injection
+      confidence: HIGH
+
+  # APP-IV-04: Ban f-strings in execute()
+  - id: sqlalchemy-fstring-in-execute
+    patterns:
+      - pattern-either:
+          - pattern: $CONN.execute(f"...")
+          - pattern: $CONN.execute(f'...')
+          - pattern: $SESSION.execute(f"...")
+          - pattern: $SESSION.execute(f'...')
+    message: >
+      F-string used in database execute() call. This is a SQL injection
+      vector. Use parameterized queries instead.
+      Reference: OPS-STD-002 APP-IV-04.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      control_id: APP-IV-04
+      standard: OPS-STD-002
+      category: security
+      subcategory: sql-injection
+      confidence: HIGH
+
+  # APP-IV-04: Ban string concatenation in text()
+  - id: sqlalchemy-string-concat-in-text
+    patterns:
+      - pattern-either:
+          - pattern: text($X + ...)
+          - pattern: text("..." + $X + "...")
+          - pattern: text("...".format(...))
+          - pattern: text("..." % ...)
+    message: >
+      String concatenation or format() used in SQLAlchemy text(). This
+      is a SQL injection vector. Use parameterized queries with :param
+      syntax instead. Reference: OPS-STD-002 APP-IV-04.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      control_id: APP-IV-04
+      standard: OPS-STD-002
+      category: security
+      subcategory: sql-injection
+      confidence: HIGH
+
+  # APP-IV-04: Ban literal_binds=True in production
+  - id: sqlalchemy-literal-binds
+    pattern: literal_binds=True
+    message: >
+      literal_binds=True inlines parameter values into SQL strings,
+      bypassing parameterized queries. This should never be used in
+      production code. Reference: OPS-STD-002 APP-IV-04.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      control_id: APP-IV-04
+      standard: OPS-STD-002
+      category: security
+      subcategory: sql-injection
+      confidence: HIGH
+
+  # APP-IV-05: Ban order_by(text(...)) with dynamic input
+  - id: sqlalchemy-order-by-text
+    patterns:
+      - pattern-either:
+          - pattern: $QUERY.order_by(text($X))
+          - pattern: $QUERY.order_by(text(f"..."))
+          - pattern: $QUERY.order_by(text(f'...'))
+    message: >
+      Using text() inside order_by() allows SQL injection via sort
+      parameters. Use a whitelist of allowed column names mapped to
+      ORM column objects instead. Reference: OPS-STD-002 APP-IV-05.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      control_id: APP-IV-05
+      standard: OPS-STD-002
+      category: security
+      subcategory: sql-injection
+      confidence: HIGH
+
+  # APP-IV-05: Ban literal_column with user input
+  - id: sqlalchemy-literal-column-dynamic
+    patterns:
+      - pattern-either:
+          - pattern: literal_column(f"...")
+          - pattern: literal_column(f'...')
+          - pattern: literal_column($X + ...)
+          - pattern: literal_column("...".format(...))
+          - pattern: literal_column("..." % ...)
+    message: >
+      Dynamic input in literal_column() allows SQL injection. Use a
+      whitelist of allowed column names mapped to ORM column references
+      instead. Reference: OPS-STD-002 APP-IV-05.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      control_id: APP-IV-05
+      standard: OPS-STD-002
+      category: security
+      subcategory: sql-injection
+      confidence: HIGH

@@ -1,0 +1,76 @@
+---
+# Forge Agent Definition: Test Coverage Reviewer
+# Reference: OPS-STD-004 (Gate Policy)
+
+agent:
+  name: forge_test_coverage_reviewer
+  display_name: Test Coverage Reviewer
+  version: "1.0.0"
+  description: >
+    Identifies critical code paths lacking tests — changed code with no
+    new tests, missing assertions for failure states, fragile test patterns,
+    and coverage threshold violations.
+
+  capability_tier: Mid-Tier
+  gate_role: specialist
+  gate_weight: 0.7
+  confidence_threshold: 0.8
+
+context_inject:
+  - path: standards/agent_slices/test_coverage_reviewer.md
+    format: markdown
+    description: Test coverage rules covering existence, quality, hygiene, and metrics
+
+tool_inputs:
+  - tool: pytest-cov
+    command: "pytest --cov --cov-report=json"
+    output_format: json
+    condition: "stack.language == 'python'"
+    description: Python line-level coverage per file with uncovered ranges
+
+  - tool: istanbul
+    command: "npx nyc report --reporter=json"
+    output_format: json
+    condition: "stack.language == 'typescript' or stack.language == 'javascript'"
+    description: JS/TS statement, branch, function, and line coverage per file
+
+verdict:
+  pass_criteria: >
+    Changed files have corresponding test files. Coverage meets project
+    threshold (default 80%, override via forge.project.yaml). Critical
+    paths tested with both happy and error cases.
+  fail_criteria: >
+    New endpoint with zero tests, coverage below threshold for changed
+    files, auth-protected endpoint without unauthenticated access test,
+    new Pydantic model without validation tests, test making real network
+    calls, or test asserting only status code.
+
+output_format:
+  schema_ref: "OPS-STD-004 §9.2"
+  structure: finding_list
+  fields:
+    - finding_id
+    - tool
+    - agent
+    - rule_id
+    - kind
+    - severity
+    - confidence
+    - file
+    - line
+    - column
+    - end_line
+    - summary
+    - rationale
+    - suggested_fix
+    - first_seen_round
+    - last_seen_round
+    - status
+    - suppression
+  coverage_summary:
+    - file
+    - statements_pct
+    - branches_pct
+    - lines_pct
+    - uncovered_ranges
+  verdict: PASS | FAIL

@@ -1,0 +1,83 @@
+# oasdiff Breaking Change Policy
+# Reference: OPS-STD-003 Section 3 (Versioning & Breaking Changes)
+# Used by: contract_reviewer agent, PR gate
+#
+# This config defines which OpenAPI spec changes are considered breaking
+# and how they map to gate verdicts.
+
+version: "1.0"
+standard: OPS-STD-003
+section: "3.1-3.2 - Versioning & Breaking Changes"
+
+# Breaking change classification per OPS-STD-003 §3.2
+breaking_changes:
+  # These changes MUST trigger a major version bump
+  always_breaking:
+    - id: endpoint-removed
+      description: "Removing an endpoint is a breaking change"
+      severity: Critical
+      standard_ref: "OPS-STD-003 §3.2"
+
+    - id: required-request-property-added
+      description: "Adding a required property to a request body is breaking"
+      severity: High
+      standard_ref: "OPS-STD-003 §3.2"
+
+    - id: response-property-removed
+      description: "Removing a property from a response is breaking"
+      severity: High
+      standard_ref: "OPS-STD-003 §3.2"
+
+    - id: property-type-changed
+      description: "Changing the type of a request or response property is breaking"
+      severity: High
+      standard_ref: "OPS-STD-003 §3.2"
+
+    - id: optional-to-required
+      description: "Making a previously optional field required is breaking"
+      severity: High
+      standard_ref: "OPS-STD-003 §3.2"
+
+    - id: enum-value-removed
+      description: "Removing an enum value from a response property is breaking"
+      severity: Medium
+      standard_ref: "OPS-STD-003 §3.2"
+
+  # These changes are non-breaking (informational only)
+  non_breaking:
+    - id: endpoint-added
+      description: "Adding a new endpoint is non-breaking"
+
+    - id: optional-request-property-added
+      description: "Adding an optional property to a request body is non-breaking"
+
+    - id: response-property-added
+      description: "Adding a property to a response is non-breaking"
+
+    - id: enum-value-added
+      description: "Adding an enum value is non-breaking"
+
+# Gate integration
+gate_policy:
+  # How breaking changes affect the gate verdict
+  on_breaking_change:
+    action: "FAIL"
+    message: "Breaking API change detected without version bump. Increment major version or revert."
+    override: "If the path includes a new version prefix (e.g., /v2/), the breaking change is acceptable."
+
+  # How to detect version bumps
+  version_bump_detection:
+    strategy: "path_prefix"
+    pattern: "/v{major}/"
+    description: "A breaking change is acceptable if it appears under a new version path prefix"
+
+# oasdiff CLI flags
+cli_config:
+  format: json
+  fail_on: "ERR"
+  # Exclude draft/internal endpoints from breaking change checks
+  exclude_paths:
+    - "/internal/**"
+    - "/debug/**"
+    - "/health"
+    - "/metrics"

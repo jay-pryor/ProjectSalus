@@ -1,0 +1,149 @@
+rules:
+  # APP-ERR-01: Ban debug=True in production FastAPI config
+  - id: fastapi-debug-enabled
+    patterns:
+      - pattern-either:
+          - pattern: FastAPI(..., debug=True, ...)
+          - pattern: app = FastAPI(..., debug=True, ...)
+    message: >
+      FastAPI debug mode is enabled. Debug mode exposes stack traces
+      and internal state to clients. Use environment-based config to
+      ensure debug=False in production.
+      Reference: OPS-STD-002 APP-ERR-01.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      control_id: APP-ERR-01
+      standard: OPS-STD-002
+      category: security
+      subcategory: error-handling
+      confidence: HIGH
+
+  # APP-ERR-01: Ban uvicorn reload in production
+  - id: uvicorn-reload-enabled
+    pattern: uvicorn.run(..., reload=True, ...)
+    message: >
+      Uvicorn reload=True is a development setting. It enables auto-reload
+      on file changes and should never be used in production deployments.
+      Reference: OPS-STD-002 APP-ERR-01.
+    severity: WARNING
+    languages: [python]
+    metadata:
+      control_id: APP-ERR-01
+      standard: OPS-STD-002
+      category: security
+      subcategory: error-handling
+      confidence: HIGH
+
+  # APP-SECRETS-03: Flag logging of sensitive fields
+  - id: logging-sensitive-password
+    patterns:
+      - pattern-either:
+          - pattern: logger.info(... + $PASSWORD + ...)
+          - pattern: logger.debug(... + $PASSWORD + ...)
+          - pattern: logger.warning(... + $PASSWORD + ...)
+          - pattern: logger.error(... + $PASSWORD + ...)
+          - pattern: logging.info(... + $PASSWORD + ...)
+          - pattern: logging.debug(... + $PASSWORD + ...)
+      - metavariable-regex:
+          metavariable: $PASSWORD
+          regex: .*(password|passwd|pwd).*
+    message: >
+      Possible password value being logged. Sensitive fields (password,
+      token, secret, api_key) must never appear in log output.
+      Reference: OPS-STD-002 APP-SECRETS-03.
+    severity: WARNING
+    languages: [python]
+    metadata:
+      control_id: APP-SECRETS-03
+      standard: OPS-STD-002
+      category: security
+      subcategory: secrets-in-logs
+      confidence: MEDIUM
+
+  # APP-SECRETS-03: Flag f-string logging of sensitive fields
+  - id: logging-sensitive-fstring
+    patterns:
+      - pattern-either:
+          - pattern: logger.$METHOD(f"...{$SENSITIVE}...")
+          - pattern: logging.$METHOD(f"...{$SENSITIVE}...")
+      - metavariable-regex:
+          metavariable: $SENSITIVE
+          regex: .*(password|token|secret|api_key|apikey|authorization|auth_token|access_token|refresh_token).*
+      - metavariable-regex:
+          metavariable: $METHOD
+          regex: ^(debug|info|warning|error|critical|exception)$
+    message: >
+      Sensitive field being logged via f-string. Fields matching
+      password, token, secret, api_key, or authorization must never
+      appear in log output. Reference: OPS-STD-002 APP-SECRETS-03.
+    severity: WARNING
+    languages: [python]
+    metadata:
+      control_id: APP-SECRETS-03
+      standard: OPS-STD-002
+      category: security
+      subcategory: secrets-in-logs
+      confidence: MEDIUM
+
+  # APP-CRYPTO-02: Ban weak hash algorithms
+  - id: weak-hash-md5
+    patterns:
+      - pattern-either:
+          - pattern: hashlib.md5(...)
+          - pattern: from hashlib import md5
+    message: >
+      MD5 is cryptographically broken and must not be used for security
+      purposes (signatures, integrity checks, password hashing). Use
+      SHA-256 or SHA-3 instead. Reference: OPS-STD-002 APP-CRYPTO-02.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      control_id: APP-CRYPTO-02
+      standard: OPS-STD-002
+      category: security
+      subcategory: cryptography
+      confidence: HIGH
+
+  # APP-CRYPTO-02: Ban SHA-1 for security use
+  - id: weak-hash-sha1
+    patterns:
+      - pattern-either:
+          - pattern: hashlib.sha1(...)
+          - pattern: from hashlib import sha1
+    message: >
+      SHA-1 is cryptographically weak and must not be used for security
+      purposes. Use SHA-256 or SHA-3 instead.
+      Reference: OPS-STD-002 APP-CRYPTO-02.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      control_id: APP-CRYPTO-02
+      standard: OPS-STD-002
+      category: security
+      subcategory: cryptography
+      confidence: HIGH
+
+  # APP-CRYPTO-02: Ban DES and RC4
+  - id: weak-cipher-des-rc4
+    patterns:
+      - pattern-either:
+          - pattern: from Crypto.Cipher import DES
+          - pattern: from Crypto.Cipher import DES3
+          - pattern: from Crypto.Cipher import ARC4
+          - pattern: from cryptography.hazmat.primitives.ciphers.algorithms import TripleDES
+          - pattern: from cryptography.hazmat.primitives.ciphers.algorithms import ARC4
+          - pattern: DES.new(...)
+          - pattern: ARC4.new(...)
+    message: >
+      DES and RC4 are deprecated ciphers with known vulnerabilities.
+      Use AES-256-GCM or ChaCha20-Poly1305 instead.
+      Reference: OPS-STD-002 APP-CRYPTO-02.
+    severity: ERROR
+    languages: [python]
+    metadata:
+      control_id: APP-CRYPTO-02
+      standard: OPS-STD-002
+      category: security
+      subcategory: cryptography
+      confidence: HIGH

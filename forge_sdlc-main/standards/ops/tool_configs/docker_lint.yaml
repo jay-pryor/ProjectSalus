@@ -1,0 +1,74 @@
+# Docker Compose Lint Configuration
+# Reference: OPS-STD-002 Section 3 (Infrastructure Controls)
+# Used by: security_reviewer agent, Light security subagent
+#
+# This config defines the checks applied to docker-compose.yml files.
+# Enforcement is via `docker compose config` + custom post-processing.
+
+version: "1.0"
+standard: OPS-STD-002
+section: "3.1 - Docker Controls"
+
+checks:
+  # INF-DOCKER-01: No root containers
+  - id: INF-DOCKER-01
+    name: non-root-user
+    description: "Containers MUST NOT run as root. Dockerfiles MUST include USER instruction."
+    check_type: dockerfile
+    rule: "USER instruction must be present and not set to root/0"
+    severity: High
+    enforcement: "Scan Dockerfiles for USER directive; flag if missing or set to root"
+
+  # INF-DOCKER-02: No latest tags
+  - id: INF-DOCKER-02
+    name: pinned-base-image
+    description: "Base images MUST be pinned to a digest or specific version tag."
+    check_type: dockerfile
+    rule: "FROM instruction must not use :latest tag"
+    severity: High
+    enforcement: "Scan FROM lines; flag :latest or missing tag"
+
+  # INF-DOCKER-03: No docker socket mounts
+  - id: INF-DOCKER-03
+    name: no-docker-socket
+    description: "Docker socket MUST NOT be mounted into application containers."
+    check_type: compose
+    rule: "volumes must not contain /var/run/docker.sock"
+    severity: Critical
+    enforcement: "Grep compose volumes for docker.sock"
+
+  # INF-DOCKER-04: Drop all capabilities
+  - id: INF-DOCKER-04
+    name: drop-all-caps
+    description: "Containers MUST drop all capabilities and add back only required ones."
+    check_type: compose
+    rule: "cap_drop: [ALL] must be present; privileged: true must not be used"
+    severity: High
+    enforcement: "Check each service for cap_drop ALL and absence of privileged"
+
+  # INF-DOCKER-05: Read-only root filesystem
+  - id: INF-DOCKER-05
+    name: read-only-root
+    description: "Read-only root filesystems SHOULD be enabled where possible."
+    check_type: compose
+    rule: "read_only: true recommended; writable paths via named volumes or tmpfs"
+    severity: Medium
+    enforcement: "Check each service for read_only flag"
+
+  # INF-IMAGE-01: Minimal base images
+  - id: INF-IMAGE-01
+    name: minimal-base-image
+    description: "Production images MUST use Alpine, distroless, or slim variants."
+    check_type: dockerfile
+    rule: "FROM must use -slim, -alpine, distroless, or equivalent minimal image"
+    severity: Medium
+    enforcement: "Scan FROM lines against allowlist of minimal base patterns"
+
+  # Resource limits (OPS-STD-002 §3 caveat: Swarm mode vs standalone)
+  - id: INF-DOCKER-RESOURCES
+    name: resource-limits
+    description: "Containers SHOULD have memory and CPU limits defined."
+    check_type: compose
+    rule: "deploy.resources.limits should be defined (Swarm mode) OR mem_limit/cpus (standalone)"
+    severity: Medium
+    enforcement: "Check for resource limit configuration in either format"

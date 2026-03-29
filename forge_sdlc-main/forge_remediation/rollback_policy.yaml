@@ -1,0 +1,61 @@
+# Forge Rollback Policy — Per-service rollback behaviour
+version: "1.0.0"
+
+policies:
+  default:
+    auto_rollback: true
+    max_rollback_depth: 3
+    cooldown_minutes: 15
+    health_check_timeout_s: 60
+    health_check_retries: 3
+
+  ers:
+    auto_rollback: true
+    max_rollback_depth: 3
+    cooldown_minutes: 15
+    health_check_timeout_s: 30
+    health_check_retries: 3
+
+  evgp-onboarding:
+    auto_rollback: true
+    max_rollback_depth: 2
+    cooldown_minutes: 30
+    health_check_timeout_s: 60
+    health_check_retries: 5
+    notes: "Payment-sensitive — extra caution"
+
+  evgp-processing:
+    auto_rollback: true
+    max_rollback_depth: 2
+    cooldown_minutes: 30
+    health_check_timeout_s: 120
+    health_check_retries: 3
+    notes: "Long-running jobs — extended timeout"
+
+  command-centre:
+    auto_rollback: true
+    max_rollback_depth: 3
+    cooldown_minutes: 10
+    health_check_timeout_s: 30
+    health_check_retries: 3
+
+  blog:
+    auto_rollback: true
+    max_rollback_depth: 5
+    cooldown_minutes: 5
+    health_check_timeout_s: 15
+    health_check_retries: 2
+    notes: "Lowest risk — minimal cooldown"
+
+  pulsity-website:
+    auto_rollback: true
+    max_rollback_depth: 5
+    cooldown_minutes: 5
+    health_check_timeout_s: 15
+    health_check_retries: 2
+
+rollback_triggers:
+  - health_check_failure
+  - error_rate_spike
+  - response_time_degradation
+  - manual_trigger

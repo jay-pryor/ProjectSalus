@@ -1,0 +1,115 @@
+# Forge Review Models v3.0.0 — Specialist reviewer assignments
+# Timeouts calibrated per model: fast models (GLM) get 300s, slower models (MiniMax, Kimi) get 600s
+version: "3.0.0"
+updated: "2026-03-15"
+
+# Model speed tiers — used by orchestrator for dynamic timeout calculation
+model_speed_tiers:
+  fast:
+    models: ["z-ai/glm-4.7-flash", "deepseek/deepseek-chat-v3-0324", "qwen/qwen3-235b-a22b"]
+    base_review_timeout: 300
+    base_build_timeout: 1800
+  moderate:
+    models: ["moonshotai/kimi-k2.5"]
+    base_review_timeout: 480
+    base_build_timeout: 2400
+  deliberate:
+    models: ["minimax/minimax-m2.5", "z-ai/glm-5"]
+    base_review_timeout: 600
+    base_build_timeout: 5400
+
+reviewers:
+  security_reviewer:
+    model: "moonshotai/kimi-k2.5"
+    provider: openrouter
+    timeout_seconds: 480
+    required_for_tiers: [2, 3]
+    focus: "Injection, auth bypass, secrets exposure, OWASP Top 10"
+    agent_definition: "forge_claw/agents/ops/security_reviewer.yaml"
+
+  silent_failure_hunter:
+    model: "qwen/qwen3-235b-a22b"
+    provider: openrouter
+    timeout_seconds: 600
+    required_for_tiers: [1, 2, 3]
+    focus: "Swallowed exceptions, empty catches, missing propagation, unawaited futures"
+    agent_definition: "forge_claw/agents/ops/silent_failure_hunter.yaml"
+
+  type_safety_reviewer:
+    model: "deepseek/deepseek-chat-v3-0324"
+    provider: openrouter
+    timeout_seconds: 300
+    required_for_tiers: [1, 2, 3]
+    focus: "Type annotations, pydantic models, None checks, coercion safety"
+    agent_definition: "forge_claw/agents/ops/type_safety_reviewer.yaml"
+
+  contract_reviewer:
+    model: "deepseek/deepseek-chat-v3-0324"
+    provider: openrouter
+    timeout_seconds: 300
+    required_for_tiers: [2, 3]
+    focus: "API schema compatibility, breaking changes, response format drift"
+    agent_definition: "forge_claw/agents/ops/contract_reviewer.yaml"
+
+  performance_reviewer:
+    model: "z-ai/glm-4.7-flash"
+    provider: openrouter
+    timeout_seconds: 300
+    required_for_tiers: [2, 3]
+    focus: "N+1 queries, unbounded loops, memory leaks, missing indexes"
+    agent_definition: "forge_claw/agents/ops/performance_reviewer.yaml"
+
+  test_coverage_reviewer:
+    model: "z-ai/glm-4.7-flash"
+    provider: openrouter
+    timeout_seconds: 300
+    required_for_tiers: [1, 2, 3]
+    focus: "Missing tests, untested edge cases, coverage gaps"
+    agent_definition: "forge_claw/agents/ops/test_coverage_reviewer.yaml"
+
+  spec_compliance_reviewer:
+    model: "moonshotai/kimi-k2.5"
+    provider: openrouter
+    timeout_seconds: 480
+    required_for_tiers: [2, 3]
+    focus: "Acceptance criteria vs implementation, spec completeness"
+    agent_definition: "forge_claw/agents/ops/spec_compliance_reviewer.yaml"
+
+gate_evaluator:
+  model: "z-ai/glm-4.7-flash"
+  provider: openrouter
+  timeout_seconds: 30
+  notes: "Simple pass/fail synthesis. For complex cases, orchestrator uses GLM-5 instead."
+
+external_tools:
+  coderabbit:
+    enabled: true
+    trigger: "pr_created"
+    required_for_tiers: [2, 3]
+    config:
+      api_key_env: CODERABBIT_API_KEY
+
+  semgrep:
+    enabled: true
+    trigger: "pre_review"
+    required_for_tiers: [1, 2, 3]
+    config:
+      ruleset: "p/python"
+      extra_rules: ["p/security-audit", "p/owasp-top-ten"]
+
+quorum:
+  tier_1:
+    min_pass: 2
+    required: [type_safety_reviewer, silent_failure_hunter, semgrep]
+  tier_2:
+    min_pass: 5
+    required: [security_reviewer, silent_failure_hunter, type_safety_reviewer,
+               contract_reviewer, spec_compliance_reviewer, semgrep, coderabbit]
+  tier_3:
+    min_pass: 6
+    required: [security_reviewer, silent_failure_hunter, type_safety_reviewer,
+               contract_reviewer, performance_reviewer, test_coverage_reviewer,
+               spec_compliance_reviewer, semgrep, coderabbit]
+    human_approval: true
+
+max_review_rounds: 3

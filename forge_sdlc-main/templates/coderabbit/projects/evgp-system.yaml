@@ -1,0 +1,45 @@
+# =============================================================================
+# CodeRabbit Project Overlay — EVGP System
+# =============================================================================
+# Project-specific invariants for the EVGP (Electric Vehicle Grand Prix)
+# platform. Merged last, after base + stack overlays.
+# =============================================================================
+
+reviews:
+  path_instructions:
+    # -------------------------------------------------------------------------
+    # Database models and migrations — EVGP naming conventions
+    # -------------------------------------------------------------------------
+    - path: "**/models/**/*.py"
+      instructions: &evgp_db_rules |
+        All database table names MUST use the evgp_ prefix (e.g., evgp_teams, evgp_runs, evgp_events). Flag any __tablename__ that does not start with evgp_.
+        Foreign key columns should follow the pattern evgp_<referenced_table>_id.
+
+    - path: "**/migrations/**"
+      instructions: *evgp_db_rules
+
+    # -------------------------------------------------------------------------
+    # LLM integration — PII and cost controls
+    # -------------------------------------------------------------------------
+    - path: "**/llm_client.py"
+      instructions: &evgp_llm_rules |
+        ALL LLM calls MUST go through the centralized llm_client.py — no direct openai/anthropic SDK usage elsewhere.
+        CostGuard enforcement: every LLM call must include max_tokens and must check against the budget before execution. Flag any call without cost tracking.
+        Unified retry: LLM calls must use the shared retry decorator with exponential backoff. No ad-hoc retry loops.
+        Typed exceptions: LLM errors must raise project-specific typed exceptions (e.g., LLMRateLimitError, LLMBudgetExceededError), not generic Exception.
+
+    - path: "**/services/**/*.py"
+      instructions: |
+        PII redaction: before passing any user data to an LLM call, it MUST be run through the PII redaction pipeline. Flag any LLM invocation where user-provided text is passed without redaction.
+        All LLM calls must go through llm_client.py — flag any direct import of openai, anthropic, or litellm in service files.
+
+    - path: "**/prompts/**"
+      instructions: *evgp_llm_rules
+
+    # -------------------------------------------------------------------------
+    # State management — EVGPState TypedDict
+    # -------------------------------------------------------------------------
+    - path: "**/src/**/*.py"
+      instructions: |
+        Application state must use the EVGPState TypedDict for type safety. Flag any Dict[str, Any] used for passing state between components.
+        State mutations must go through defined state transition functions — no direct dict assignment on state objects.

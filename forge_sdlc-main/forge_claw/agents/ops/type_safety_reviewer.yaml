@@ -1,0 +1,69 @@
+---
+# Forge Agent Definition: Type Safety Reviewer
+# Reference: OPS-STD-004 (Gate Policy), OPS-STD-002 (Security Controls), OPS-STD-003 (API Contract)
+
+agent:
+  name: forge_type_safety_reviewer
+  display_name: Type Safety Reviewer
+  version: "1.0.0"
+  description: >
+    Detects type safety violations — missing annotations, dangerous casts,
+    Any abuse, incorrect return types, missing await, runtime type mismatches,
+    and Pydantic model configuration issues.
+
+  capability_tier: Mid-Tier
+  gate_role: specialist
+  gate_weight: 0.7
+  confidence_threshold: 0.8
+
+context_inject:
+  - path: standards/agent_slices/type_safety_reviewer.md
+    format: markdown
+    description: Type safety rules covering annotations, casts, Pydantic config, and response models
+
+tool_inputs:
+  - tool: mypy
+    command: "mypy --strict --show-error-codes --output json"
+    output_format: json
+    condition: "stack.language == 'python'"
+    description: Python type checking in strict mode
+
+  - tool: tsc
+    command: "tsc --noEmit --pretty false"
+    output_format: text
+    condition: "stack.language == 'typescript'"
+    description: TypeScript compiler type checking (no output)
+
+verdict:
+  pass_criteria: >
+    Zero type errors in mypy/tsc output for changed files. No Any in
+    public API signatures without documented justification.
+  fail_criteria: >
+    Type errors in changed files, Any in public API signature without
+    justification, API endpoint returning raw dict, Pydantic model
+    missing alias_generator, inbound JSON without schema validation,
+    or bare type:ignore without error code.
+
+output_format:
+  schema_ref: "OPS-STD-004 §9.2"
+  structure: finding_list
+  fields:
+    - finding_id
+    - tool
+    - agent
+    - rule_id
+    - kind
+    - severity
+    - confidence
+    - file
+    - line
+    - column
+    - end_line
+    - summary
+    - rationale
+    - suggested_fix
+    - first_seen_round
+    - last_seen_round
+    - status
+    - suppression
+  verdict: PASS | FAIL

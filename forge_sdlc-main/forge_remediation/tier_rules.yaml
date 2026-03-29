@@ -1,0 +1,101 @@
+# Forge Tier Rules — Classification logic for remediation tiers
+version: "1.0.0"
+
+# Keywords that ALWAYS force Tier 3 regardless of other signals
+tier_3_mandatory:
+  keywords:
+    - auth
+    - sso
+    - oauth
+    - tenant
+    - migration
+    - schema
+    - billing
+    - payment
+    - stripe
+    - permissions
+    - security
+    - data_corruption
+    - encryption
+    - api_key
+    - secret
+    - credential
+    - privilege
+  error_types:
+    - SecurityError
+    - DataIntegrityError
+
+tier_1_criteria:
+  description: "Auto-fix, auto-deploy, no human approval needed"
+  conditions:
+    error_types:
+      - TypeError
+      - AttributeError
+      - KeyError
+      - ValueError
+      - ImportError
+      - ModuleNotFoundError
+      - FileNotFoundError
+      - ValidationError
+    single_file_fix: true
+    blast_radius: low
+    no_schema_change: true
+    no_api_contract_change: true
+    test_coverage_exists: true
+
+tier_2_criteria:
+  description: "Auto-fix with multi-reviewer validation and 30-minute watch"
+  conditions:
+    error_types:
+      - ConnectionError
+      - TimeoutError
+      - HTTPException
+      - IntegrityError
+      - OperationalError
+      - JSONDecodeError
+    multi_file_fix: true
+    blast_radius: medium
+    api_change_possible: true
+    cross_service_impact: false
+
+tier_3_criteria:
+  description: "Human approval required — Telegram alert and Dave confirmation"
+  conditions:
+    mandatory_keyword_match: true
+    blast_radius: high
+    cross_service_impact: true
+    schema_change: true
+    affects_services:
+      - evgp-onboarding  # payment-sensitive
+      - outreach          # high-volume email
+
+# When to upgrade a tier
+escalation_rules:
+  tier_1_to_tier_2:
+    conditions:
+      - failed_attempts: 2
+      - fix_touches_multiple_files: true
+      - test_suite_fails_after_fix: true
+    action: "Reclassify as Tier 2, add multi-reviewer validation"
+
+  tier_2_to_tier_3:
+    conditions:
+      - failed_attempts: 2
+      - error_rate_increases_after_fix: true
+      - rollback_triggered: true
+      - blast_radius_exceeds: medium
+    action: "Reclassify as Tier 3, send Telegram alert, pause until approved"
+
+  any_to_tier_3:
+    conditions:
+      - mandatory_keyword_detected: true
+      - affects_payment_flow: true
+      - affects_auth_flow: true
+      - data_loss_possible: true
+    action: "Immediate Tier 3 escalation regardless of current tier"
+
+# Cooldown — prevent rapid re-attempts on the same issue
+cooldown:
+  tier_1: 5    # minutes before retry
+  tier_2: 15
+  tier_3: 60   # wait for human approval anyway

@@ -1,0 +1,53 @@
+# Forge Gap Taxonomy v1.0
+# Classifies defects by what quality gate should have caught them.
+# Used by debrief.py to populate forge_gap_class in defect_records.
+
+gap_classes:
+
+  missing-test:
+    name: Missing Test
+    description: A unit or integration test covering this code path would have caught the defect before merge.
+    example: "Function returns None instead of empty list when no results found — no test asserts return type."
+    recommended_action: Add unit test covering the failing code path and edge case; add to CI suite.
+
+  missing-type-check:
+    name: Missing Type Check
+    description: A type annotation or mypy/pyright rule would have flagged the incorrect type at static analysis time.
+    example: "Passing str where int expected in API call — no type hints on function signature."
+    recommended_action: Add type annotations to affected function; enable mypy strict mode for module.
+
+  missing-lint-rule:
+    name: Missing Lint Rule
+    description: A ruff or eslint rule would have caught this anti-pattern or style violation automatically.
+    example: "Bare except clause swallowing critical database errors silently."
+    recommended_action: Enable the relevant ruff/eslint rule in project config; fix existing violations.
+
+  missing-standard:
+    name: Missing Forge Standard
+    description: A Forge standard rule would have prevented this architectural or design pattern violation.
+    example: "Service writes directly to another service's database instead of using the API contract."
+    recommended_action: Create or update Forge standard to codify the expected pattern; add to preflight checks.
+
+  missing-contract-test:
+    name: Missing Contract Test
+    description: An API contract test between services would have detected the breaking interface change.
+    example: "Upstream service changed response field from 'user_id' to 'userId' — downstream broke silently."
+    recommended_action: Add contract test (e.g., pact or schema validation) between the two services.
+
+  missing-integration-test:
+    name: Missing Integration Test
+    description: A cross-service integration test exercising the full workflow would have caught the failure.
+    example: "Webhook handler works in isolation but fails when called with real Stripe payload format."
+    recommended_action: Add integration test that exercises the end-to-end flow with realistic test data.
+
+  missing-review-agent-pattern:
+    name: Missing Review Agent Pattern
+    description: The review agent does not yet check for this class of defect pattern.
+    example: "Hardcoded API URL in production code — review agent only checks for hardcoded secrets, not URLs."
+    recommended_action: Add pattern detection rule to review agent configuration.
+
+  process-gap:
+    name: Process Gap
+    description: The defect stems from a workflow or process issue, not a tooling gap.
+    example: "Deploy went out without running staging smoke tests — process was skipped, not missing."
+    recommended_action: Document the process gap; add checklist item or automation gate to prevent recurrence.

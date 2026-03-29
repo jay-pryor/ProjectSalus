@@ -1,0 +1,97 @@
+---
+# Forge Agent Definition: Security Reviewer
+# Reference: OPS-STD-004 (Gate Policy), OPS-STD-002 (Security Controls), OPS-STD-001 (Auth/SSO)
+
+agent:
+  name: forge_security_reviewer
+  display_name: Security Reviewer
+  version: "1.0.0"
+  description: >
+    Evaluates code changes and infrastructure configuration for security
+    compliance against OPS-STD-002 and OPS-STD-001. Consumes pre-computed
+    tool outputs and applies 48 security controls across access control,
+    input validation, XSS, cryptography, secrets, supply chain, Docker,
+    Nginx, database, Redis, and SSH.
+
+  capability_tier: Frontier
+  gate_role: specialist
+  gate_weight: 1.0
+  confidence_threshold: 0.8
+
+context_inject:
+  - path: standards/agent_slices/security_reviewer.md
+    format: markdown
+    description: Full security review ruleset with 48 controls and pass/fail criteria
+
+tool_inputs:
+  - tool: semgrep
+    config_paths:
+      - standards/tool_configs/semgrep/fastapi_auth.yaml
+      - standards/tool_configs/semgrep/sql_injection.yaml
+      - standards/tool_configs/semgrep/xss_prevention.yaml
+      - standards/tool_configs/semgrep/error_handling.yaml
+      - standards/tool_configs/semgrep/secrets_patterns.yaml
+    output_format: sarif
+    description: Static analysis findings mapped to OPS-STD-002 control IDs
+
+  - tool: detect-secrets
+    command: "detect-secrets scan --baseline .secrets.baseline"
+    output_format: json
+    description: New or modified secrets detected in the changeset
+
+  - tool: pip-audit
+    command: "pip-audit --format json"
+    output_format: json
+    condition: "stack.language == 'python'"
+    description: Known CVEs in Python dependencies
+
+  - tool: npm-audit
+    command: "npm audit --json"
+    output_format: json
+    condition: "stack.language == 'typescript' or stack.language == 'javascript'"
+    description: Known CVEs in Node.js dependencies
+
+  - tool: trivy
+    command: "trivy fs --format json --severity HIGH,CRITICAL ."
+    output_format: json
+    description: Filesystem and container vulnerability scan
+
+  - tool: docker-compose-lint
+    command: "docker compose config --quiet"
+    output_format: text
+    condition: "paths.docker_compose is defined"
+    description: Docker Compose structural and security validation
+
+verdict:
+  pass_criteria: >
+    Zero Critical-severity findings AND zero High-severity findings.
+    All Medium findings recorded with tracking references.
+  fail_criteria: >
+    Any Critical-severity finding OR any High-severity finding.
+  false_positive_handling: >
+    Document rule ID, file, line, and justification. False-positive
+    dismissals count as Medium tracked items.
+
+output_format:
+  schema_ref: "OPS-STD-004 §9.2"
+  structure: finding_list
+  fields:
+    - finding_id
+    - tool
+    - agent
+    - rule_id
+    - kind
+    - severity
+    - confidence
+    - file
+    - line
+    - column
+    - end_line
+    - summary
+    - rationale
+    - suggested_fix
+    - first_seen_round
+    - last_seen_round
+    - status
+    - suppression
+  verdict: PASS | FAIL
