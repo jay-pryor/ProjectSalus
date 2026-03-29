@@ -151,3 +151,47 @@ defects:
     resolution: "Changed sentinel from -1.0 to 0.0; added 'is not None' check to avoid falsy trap on max_range=0.0"
     status: resolved
     commit: ""
+
+  - id: D-014
+    severity: high
+    task: D-013-review
+    found_by: silent_failure_hunter
+    file: src/salus/engine/viewshed.py
+    line: 99
+    description: "vs_ds not None-guarded after gdal.ViewshedGenerate() — function can return None on failure even with UseExceptions() active in some GDAL builds, causing AttributeError with no diagnostic context"
+    resolution: "Added explicit None guard after ViewshedGenerate; raises RuntimeError with diagnostic message; ds closed before raising"
+    status: resolved
+    commit: ""
+
+  - id: D-015
+    severity: medium
+    task: D-013-review
+    found_by: silent_failure_hunter
+    file: src/salus/engine/viewshed.py
+    line: 99
+    description: "No try/finally around ReadAsArray/cleanup — if ReadAsArray or astype raises, GDAL in-memory datasets are never explicitly closed"
+    resolution: "Wrapped ReadAsArray/astype in try/finally; vs_ds and ds set to None in finally block to release GDAL handles"
+    status: resolved
+    commit: ""
+
+  - id: D-016
+    severity: medium
+    task: D-013-review
+    found_by: silent_failure_hunter
+    file: src/salus/engine/viewshed.py
+    line: 63
+    description: "driver.Create() return value not None-guarded — returns None if MEM driver unavailable or rows/cols are zero, causing AttributeError on next line with no context"
+    resolution: "Added None guard after driver.Create(); raises RuntimeError with raster dimensions in message"
+    status: resolved
+    commit: ""
+
+  - id: D-017
+    severity: medium
+    task: D-013-review
+    found_by: regression_reviewer
+    file: src/salus/engine/viewshed.py
+    line: 80
+    description: "max_range=0.0 maps to GDAL unlimited (correct) but NumPy path treats it as 1-cell range (if max_range is not None is True for 0.0) — GDAL/NumPy semantic divergence for this edge case"
+    resolution: "Added normalisation at compute_viewshed entry: max_range <= 0.0 converted to None so both paths treat it as unlimited; tests added for max_range=0.0 and max_range<0.0"
+    status: resolved
+    commit: ""

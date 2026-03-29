@@ -165,6 +165,47 @@ class TestViewshedCommand:
         assert result.exit_code != 0
         assert "outside" in result.output.lower() or "extent" in result.output.lower()
 
+    def test_unrecognised_output_extension_warns(self, flat_dem_path, tmp_path):
+        """An unrecognised output extension must produce a warning in stderr."""
+        runner = CliRunner()
+        out = tmp_path / "output.xyz"
+        result = runner.invoke(
+            main,
+            [
+                "viewshed",
+                "--dem",
+                str(flat_dem_path),
+                "--x",
+                "500050",
+                "--y",
+                "6100050",
+                "--output",
+                str(out),
+            ],
+        )
+        assert "Warning" in result.output or "unrecognised" in result.output
+
+    def test_corrupt_dem_exits_nonzero(self, tmp_path):
+        """A file that exists but is not a valid rasterio dataset must exit non-zero."""
+        bad_dem = tmp_path / "bad.tif"
+        bad_dem.write_text("not a geotiff")
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "viewshed",
+                "--dem",
+                str(bad_dem),
+                "--x",
+                "500050",
+                "--y",
+                "6100050",
+                "--output",
+                str(tmp_path / "out.png"),
+            ],
+        )
+        assert result.exit_code != 0
+
     def test_ridge_dem_runs(self, ridge_dem_path, tmp_path):
         """viewshed must complete successfully on the ridge DEM fixture."""
         runner = CliRunner()

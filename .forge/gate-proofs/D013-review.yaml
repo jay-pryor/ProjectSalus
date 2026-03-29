@@ -1,0 +1,33 @@
+task_id: D013-review
+timestamp: 2026-03-29T00:00:00Z
+gate_type: retroactive-review
+description: "Retroactive Forge review cycle for D-013 GDAL maxDistance fix in viewshed.py"
+quality_gates:
+  G1_lint: pass
+  G2_format: pass
+  G3_import: pass
+  G4_type: pass   # informational only — import-untyped for rasterio/osgeo/matplotlib_scalebar stubs
+  G5_security: pass
+  G6_unit_test: pass     # 51 tests passing
+  G7_coverage: pass      # 83.21%
+  G8_secrets: N/A        # detect-secrets not installed
+  coverage_pct: 83
+review:
+  l1_standards:
+    testing: pass
+    error_handling: pass
+    logging: N/A
+    security: N/A
+  l2_agents:
+    silent_failure_hunter: {status: findings-resolved, findings: 3}  # D-014, D-015, D-016
+    regression_reviewer: {status: findings-resolved, findings: 1}    # D-017
+defect_ids: [D-014, D-015, D-016, D-017]
+overall: pass
+notes: >
+  Retroactive review triggered after D-013 was committed without a full Forge cycle.
+  Four additional defects found and resolved: None-guards on GDAL driver.Create() and
+  ViewshedGenerate() return values (D-014, D-016), try/finally for GDAL handle cleanup
+  (D-015), and max_range=0.0 normalisation to align GDAL/NumPy semantics (D-017).
+  Two tests added for the max_range normalisation path; other new GDAL-internal branches
+  cannot be exercised without GDAL installed in the development environment.
+  Coverage improved from 77.99% (pre-fix) to 83.21%.

@@ -30,6 +30,10 @@ def compute_viewshed(
     Returns:
         Boolean 2D array matching site.dem shape. True = visible from observer.
     """
+    # Normalise: treat 0.0 as unlimited (same as None) so both paths agree
+    if max_range is not None and max_range <= 0.0:
+        max_range = None
+
     try:
         return _viewshed_gdal(site, observer_x, observer_y, observer_height, max_range)
     except ImportError:
@@ -61,6 +65,8 @@ def _viewshed_gdal(
     # Create in-memory raster
     driver = gdal.GetDriverByName("MEM")
     ds = driver.Create("", cols, rows, 1, gdal.GDT_Float64)
+    if ds is None:
+        raise RuntimeError(f"GDAL MEM driver failed to create in-memory raster ({rows}×{cols})")
     ds.SetGeoTransform(
         (
             site.origin_x,
@@ -96,9 +102,17 @@ def _viewshed_gdal(
         mode=2,  # whole raster
         maxDistance=max_dist,
     )
-    result = vs_ds.GetRasterBand(1).ReadAsArray().astype(bool)
-    vs_ds = None
-    ds = None
+    if vs_ds is None:
+        ds = None
+        raise RuntimeError(
+            "gdal.ViewshedGenerate returned None — check observer coordinates and DEM validity"
+        )
+
+    try:
+        result = vs_ds.GetRasterBand(1).ReadAsArray().astype(bool)
+    finally:
+        vs_ds = None
+        ds = None
     return result
 
 
