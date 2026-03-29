@@ -1,0 +1,18 @@
+# HENSOLDT Spexer 500 — X-band AESA Radar (short-range cUAS / perimeter)
+# Source: HENSOLDT product datasheet / Resources/Sensors/Radar/hensoldt_spexer_500.md
+# Last updated: 2026-03-29
+# Note: published max range is against walking person (5 km); UAV range not explicitly stated.
+#       Conservative 3 km used here for small UAS targets.
+
+name: HENSOLDT Spexer 500
+type: Radar
+
+max_range_m: 3000.0          # confidence: medium — 5 km published for walking person; 3 km conservative for small UAS
+min_range_m: 100.0           # confidence: high — 0.1 km instrumented minimum published on datasheet
+azimuth_coverage_deg: 120.0  # confidence: high — published: 120° sector, no mechanical movement
+elevation_coverage_deg: 65.0 # confidence: low — not published; estimated -5° to +60° from cUAS optimisation
+frequency_bands:             # confidence: medium — X-band stated; centre frequency estimated
+  - "9.5 GHz"
+requires_los: true           # confidence: high — radar requires direct LOS to target
+mounting_height_m: 5.0       # confidence: medium — typical mast/pedestal mount; not specified in datasheet
+cost_aud: null               # confidence: N/A — not publicly disclosed

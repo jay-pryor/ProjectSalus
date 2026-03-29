@@ -1,0 +1,17 @@
+# Echodyne EchoGuard — K-band AESA Radar (cUAS)
+# Source: Echodyne product datasheet / Resources/Sensors/Radar/echodyne_echoguard.md
+# Last updated: 2026-03-29
+# Note: detection range published against DJI Mavic Pro / Phantom 4 class target (~0.01 m² RCS)
+
+name: Echodyne EchoGuard
+type: Radar
+
+max_range_m: 900.0           # confidence: high — published: 900 m against Mavic Pro/Phantom 4 class
+min_range_m: 10.0            # confidence: medium — MESA/FMCW type; 10 m estimated minimum, not published
+azimuth_coverage_deg: 120.0  # confidence: high — published: 120° per panel
+elevation_coverage_deg: 80.0 # confidence: high — published: 80° total vertical FOV
+frequency_bands:             # confidence: high — published frequency
+  - "24.55 GHz"
+requires_los: true           # confidence: high — radar requires direct LOS to target
+mounting_height_m: 5.0       # confidence: medium — typical tripod/mast; not specified in datasheet
+cost_aud: null               # confidence: N/A — not publicly disclosed

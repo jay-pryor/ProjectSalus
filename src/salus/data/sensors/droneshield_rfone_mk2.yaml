@@ -1,0 +1,19 @@
+# DroneShield RfOne Mk2 — Passive RF Detection Sensor
+# Source: DroneShield product datasheet / Resources/Sensors/RF/droneshield_rfone_mk2.md
+# Last updated: 2026-03-29
+
+name: DroneShield RfOne Mk2
+type: RF
+
+max_range_m: 8000.0        # confidence: high — "up to 8 km" published on datasheet
+min_range_m: 0.0           # confidence: high — passive sensor, no transmit blind zone
+azimuth_coverage_deg: 90.0 # confidence: high — datasheet states 4 units required for 360° coverage
+elevation_coverage_deg: 60.0 # confidence: low — not published; 60° is a conservative assumption for mast-mounted RF
+frequency_bands:           # confidence: medium — ISM bands stated; specific channels estimated
+  - "433 MHz"
+  - "900 MHz"
+  - "2.4 GHz"
+  - "5.8 GHz"
+requires_los: false        # confidence: high — passive RF, signal propagates around terrain
+mounting_height_m: 5.0     # confidence: medium — typical mast mount; not specified in datasheet
+cost_aud: null             # confidence: N/A — not publicly disclosed

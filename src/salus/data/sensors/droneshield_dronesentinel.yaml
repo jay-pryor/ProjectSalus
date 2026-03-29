@@ -1,0 +1,21 @@
+# DroneShield DroneSentinel — Standalone Passive Acoustic Detection Sensor
+# Source: DroneShield product information (general); no dedicated research file available.
+# Last updated: 2026-03-29
+# Note: DroneSentinel is DroneShield's standalone acoustic-only sensor (distinct from
+#       DroneSentry, which is the integrated multi-sensor tower).
+#       No Resources/Sensors/Acoustic/ research file exists for this product.
+#       All values are conservative estimates based on published DroneShield marketing materials
+#       and typical passive acoustic cUAS sensor performance. Confidence is low across all fields.
+#       Update this file once a dedicated research document is available.
+
+name: DroneShield DroneSentinel
+type: Acoustic
+
+max_range_m: 300.0           # confidence: low — acoustic range 150–500 m typical; 300 m conservative estimate
+min_range_m: 0.0             # confidence: high — passive sensor, no blind zone
+azimuth_coverage_deg: 360.0  # confidence: medium — omnidirectional microphone array typical for this class
+elevation_coverage_deg: 90.0 # confidence: low — upper hemisphere coverage assumed; not published
+frequency_bands: []          # confidence: high — passive acoustic, no RF transmission
+requires_los: false          # confidence: high — sound propagates around terrain obstacles
+mounting_height_m: 2.0       # confidence: low — low mounting typical for acoustic; not published
+cost_aud: null               # confidence: N/A — not publicly disclosed
