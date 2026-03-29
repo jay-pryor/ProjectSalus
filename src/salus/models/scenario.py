@@ -1,8 +1,10 @@
-"""Scenario data models — sensor and effector placements on a site."""
+"""Scenario data models — placements and top-level scenario configuration."""
 
 from __future__ import annotations
 
-from pydantic import BaseModel, field_validator
+from pathlib import Path
+
+from pydantic import BaseModel, Field, field_validator
 
 _BEARING_MAX_DEG: float = 360.0  # exclusive upper bound for compass bearing
 
@@ -51,4 +53,98 @@ class SensorPlacement(BaseModel):
     def _height_override_non_negative(cls, v: float | None) -> float | None:
         if v is not None and v < 0.0:
             raise ValueError(f"height_override_m must be >= 0, got {v}")
+        return v
+
+
+class EffectorPlacement(BaseModel):
+    """A single effector deployed at a specific position and orientation on a site.
+
+    Associates an effector definition (by name) with a physical deployment:
+    map coordinates, boresight bearing, and optional height override.
+
+    Coordinates are in projected CRS units (metres). Bearing is a compass
+    bearing (0 = north, 90 = east, 180 = south, 270 = west), clockwise.
+    """
+
+    effector_name: str
+    """Name of the effector definition this placement refers to."""
+
+    position_x: float
+    """Easting of the effector in CRS units (metres)."""
+
+    position_y: float
+    """Northing of the effector in CRS units (metres)."""
+
+    bearing_deg: float
+    """Boresight direction as a compass bearing in degrees [0, 360)."""
+
+    height_override_m: float | None = None
+    """Override the effector's default mounting height in metres. None = use effector default."""
+
+    @field_validator("effector_name")
+    @classmethod
+    def _effector_name_non_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("effector_name must not be empty or whitespace")
+        return v
+
+    @field_validator("bearing_deg")
+    @classmethod
+    def _bearing_valid(cls, v: float) -> float:
+        if not (0.0 <= v < _BEARING_MAX_DEG):
+            raise ValueError(f"bearing_deg must be in [0, 360), got {v}")
+        return v
+
+    @field_validator("height_override_m")
+    @classmethod
+    def _height_override_non_negative(cls, v: float | None) -> float | None:
+        if v is not None and v < 0.0:
+            raise ValueError(f"height_override_m must be >= 0, got {v}")
+        return v
+
+
+class ScenarioConfig(BaseModel):
+    """Top-level configuration for a cUAS simulation scenario.
+
+    Loaded from a YAML scenario file. Path fields are resolved relative to the
+    scenario file's parent directory during loading (see load_scenario).
+
+    All path fields store absolute, resolved paths after loading.
+    """
+
+    site_dem_path: Path
+    """Path to the site Digital Elevation Model (GeoTIFF)."""
+
+    site_dsm_path: Path | None = None
+    """Path to the site Digital Surface Model (GeoTIFF). None = DEM used for occlusion."""
+
+    boundary_path: Path | None = None
+    """Path to the site boundary GeoJSON file. None = no boundary clipping."""
+
+    sensor_placements: list[SensorPlacement] = Field(default_factory=list)
+    """Sensor deployments on the site."""
+
+    effector_placements: list[EffectorPlacement] = Field(default_factory=list)
+    """Effector deployments on the site."""
+
+    threat_profiles: list[str] = Field(default_factory=list)
+    """Threat type names to evaluate (e.g. 'DJI Phantom 4'). Empty = no threat analysis."""
+
+    @field_validator("site_dem_path", mode="before")
+    @classmethod
+    def _site_dem_path_non_empty(cls, v: object) -> object:
+        if isinstance(v, str) and not v.strip():
+            raise ValueError("site_dem_path must not be empty or whitespace")
+        elif isinstance(v, Path) and not v.parts:
+            raise ValueError("site_dem_path must not be an empty path")
+        elif not isinstance(v, (str, Path)):
+            raise ValueError(f"site_dem_path must be a string or Path, got {type(v).__name__}")
+        return v
+
+    @field_validator("threat_profiles")
+    @classmethod
+    def _threat_profiles_non_empty(cls, v: list[str]) -> list[str]:
+        for i, entry in enumerate(v):
+            if not entry.strip():
+                raise ValueError(f"threat_profiles[{i}] must not be empty or whitespace")
         return v

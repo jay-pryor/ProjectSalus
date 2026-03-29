@@ -1,11 +1,13 @@
-"""Tests for SensorPlacement model (models/scenario.py)."""
+"""Tests for scenario Pydantic models (models/scenario.py)."""
 
 from __future__ import annotations
+
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
-from salus.models.scenario import SensorPlacement
+from salus.models.scenario import EffectorPlacement, ScenarioConfig, SensorPlacement
 
 
 class TestSensorPlacement:
@@ -109,3 +111,155 @@ class TestSensorPlacement:
         """bearing_deg=90.0 (east) is valid and stored exactly."""
         sp = SensorPlacement(sensor_name="S", position_x=0.0, position_y=0.0, bearing_deg=90.0)
         assert sp.bearing_deg == pytest.approx(90.0)
+
+
+class TestEffectorPlacement:
+    def test_valid_minimal(self):
+        """Minimal valid EffectorPlacement."""
+        ep = EffectorPlacement(
+            effector_name="EOS Slinger",
+            position_x=500060.0,
+            position_y=6100060.0,
+            bearing_deg=90.0,
+        )
+        assert ep.effector_name == "EOS Slinger"
+        assert ep.bearing_deg == pytest.approx(90.0)
+        assert ep.height_override_m is None
+
+    def test_empty_effector_name_raises(self):
+        """Empty effector_name is invalid."""
+        with pytest.raises(ValidationError, match="effector_name"):
+            EffectorPlacement(effector_name="", position_x=0.0, position_y=0.0, bearing_deg=0.0)
+
+    def test_bearing_360_raises(self):
+        """bearing_deg=360.0 is invalid."""
+        with pytest.raises(ValidationError, match="bearing_deg"):
+            EffectorPlacement(effector_name="E", position_x=0.0, position_y=0.0, bearing_deg=360.0)
+
+    def test_bearing_negative_raises(self):
+        """Negative bearing_deg is invalid."""
+        with pytest.raises(ValidationError, match="bearing_deg"):
+            EffectorPlacement(effector_name="E", position_x=0.0, position_y=0.0, bearing_deg=-5.0)
+
+    def test_negative_height_override_raises(self):
+        """Negative height_override_m is invalid."""
+        with pytest.raises(ValidationError, match="height_override_m"):
+            EffectorPlacement(
+                effector_name="E",
+                position_x=0.0,
+                position_y=0.0,
+                bearing_deg=0.0,
+                height_override_m=-1.0,
+            )
+
+    def test_height_override_zero_valid(self):
+        """height_override_m=0.0 is valid."""
+        ep = EffectorPlacement(
+            effector_name="E",
+            position_x=0.0,
+            position_y=0.0,
+            bearing_deg=0.0,
+            height_override_m=0.0,
+        )
+        assert ep.height_override_m == pytest.approx(0.0)
+
+
+class TestScenarioConfig:
+    def test_valid_minimal(self, tmp_path):
+        """ScenarioConfig with only site_dem_path is valid."""
+        dem = tmp_path / "site.tif"
+        sc = ScenarioConfig(site_dem_path=dem)
+        assert sc.site_dem_path == dem
+        assert sc.site_dsm_path is None
+        assert sc.boundary_path is None
+        assert sc.sensor_placements == []
+        assert sc.effector_placements == []
+        assert sc.threat_profiles == []
+
+    def test_valid_full(self, tmp_path):
+        """ScenarioConfig accepts all fields."""
+        dem = tmp_path / "dem.tif"
+        dsm = tmp_path / "dsm.tif"
+        boundary = tmp_path / "boundary.geojson"
+        sc = ScenarioConfig(
+            site_dem_path=dem,
+            site_dsm_path=dsm,
+            boundary_path=boundary,
+            sensor_placements=[
+                SensorPlacement(
+                    sensor_name="DroneShield RfOne Mk2",
+                    position_x=500050.0,
+                    position_y=6100050.0,
+                    bearing_deg=0.0,
+                )
+            ],
+            effector_placements=[
+                EffectorPlacement(
+                    effector_name="EOS Slinger",
+                    position_x=500060.0,
+                    position_y=6100060.0,
+                    bearing_deg=90.0,
+                )
+            ],
+            threat_profiles=["DJI Phantom 4"],
+        )
+        assert len(sc.sensor_placements) == 1
+        assert len(sc.effector_placements) == 1
+        assert sc.threat_profiles == ["DJI Phantom 4"]
+
+    def test_missing_site_dem_path_raises(self):
+        """site_dem_path is required."""
+        with pytest.raises(ValidationError):
+            ScenarioConfig()  # type: ignore[call-arg]
+
+    def test_empty_site_dem_path_raises(self):
+        """Empty string for site_dem_path is invalid."""
+        with pytest.raises(ValidationError, match="site_dem_path"):
+            ScenarioConfig(site_dem_path="")
+
+    def test_site_dem_path_string_coerced_to_path(self, tmp_path):
+        """A string value for site_dem_path is coerced to Path."""
+        sc = ScenarioConfig(site_dem_path=str(tmp_path / "dem.tif"))
+        assert isinstance(sc.site_dem_path, Path)
+
+    def test_sensor_placements_default_empty_list(self, tmp_path):
+        """sensor_placements defaults to an empty list, not a shared mutable."""
+        sc1 = ScenarioConfig(site_dem_path=tmp_path / "a.tif")
+        sc2 = ScenarioConfig(site_dem_path=tmp_path / "b.tif")
+        assert sc1.sensor_placements is not sc2.sensor_placements
+
+    def test_invalid_sensor_placement_in_list_raises(self, tmp_path):
+        """An invalid SensorPlacement dict inside sensor_placements raises ValidationError."""
+        with pytest.raises(ValidationError):
+            ScenarioConfig(
+                site_dem_path=tmp_path / "dem.tif",
+                sensor_placements=[
+                    {
+                        "sensor_name": "",
+                        "position_x": 0,
+                        "position_y": 0,
+                        "bearing_deg": 0,
+                    }
+                ],
+            )
+
+    def test_non_path_site_dem_path_raises(self, tmp_path):
+        """Passing an integer for site_dem_path raises ValidationError."""
+        with pytest.raises(ValidationError, match="site_dem_path"):
+            ScenarioConfig(site_dem_path=42)  # type: ignore[arg-type]
+
+    def test_empty_threat_profile_entry_raises(self, tmp_path):
+        """An empty string in threat_profiles raises ValidationError."""
+        with pytest.raises(ValidationError, match="threat_profiles"):
+            ScenarioConfig(
+                site_dem_path=tmp_path / "dem.tif",
+                threat_profiles=["DJI Phantom 4", ""],
+            )
+
+    def test_whitespace_threat_profile_entry_raises(self, tmp_path):
+        """A whitespace-only string in threat_profiles raises ValidationError."""
+        with pytest.raises(ValidationError, match="threat_profiles"):
+            ScenarioConfig(
+                site_dem_path=tmp_path / "dem.tif",
+                threat_profiles=["  "],
+            )

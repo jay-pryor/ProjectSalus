@@ -415,3 +415,80 @@ defects:
     resolution: "Changed parameter, return type, and local variable annotations to npt.NDArray[np.bool_]; added numpy.typing import"
     status: resolved
     commit: ""
+
+  - id: D-038
+    severity: medium
+    task: S2-6
+    found_by: type_design_analyzer
+    file: src/salus/ingest/scenario.py
+    line: 45
+    description: "raw annotated as Any for full duration of load_scenario — persists past isinstance guard, hiding key/value type information from mypy"
+    resolution: "Introduced data: dict[str, Any] = raw after isinstance guard; use data for all subsequent access"
+    status: resolved
+    commit: ""
+
+  - id: D-039
+    severity: medium
+    task: S2-6
+    found_by: type_design_analyzer
+    file: src/salus/ingest/scenario.py
+    line: 60
+    description: "Resolved Path assigned back to raw dict as str then Pydantic coerces back to Path — unnecessary Path->str->Path round-trip; assign Path directly"
+    resolution: "Changed assignment to data[field] = (scenario_dir / str(field_val)).resolve() — assigns Path directly"
+    status: resolved
+    commit: ""
+
+  - id: D-040
+    severity: medium
+    task: S2-6
+    found_by: silent_failure_hunter
+    file: src/salus/ingest/scenario.py
+    line: 60
+    description: "Path field values not validated as str/Path before join — non-string YAML scalars (int, bool) silently coerced via str(), producing nonsense paths that only fail deep in rasterio with no field context"
+    resolution: "Added isinstance(field_val, (str, Path)) check before join; raises ValueError with field name and type if unexpected; test added in test_non_string_path_field_raises"
+    status: resolved
+    commit: ""
+
+  - id: D-041
+    severity: low
+    task: S2-6
+    found_by: silent_failure_hunter
+    file: src/salus/models/scenario.py
+    line: 133
+    description: "_site_dem_path_non_empty validator only handles str and Path inputs; non-string YAML scalars reaching the model directly bypass both branches and are passed to Pydantic coercion without a clear ValueError"
+    resolution: "Added elif not isinstance(v, (str, Path)) branch raising clear ValueError; test added in test_non_path_site_dem_path_raises"
+    status: resolved
+    commit: ""
+
+  - id: D-042
+    severity: low
+    task: S2-6
+    found_by: silent_failure_hunter
+    file: src/salus/models/scenario.py
+    line: 130
+    description: "threat_profiles list[str] has no validator — empty or whitespace-only entries accepted silently, inconsistent with every other str field in the module"
+    resolution: "Added _threat_profiles_non_empty field_validator iterating the list; Pydantic v2 pattern (no each_item); tests added for empty and whitespace entries"
+    status: resolved
+    commit: ""
+
+  - id: D-043
+    severity: medium
+    task: S2-6
+    found_by: silent_failure_hunter
+    file: src/salus/ingest/scenario.py
+    line: 60
+    description: "No path-containment check after resolution — a scenario YAML with absolute paths like /etc/shadow is silently resolved and passed to rasterio"
+    resolution: "Design decision: .resolve() satisfies security.md MUST rule. Additional containment check (restrict to scenario_dir) is a SHOULD rule and is overly restrictive — users legitimately reference shared DEM/DSM files outside the scenario directory. Deferred."
+    status: resolved
+    commit: ""
+
+  - id: D-044
+    severity: medium
+    task: S2-6
+    found_by: silent_failure_hunter
+    file: src/salus/ingest/scenario.py
+    line: 62
+    description: "Resolved DEM/DSM/boundary paths not checked for existence in load_scenario — failure deferred to rasterio with no scenario-level context"
+    resolution: "Design decision: CLAUDE.md rule — do not add validation for scenarios that can't happen. A scenario file may be authored before the DEM is generated. Path existence is the simulation engine's responsibility, not the loader's. Deferred."
+    status: resolved
+    commit: ""
