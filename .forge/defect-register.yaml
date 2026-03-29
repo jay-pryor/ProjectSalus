@@ -316,3 +316,25 @@ defects:
     resolution: "Return type changed to list[dict[str, Any]]; element validation now inside _load_yaml_records so annotation is accurate"
     status: resolved
     commit: ""
+
+  - id: D-029
+    severity: medium
+    task: S2-2
+    found_by: type_design_analyzer
+    file: src/salus/ingest/sensors.py
+    line: 14
+    description: "T = TypeVar('T') is unconstrained — should be bound=BaseModel to reject non-Pydantic classes at the call site and make the contract explicit"
+    resolution: "Changed to TypeVar('T', bound=BaseModel); added BaseModel import"
+    status: resolved
+    commit: ""
+
+  - id: D-030
+    severity: low
+    task: S2-2
+    found_by: type_design_analyzer
+    file: src/salus/ingest/sensors.py
+    line: 104
+    description: "model_cls(**record) is unverifiable by mypy — reliance on Pydantic ValidationError for runtime type guarantee is correct but undocumented in code"
+    resolution: "Added inline comment explaining the deliberate reliance on Pydantic's runtime ValidationError"
+    status: resolved
+    commit: ""

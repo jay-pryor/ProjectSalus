@@ -19,9 +19,10 @@ review:
     logging: N/A         # No long-running ops; warnings.warn used appropriately for empty directory
     security: pass       # yaml.safe_load (not yaml.load); Path() used throughout; no eval/exec
   l2_agents:
-    silent_failure_hunter: {status: findings-resolved, findings: 5}  # D-024 through D-028
+    silent_failure_hunter: {status: findings-resolved, findings: 5}   # D-024 through D-028
     spec_compliance: {status: pass, findings: 0}
-defect_ids: [D-024, D-025, D-026, D-027, D-028]
+    type_design_analyzer: {status: findings-resolved, findings: 2}    # D-029, D-030 (retroactive)
+defect_ids: [D-024, D-025, D-026, D-027, D-028, D-029, D-030]
 overall: pass
 notes: >
   All 5 defects logged and resolved before commit. Key fixes: OSError caught in

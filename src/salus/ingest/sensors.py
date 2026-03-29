@@ -7,11 +7,11 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 import yaml
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from salus.models.sensor import EffectorDefinition, SensorDefinition
 
-T = TypeVar("T")
+T = TypeVar("T", bound=BaseModel)
 
 _YAML_SUFFIXES = (".yaml", ".yml")
 
@@ -99,6 +99,8 @@ def _load_definitions(
         records = _load_yaml_records(path)
         for i, record in enumerate(records):
             try:
+                # Pydantic's ValidationError provides runtime type enforcement
+                # for record fields — mypy cannot verify **dict[str, Any] here.
                 results.append(model_cls(**record))
             except (ValidationError, TypeError) as exc:
                 raise ValueError(
