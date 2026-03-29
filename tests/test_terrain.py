@@ -2,9 +2,11 @@
 
 import numpy as np
 import pytest
+from shapely.geometry import Polygon
 
 from salus.ingest.terrain import load_dem
 from salus.models.site import SiteModel
+from salus.models.zone import Zone, ZoneType
 
 
 class TestSiteModel:
@@ -21,6 +23,21 @@ class TestSiteModel:
         assert site.resolution == 1.0
         assert site.dsm is None
         assert site.surface_array() is site.dem
+
+    def test_zones_default_empty(self):
+        """SiteModel zones must default to an empty list."""
+        dem = np.zeros((10, 10))
+        site = SiteModel(dem=dem, resolution=1.0, origin_x=0.0, origin_y=0.0)
+        assert site.zones == []
+
+    def test_zones_accepts_zone_list(self):
+        """SiteModel must accept a list of Zone objects."""
+        dem = np.zeros((10, 10))
+        poly = Polygon([(0, 0), (10, 0), (10, 10), (0, 10)])
+        zone = Zone(name="Test", zone_type=ZoneType.perimeter, geometry=poly)
+        site = SiteModel(dem=dem, resolution=1.0, origin_x=0.0, origin_y=0.0, zones=[zone])
+        assert len(site.zones) == 1
+        assert site.zones[0].name == "Test"
 
     def test_surface_array_prefers_dsm(self):
         dem = np.zeros((10, 10))

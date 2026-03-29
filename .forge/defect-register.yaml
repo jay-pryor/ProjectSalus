@@ -536,3 +536,25 @@ defects:
     resolution: "Added fallback constant _FALLBACK_SENSOR_FILENAME='sensor'; _safe_filename returns it when result would be empty"
     status: resolved
     commit: "66cdc1b"
+
+  - id: D-049
+    severity: medium
+    task: S3-1
+    found_by: silent_failure_hunter
+    file: src/salus/ingest/boundaries.py
+    line: 172
+    description: "bare except Exception in _extract_epsg swallows ImportError and runtime faults from pyproj; should catch only CRSError"
+    resolution: ""
+    status: resolved
+    commit: "eef0997"
+
+  - id: D-050
+    severity: medium
+    task: S3-1
+    found_by: type_design_analyzer
+    file: src/salus/ingest/boundaries.py
+    line: 53
+    description: "max(union.geoms, ...) returns BaseGeometry per Shapely stubs; conflicts with declared -> Polygon return; no runtime guard for degenerate case"
+    resolution: ""
+    status: resolved
+    commit: "eef0997"
