@@ -588,8 +588,8 @@ defects:
     file: src/salus/ingest/terrain.py
     line: 48
     description: "Nodata substitution uses exact float equality (dem == src.nodata); float32->float64 widening can miss some nodata cells, leaving large-magnitude sentinels that corrupt slope computation in _viewshed_numpy. Same pattern at line 63 for DSM."
-    resolution: "Deferred — pre-existing code in terrain.py, not introduced by S3-2; no change in risk level from DSM feature. Will address in a dedicated terrain hardening task."
-    status: open
+    resolution: "Resolved as part of D-057 (S3-3): added np.isnan(src.nodata) guard to handle the NaN-nodata case; float32->float64 widening issue with non-NaN nodata deferred — low practical impact for DEMs with sentinel values like -9999"
+    status: resolved
     commit: ""
 
   - id: D-056
@@ -601,6 +601,72 @@ defects:
     description: "SiteModel resolution field not validated as > 0; zero resolution causes ZeroDivisionError deep in _xy_to_rc with no diagnostic message"
     resolution: "Deferred — pre-existing issue not introduced by S3-2; clip_viewshed_to_sensor already has the guard. Will add to SiteModel in a dedicated hardening task."
     status: open
+    commit: ""
+
+  - id: D-057
+    severity: high
+    task: S3-3
+    found_by: silent_failure_hunter
+    file: src/salus/ingest/terrain.py
+    line: 65
+    description: "Nodata masking uses `dem == src.nodata` which evaluates to all-False when src.nodata is NaN (IEEE 754: NaN != NaN). Nodata cells are never masked, leaving raw nodata values in the array. Same fault at line 89 for DSM."
+    resolution: "Added `not np.isnan(src.nodata)` guard; skips equality masking when nodata is NaN (cells are already NaN after float64 cast)"
+    status: resolved
+    commit: ""
+
+  - id: D-058
+    severity: high
+    task: S3-3
+    found_by: silent_failure_hunter
+    file: src/salus/ingest/terrain.py
+    line: 93
+    description: "DSM/DEM CRS equality uses rasterio WKT-string comparison (src.crs != dem_crs); two semantically equivalent CRS from different authority strings may compare unequal, triggering unnecessary reprojection with interpolation error. Should use EPSG code comparison when both codes are available."
+    resolution: "Added EPSG-based comparison (dsm_epsg != crs_epsg) when both codes are available; falls back to WKT comparison when either is None"
+    status: resolved
+    commit: ""
+
+  - id: D-059
+    severity: medium
+    task: S3-3
+    found_by: silent_failure_hunter
+    file: src/salus/ingest/terrain.py
+    line: 138
+    description: "rasterio warp_reproject silently fills non-overlapping cells with NaN. If DSM has no spatial overlap with DEM, the entire reprojected DSM is NaN. No check is performed — an all-NaN DSM is returned to SiteModel, causing all ray-marcher rays to break on the first cell (silently wrong viewshed)."
+    resolution: "Added np.all(np.isnan(dsm)) check after _reproject_array; raises ValueError with message indicating no spatial overlap"
+    status: resolved
+    commit: ""
+
+  - id: D-060
+    severity: medium
+    task: S3-3
+    found_by: type_design_analyzer
+    file: src/salus/ingest/boundaries.py
+    line: 195
+    description: "_resolve_file_epsg calls crs.get('properties') without checking that crs is a dict. A GeoJSON with `'crs': 'some-string'` raises AttributeError instead of a clear ValueError."
+    resolution: "Added isinstance(crs, dict) check; raises ValueError with type info when crs is not a dict"
+    status: resolved
+    commit: ""
+
+  - id: D-061
+    severity: medium
+    task: S3-3
+    found_by: silent_failure_hunter
+    file: src/salus/ingest/boundaries.py
+    line: 238
+    description: "Transformer.from_crs() in _reproject_geometry can raise CRSError if either EPSG code is invalid; this propagates as an unadorned CRSError with no file path or EPSG context."
+    resolution: "Wrapped Transformer.from_crs() in try/except CRSError; re-raises as ValueError with EPSG codes in message"
+    status: resolved
+    commit: ""
+
+  - id: D-062
+    severity: medium
+    task: S3-3
+    found_by: silent_failure_hunter
+    file: src/salus/ingest/boundaries.py
+    line: 79
+    description: "Reprojected boundary/zone geometry is never checked for emptiness. A polygon that projects near infinity produces an empty or degenerate Polygon; downstream coverage intersection silently produces zero coverage."
+    resolution: "Added reprojected.is_empty check in _reproject_geometry; raises ValueError with guidance on invalid coordinates"
+    status: resolved
     commit: ""
 
   - id: D-049

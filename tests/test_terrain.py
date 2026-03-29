@@ -113,6 +113,86 @@ class TestLoadDem:
         with pytest.raises(FileNotFoundError, match="DSM not found"):
             load_dem(flat_dem_path, dsm_path=tmp_path / "no_such_dsm.tif")
 
+    def test_dem_undefined_crs_raises(self, tmp_path):
+        """A DEM with no CRS defined must raise ValueError."""
+        import rasterio
+        from rasterio.transform import from_bounds
+
+        path = tmp_path / "no_crs.tif"
+        data = np.full((10, 10), 50.0, dtype=np.float64)
+        transform = from_bounds(0, 0, 10, 10, 10, 10)
+        with rasterio.open(
+            path,
+            "w",
+            driver="GTiff",
+            height=10,
+            width=10,
+            count=1,
+            dtype="float64",
+            transform=transform,
+        ) as dst:
+            dst.write(data, 1)
+
+        with pytest.raises(ValueError, match="CRS"):
+            load_dem(path)
+
+    def test_dsm_undefined_crs_raises(self, flat_dem_path, tmp_path):
+        """A DSM with no CRS defined must raise ValueError."""
+        import rasterio
+        from rasterio.transform import from_bounds
+
+        dsm_path = tmp_path / "dsm_no_crs.tif"
+        data = np.full((100, 100), 52.0, dtype=np.float64)
+        transform = from_bounds(500000, 6100000, 500100, 6100100, 100, 100)
+        with rasterio.open(
+            dsm_path,
+            "w",
+            driver="GTiff",
+            height=100,
+            width=100,
+            count=1,
+            dtype="float64",
+            transform=transform,
+        ) as dst:
+            dst.write(data, 1)
+
+        with pytest.raises(ValueError, match="CRS"):
+            load_dem(flat_dem_path, dsm_path=dsm_path)
+
+    def test_dsm_crs_mismatch_warns_and_reprojects(self, flat_dem_path, tmp_path):
+        """A DSM with a different CRS must be reprojected with a warning."""
+        import rasterio
+        from pyproj import Transformer
+        from rasterio.crs import CRS
+        from rasterio.transform import from_bounds
+
+        # Convert DEM bounds from EPSG:28354 to WGS84 for the DSM
+        t = Transformer.from_crs(28354, 4326, always_xy=True)
+        left, bottom = t.transform(500000.0, 6100000.0)
+        right, top = t.transform(500100.0, 6100100.0)
+
+        dsm_path = tmp_path / "dsm_wgs84.tif"
+        dsm_data = np.full((50, 50), 52.0, dtype=np.float64)
+        transform = from_bounds(left, bottom, right, top, 50, 50)
+        with rasterio.open(
+            dsm_path,
+            "w",
+            driver="GTiff",
+            height=50,
+            width=50,
+            count=1,
+            dtype="float64",
+            crs=CRS.from_epsg(4326),
+            transform=transform,
+        ) as dst:
+            dst.write(dsm_data, 1)
+
+        with pytest.warns(UserWarning, match="eprojecting"):
+            site = load_dem(flat_dem_path, dsm_path=dsm_path)
+
+        assert site.dsm is not None
+        assert site.dsm.shape == site.dem.shape
+
     def test_dem_nodata_replaced_with_nan(self, tmp_path):
         """DEM cells matching the nodata value must be converted to NaN."""
         import rasterio

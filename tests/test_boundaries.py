@@ -144,15 +144,28 @@ class TestLoadBoundary:
         result = load_boundary(boundary_file_no_crs, site_epsg=4326)
         assert isinstance(result, Polygon)
 
-    def test_crs_mismatch_raises(self, boundary_file: Path) -> None:
-        """A CRS mismatch between file and site must raise ValueError."""
-        with pytest.raises(ValueError, match="CRS"):
-            load_boundary(boundary_file, site_epsg=4326)
+    def test_crs_mismatch_reprojects_with_warning(self, boundary_file: Path) -> None:
+        """A CRS mismatch must reproject the boundary and emit a UserWarning."""
+        with pytest.warns(UserWarning, match="eprojecting"):
+            result = load_boundary(boundary_file, site_epsg=4326)
+        assert isinstance(result, Polygon)
+        assert result.area > 0
 
-    def test_no_crs_file_mismatched_site_epsg_raises(self, boundary_file_no_crs: Path) -> None:
-        """A no-CRS file (assumed WGS84) must raise when site_epsg != 4326."""
-        with pytest.raises(ValueError, match="CRS"):
-            load_boundary(boundary_file_no_crs, site_epsg=_SITE_EPSG)
+    def test_no_crs_file_mismatched_site_epsg_reprojects(self, boundary_file_no_crs: Path) -> None:
+        """A no-CRS file (assumed WGS84) must reproject when site_epsg != 4326."""
+        with pytest.warns(UserWarning, match="eprojecting"):
+            result = load_boundary(boundary_file_no_crs, site_epsg=_SITE_EPSG)
+        assert isinstance(result, Polygon)
+        assert result.area > 0
+
+    def test_unparseable_crs_member_raises(self, tmp_path: Path) -> None:
+        """A GeoJSON with a 'crs' member that cannot be parsed must raise ValueError."""
+        coords = _square_coords(500000.0, 6100000.0, 500.0)
+        data = _feature_collection([_geojson_feature(coords)])
+        data["crs"] = {"type": "name", "properties": {"name": "EPSG:not-a-real-crs"}}
+        path = _write_json(tmp_path / "bad_crs.geojson", data)
+        with pytest.raises(ValueError, match="[Cc][Rr][Ss]"):
+            load_boundary(path, site_epsg=_SITE_EPSG)
 
     def test_multi_feature_unioned(self, multi_feature_boundary_file: Path) -> None:
         """Multiple polygon features must be unioned into a single Polygon."""
@@ -231,10 +244,27 @@ class TestLoadZones:
         for z in zones:
             assert isinstance(z.geometry, Polygon)
 
-    def test_crs_mismatch_raises(self, zones_file: Path) -> None:
-        """A CRS mismatch between file and site must raise ValueError."""
-        with pytest.raises(ValueError, match="CRS"):
-            load_zones(zones_file, site_epsg=4326)
+    def test_crs_mismatch_reprojects_with_warning(self, zones_file: Path) -> None:
+        """A CRS mismatch must reproject zone geometries and emit a UserWarning."""
+        with pytest.warns(UserWarning, match="eprojecting"):
+            zones = load_zones(zones_file, site_epsg=4326)
+        assert len(zones) == 3
+        for z in zones:
+            assert isinstance(z.geometry, Polygon)
+
+    def test_unparseable_crs_member_raises(self, tmp_path: Path) -> None:
+        """A zones GeoJSON with an unparseable 'crs' member must raise ValueError."""
+        features = [
+            _geojson_feature(
+                _square_coords(500000.0, 6100000.0, 100.0),
+                {"name": "Zone A", "type": "perimeter"},
+            )
+        ]
+        data = _feature_collection(features)
+        data["crs"] = {"type": "name", "properties": {"name": "EPSG:not-a-real-crs"}}
+        path = _write_json(tmp_path / "bad_crs_zones.geojson", data)
+        with pytest.raises(ValueError, match="[Cc][Rr][Ss]"):
+            load_zones(path, site_epsg=_SITE_EPSG)
 
     def test_file_not_found_raises(self, tmp_path: Path) -> None:
         """A missing file must raise FileNotFoundError."""
