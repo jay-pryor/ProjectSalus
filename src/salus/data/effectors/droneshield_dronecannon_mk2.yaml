@@ -1,0 +1,18 @@
+# DroneShield DroneCannon Mk2 — Directional RF Jammer
+# Source: DroneShield product datasheet / Resources/Effectors/RF_Jammer/droneshield_dronecannon_mk2.md
+# Last updated: 2026-03-29
+# Note: max_range_m not published — estimated from XPELLER jammer family (1.5–10 km);
+#       2 km used as a conservative field-deployable estimate.
+
+name: DroneShield DroneCannon Mk2
+type: RF_Jammer
+
+max_range_m: 2000.0            # confidence: medium — not published; conservative estimate from jammer family
+min_range_m: 0.0               # confidence: medium — fixed-site jammer; no minimum published
+engagement_arc_deg: 90.0       # confidence: high — datasheet: 4 units required for 360° coverage per mast
+reaction_time_s: 0.5           # confidence: high — "instant RF disruption" stated on datasheet
+simultaneous_engagements: 20   # confidence: medium — sector jammer affects all in sector; 20 is saturation cap estimate
+reload_time_s: 0.0             # confidence: high — continuous jammer, no reload concept applies
+defeat_probability: 0.80       # confidence: medium — against commercial drones with known protocols
+requires_los: false            # confidence: medium — directional but not precision-aimed; non-LOS capable
+defeat_mechanism: "RF disruption of UAS navigation and C2 links — forces return-to-home, hover, or landing"

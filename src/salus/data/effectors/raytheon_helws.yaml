@@ -1,0 +1,19 @@
+# Raytheon HELWS — High Energy Laser Weapon System (Directed Energy)
+# Source: Raytheon product datasheet / Resources/Effectors/Directed_Energy/raytheon_helws.md
+# Last updated: 2026-03-29
+# Note: HELWS is a scalable power system (10–100 kW). All engagement parameters are
+#       weather-dependent — rain, fog, and dust degrade effective range and dwell time.
+#       Values below reflect clear-atmosphere conditions at conservative power level.
+
+name: Raytheon HELWS
+type: Directed_Energy
+
+max_range_m: 3000.0            # confidence: high — "up to 3 km" published on datasheet
+min_range_m: 50.0              # confidence: medium — laser safety standoff and focus distance; not published
+engagement_arc_deg: 360.0      # confidence: high — full azimuth coverage stated; vehicle-mounted
+reaction_time_s: 2.0           # confidence: medium — MTS target acquisition time; not published
+simultaneous_engagements: 1    # confidence: high — single-beam system; one target at a time
+reload_time_s: 2.0             # confidence: medium — re-slew and re-acquire time on new target; not published
+defeat_probability: 0.85       # confidence: medium — against small UAS in clear conditions; degrades in adverse weather
+requires_los: true             # confidence: high — directed energy requires unobstructed beam path to target
+defeat_mechanism: "High-energy laser burn-through — sustained thermal damage to UAS airframe, electronics, or propulsion"

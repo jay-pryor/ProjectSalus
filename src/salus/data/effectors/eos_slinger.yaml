@@ -1,0 +1,18 @@
+# EOS Slinger — 30x113mm Proximity-Fused Airburst Chain Gun (Kinetic)
+# Source: EOS Defence product datasheet / Resources/Effectors/Kinetic/eos_slinger.md
+# Last updated: 2026-03-29
+# Note: max_range_m is published lower bound ("demonstrated beyond 800 m"); actual max is higher
+#       but not published. 800 m used as the conservative confirmed value.
+
+name: EOS Slinger
+type: Kinetic
+
+max_range_m: 800.0             # confidence: high — "demonstrated beyond 800 m" published; actual max not stated
+min_range_m: 50.0              # confidence: medium — airburst requires safe arming distance; not published
+engagement_arc_deg: 360.0      # confidence: high — turret-based weapon station; full azimuth rotation
+reaction_time_s: 3.0           # confidence: medium — automated with Echodyne MESA radar cueing; not published
+simultaneous_engagements: 1    # confidence: high — single barrel, single target engagement
+reload_time_s: 0.3             # confidence: high — 200 rpm max = 1 round per 0.3 s; selectable fire rate
+defeat_probability: 0.70       # confidence: medium — against small UAS with proximity-fused HE; not published
+requires_los: true             # confidence: high — kinetic weapon always requires LOS
+defeat_mechanism: "Proximity-fused 30x113mm HE airburst fragmentation — programmable fuse detonation near target"

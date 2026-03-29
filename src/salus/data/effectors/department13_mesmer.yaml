@@ -1,0 +1,19 @@
+# Department 13 MESMER — Protocol Exploitation / Cyber Defeat System
+# Source: Department 13 product datasheet / Resources/Effectors/Cyber_Protocol/department13_mesmer.md
+# Last updated: 2026-03-29
+# Note: MESMER exploits weaknesses in UAS digital radio protocols — it is NOT an RF jammer.
+#       Specific protocols supported are OPSEC-withheld. Defeat probability reflects
+#       effectiveness against standard commercial protocols only.
+
+name: Department 13 MESMER
+type: Cyber
+
+max_range_m: 5000.0            # confidence: high — "up to approximately 5 km" published for v1.5
+min_range_m: 0.0               # confidence: high — electromagnetic propagation; no minimum range
+engagement_arc_deg: 360.0      # confidence: high — omnidirectional antenna design
+reaction_time_s: 5.0           # confidence: medium — protocol detection + handshake exploitation; not published
+simultaneous_engagements: 5    # confidence: medium — swarm defeat capability stated; cap of 5 is conservative estimate
+reload_time_s: 2.0             # confidence: medium — electronic re-targeting to new UAS; not published
+defeat_probability: 0.85       # confidence: medium — against commercial protocols; lower vs hardened/proprietary systems
+requires_los: false            # confidence: high — explicitly stated non-line-of-sight capable
+defeat_mechanism: "Protocol exploitation via command injection — coerce UAS to land, hover, return-to-home, or enable full control takeover"
