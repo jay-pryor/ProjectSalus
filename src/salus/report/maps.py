@@ -8,6 +8,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import ListedColormap
+from shapely.geometry import MultiPolygon, Polygon
 
 from salus.models.site import SiteModel
 
@@ -39,6 +40,7 @@ def render_coverage_map(
     output_path: str | Path,
     title: str = "Coverage Map",
     sensor_positions: list[tuple[float, float]] | None = None,
+    boundary: Polygon | MultiPolygon | None = None,
 ) -> Path:
     """Render a coverage map overlaid on terrain hillshade.
 
@@ -48,6 +50,7 @@ def render_coverage_map(
         output_path: Where to save the PNG.
         title: Map title.
         sensor_positions: Optional list of (x, y) positions to mark on the map.
+        boundary: Optional site boundary polygon to draw as an outline on the map.
 
     Returns:
         Path to the saved PNG.
@@ -57,56 +60,67 @@ def render_coverage_map(
     extent = (min_x, max_x, min_y, max_y)
 
     fig, ax = plt.subplots(1, 1, figsize=(12, 10))
-
-    # Hillshade background
-    hs = _hillshade(site.dem)
-    ax.imshow(hs, cmap="gray", extent=extent, origin="upper", alpha=0.7)
-
-    # Coverage overlay — green where covered, transparent where not
-    cov_display = np.ma.masked_where(~coverage, coverage.astype(float))
-    cov_cmap = ListedColormap(["#2ecc71"])
-    ax.imshow(cov_display, cmap=cov_cmap, extent=extent, origin="upper", alpha=0.5)
-
-    # Sensor positions
-    if sensor_positions:
-        for x, y in sensor_positions:
-            ax.plot(x, y, "r^", markersize=12, markeredgecolor="black", markeredgewidth=1)
-
-    ax.set_title(title, fontsize=14, fontweight="bold")
-    ax.set_xlabel("Easting (m)")
-    ax.set_ylabel("Northing (m)")
-
-    # Scale bar — optional dependency
     try:
-        from matplotlib_scalebar.scalebar import ScaleBar
+        # Hillshade background
+        hs = _hillshade(site.dem)
+        ax.imshow(hs, cmap="gray", extent=extent, origin="upper", alpha=0.7)
 
-        scalebar = ScaleBar(1, units="m", location="lower right")
-        ax.add_artist(scalebar)
-    except ImportError:
-        pass  # matplotlib-scalebar not installed; scale bar omitted
-    except Exception as exc:
-        warnings.warn(f"ScaleBar could not be added: {exc}", stacklevel=2)
+        # Coverage overlay — green where covered, transparent where not
+        cov_display = np.ma.masked_where(~coverage, coverage.astype(float))
+        cov_cmap = ListedColormap(["#2ecc71"])
+        ax.imshow(cov_display, cmap=cov_cmap, extent=extent, origin="upper", alpha=0.5)
 
-    # North arrow
-    ax.annotate(
-        "N",
-        xy=(0.97, 0.97),
-        xycoords="axes fraction",
-        fontsize=14,
-        fontweight="bold",
-        ha="center",
-        va="top",
-    )
-    ax.annotate(
-        "",
-        xy=(0.97, 0.97),
-        xytext=(0.97, 0.92),
-        xycoords="axes fraction",
-        arrowprops=dict(arrowstyle="->", lw=2),
-    )
+        # Boundary outline
+        if boundary is not None:
+            if isinstance(boundary, MultiPolygon):
+                geoms: list[Polygon] = list(boundary.geoms)
+            else:
+                geoms = [boundary]
+            for geom in geoms:
+                if geom.is_empty:
+                    continue
+                bx, by = geom.exterior.xy
+                ax.plot(bx, by, color="white", linewidth=2, zorder=5)
 
-    fig.tight_layout()
-    try:
+        # Sensor positions
+        if sensor_positions:
+            for x, y in sensor_positions:
+                ax.plot(x, y, "r^", markersize=12, markeredgecolor="black", markeredgewidth=1)
+
+        ax.set_title(title, fontsize=14, fontweight="bold")
+        ax.set_xlabel("Easting (m)")
+        ax.set_ylabel("Northing (m)")
+
+        # Scale bar — optional dependency
+        try:
+            from matplotlib_scalebar.scalebar import ScaleBar
+
+            scalebar = ScaleBar(1, units="m", location="lower right")
+            ax.add_artist(scalebar)
+        except ImportError:
+            pass  # matplotlib-scalebar not installed; scale bar omitted
+        except Exception as exc:
+            warnings.warn(f"ScaleBar could not be added: {exc}", stacklevel=2)
+
+        # North arrow
+        ax.annotate(
+            "N",
+            xy=(0.97, 0.97),
+            xycoords="axes fraction",
+            fontsize=14,
+            fontweight="bold",
+            ha="center",
+            va="top",
+        )
+        ax.annotate(
+            "",
+            xy=(0.97, 0.97),
+            xytext=(0.97, 0.92),
+            xycoords="axes fraction",
+            arrowprops=dict(arrowstyle="->", lw=2),
+        )
+
+        fig.tight_layout()
         fig.savefig(output_path, dpi=200, bbox_inches="tight")
     finally:
         plt.close(fig)

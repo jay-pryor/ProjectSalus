@@ -10,6 +10,8 @@ from PIL import Image
 
 matplotlib.use("Agg")  # Non-interactive backend — must be set before importing pyplot
 
+from shapely.geometry import Polygon
+
 from salus.ingest.terrain import load_dem
 from salus.report.maps import _hillshade, render_coverage_map
 
@@ -142,6 +144,20 @@ class TestRenderCoverageMap:
         out = tmp_path / "ridge_coverage.png"
 
         result = render_coverage_map(site, coverage, out)
+
+        assert result.exists()
+        img = Image.open(out)
+        assert img.format == "PNG"
+
+    def test_boundary_outline_renders(self, flat_dem_path, tmp_path):
+        """Providing a boundary polygon must not raise and must produce a valid file."""
+        site = load_dem(flat_dem_path)
+        coverage = np.ones(site.dem.shape, dtype=bool)
+        min_x, max_x, min_y, max_y = site.extent
+        boundary = Polygon([(min_x, min_y), (max_x, min_y), (max_x, max_y), (min_x, max_y)])
+        out = tmp_path / "boundary.png"
+
+        result = render_coverage_map(site, coverage, out, boundary=boundary)
 
         assert result.exists()
         img = Image.open(out)

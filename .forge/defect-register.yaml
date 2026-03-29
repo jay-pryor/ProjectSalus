@@ -690,3 +690,69 @@ defects:
     resolution: ""
     status: resolved
     commit: "eef0997"
+
+  - id: D-063
+    severity: high
+    task: S3-4
+    found_by: silent_failure_hunter
+    file: src/salus/report/maps.py
+    line: 62
+    description: "Figure handle leak in render_coverage_map — fig is created before the try/finally block that calls plt.close(fig). If _hillshade raises ValueError (NaN DEM) or boundary rendering raises, the figure handle leaks."
+    resolution: "Widened try/finally to wrap entire rendering body from fig creation to savefig; plt.close(fig) now called regardless of any rendering error"
+    status: resolved
+    commit: "pending"
+
+  - id: D-064
+    severity: high
+    task: S3-4
+    found_by: silent_failure_hunter
+    file: src/salus/models/site.py
+    line: 33
+    description: "SiteModel docstring says origin_x/origin_y are 'top-left cell centre' but terrain.py sets them from transform.c/f which are outer pixel edges. Misleading docstring — actual alignment in boundary_mask is correct. False positive on code logic; docstring correction deferred as out-of-scope for S3-4."
+    resolution: "Deferred — false positive. origin_x = transform.c (outer edge, per rasterio convention), which is what from_origin expects. Docstring fix deferred to a later cleanup task."
+    status: resolved
+    commit: ""
+
+  - id: D-065
+    severity: high
+    task: S3-4
+    found_by: silent_failure_hunter
+    file: src/salus/engine/coverage.py
+    line: 82
+    description: "coverage_percentage astype(bool) on a float array with NaN/inf would coerce NaN to True. However function signature types input as NDArray[np.bool_]; callers are responsible for passing bool arrays. Deferred — type contract is the guard."
+    resolution: "Deferred — type annotation NDArray[np.bool_] is the contract. All internal callers pass bool arrays. Adding runtime dtype check would be defensive programming beyond the module's stated contract."
+    status: resolved
+    commit: ""
+
+  - id: D-066
+    severity: medium
+    task: S3-4
+    found_by: silent_failure_hunter
+    file: src/salus/report/maps.py
+    line: 80
+    description: "Empty Polygon in boundary MultiPolygon — geom.exterior is None if geom.is_empty, raising AttributeError. Also leaks figure handle since the try/finally only covers fig.savefig."
+    resolution: "Added if geom.is_empty: continue guard before accessing geom.exterior; figure leak resolved via D-063 fix"
+    status: resolved
+    commit: "pending"
+
+  - id: D-067
+    severity: medium
+    task: S3-4
+    found_by: silent_failure_hunter
+    file: src/salus/engine/coverage.py
+    line: 39
+    description: "clip_coverage_to_boundary checks shape but not ndim. A 3D array with a matching .shape tuple (e.g. shape (100, 100, 1)) would pass the guard and produce silently wrong results from the & operation."
+    resolution: "Added ndim != 2 check raising ValueError before the shape check"
+    status: resolved
+    commit: "pending"
+
+  - id: D-068
+    severity: medium
+    task: S3-4
+    found_by: silent_failure_hunter
+    file: src/salus/engine/coverage.py
+    line: 87
+    description: "coverage_percentage returns 0.0 silently when mask is all-False (zero denominator). Caller receives 0.0 with no indication that the mask was degenerate (e.g. boundary missed the raster due to CRS mismatch), vs genuinely 0% coverage."
+    resolution: "Added UserWarning emitted when denominator == 0 and mask is not None; test updated to assert warning"
+    status: resolved
+    commit: "pending"

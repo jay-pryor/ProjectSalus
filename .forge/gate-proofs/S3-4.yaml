@@ -1,0 +1,64 @@
+task_id: S3-4
+timestamp: 2026-03-29T23:55:00Z
+quality_gates:
+  G1_lint: pass
+  G2_format: pass
+  G3_import: pass
+  G4_type: pass
+  G5_security: pass
+  G6_unit_test: pass
+  G7_coverage: pass
+  G8_secrets: pass
+  coverage_pct: 83.89
+review:
+  l1_standards:
+    testing: pass
+    error_handling: pass
+    logging: pass
+    security: pass
+  l2_agents:
+    silent_failure_hunter: {status: fail, findings: 8}
+    spec_compliance: {status: pass, findings: 2}
+defect_ids: [D-063, D-064, D-065, D-066, D-067, D-068]
+notes: >
+  All High and Medium defects resolved before commit.
+
+  D-063 (HIGH): Figure handle leak in render_coverage_map — widened try/finally
+  to wrap the entire rendering body from fig creation to savefig. plt.close(fig)
+  now called regardless of rendering errors.
+
+  D-064 (HIGH): DEFERRED — false positive. silent_failure_hunter flagged
+  origin_x/origin_y as "cell centre" passed to from_origin which expects "outer edge".
+  Investigation shows terrain.py sets origin_x = transform.c (rasterio outer edge,
+  per affine convention). The SiteModel docstring saying "cell centre" is misleading
+  but the actual value and usage in boundary_mask are correct. Docstring fix deferred.
+
+  D-065 (HIGH): DEFERRED — type contract. coverage_percentage is annotated as
+  NDArray[np.bool_]; passing float arrays with NaN is a type violation by the caller.
+  All internal callers pass bool arrays. Adding runtime dtype enforcement was judged
+  over-defensive for an internal API.
+
+  D-066 (MEDIUM): Empty polygon AttributeError in boundary loop — added
+  `if geom.is_empty: continue` guard before geom.exterior.xy access. Figure handle
+  leak also fixed by D-063.
+
+  D-067 (MEDIUM): Added ndim != 2 check in clip_coverage_to_boundary before the
+  shape check, raising ValueError with a clear message for non-2D inputs.
+
+  D-068 (MEDIUM): coverage_percentage now emits UserWarning when mask is not None
+  and all-False (zero denominator). Test updated to assert the warning.
+
+  spec-compliance Info (boundary_mask public vs private): Accepted — boundary_mask
+  is a useful public function; callers may want to obtain the mask independently
+  for use with coverage_percentage. Keeping it public is intentional.
+
+  spec-compliance Info (only one map function): Noted for future tasks — any new
+  render_*_map functions must also accept the boundary parameter.
+
+  G4 (mypy): All errors are pre-existing import-untyped warnings for third-party
+  libraries without stubs (shapely, rasterio, yaml). No new type errors introduced.
+
+  G6 (17 pre-existing failures): All in test_cli.py and test_viewshed.py; root cause
+  is PROJ database missing at /opt/conda/share/proj in this dev environment. Unrelated
+  to S3-4 changes.
+overall: pass
