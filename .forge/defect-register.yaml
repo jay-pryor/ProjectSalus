@@ -195,3 +195,69 @@ defects:
     resolution: "Added normalisation at compute_viewshed entry: max_range <= 0.0 converted to None so both paths treat it as unlimited; tests added for max_range=0.0 and max_range<0.0"
     status: resolved
     commit: ""
+
+  - id: D-018
+    severity: high
+    task: S2-1
+    found_by: silent_failure_hunter
+    file: src/salus/models/sensor.py
+    line: 52
+    description: "frequency_bands: list[str] = [] uses bare mutable default — Pydantic v2 copies it safely but the pattern is misleading and not idiomatic; Field(default_factory=list) is the correct form"
+    resolution: "Changed to Field(default_factory=list)"
+    status: resolved
+    commit: ""
+
+  - id: D-019
+    severity: medium
+    task: S2-1
+    found_by: silent_failure_hunter
+    file: src/salus/models/sensor.py
+    line: 34
+    description: "name (SensorDefinition line 34, EffectorDefinition line 121) and defeat_mechanism (line 151) accept empty or whitespace-only strings — produces blank labels in downstream reports without error"
+    resolution: "Added _name_non_empty validator to both models; added _defeat_mechanism_non_empty to EffectorDefinition; tests added"
+    status: resolved
+    commit: ""
+
+  - id: D-020
+    severity: medium
+    task: S2-1
+    found_by: silent_failure_hunter
+    file: src/salus/models/sensor.py
+    line: 136
+    description: "reaction_time_s accepts 0.0 — any downstream 1/reaction_time_s throughput calculation would produce ZeroDivisionError or inf silently; must be strictly positive"
+    resolution: "Changed validator bound from >= 0 to > 0; test added for reaction_time_s=0.0 rejection"
+    status: resolved
+    commit: ""
+
+  - id: D-021
+    severity: medium
+    task: S2-1
+    found_by: type_design_analyzer
+    file: src/salus/models/sensor.py
+    line: 108
+    description: "model_validator return type annotated as concrete class (SensorDefinition/EffectorDefinition) instead of Self — breaks subclass inference and creates forward-reference fragility"
+    resolution: "Imported Self from typing; changed return annotations to -> Self on both _min_less_than_max validators"
+    status: resolved
+    commit: ""
+
+  - id: D-022
+    severity: medium
+    task: S2-1
+    found_by: type_design_analyzer
+    file: src/salus/models/sensor.py
+    line: 10
+    description: "SensorType and EffectorType use (str, Enum) multiple inheritance — str(SensorType.RF) returns 'SensorType.RF' not 'RF'; StrEnum (Python 3.11+) is the correct pattern and serialises cleanly"
+    resolution: "Changed both enums to inherit from StrEnum (Python 3.11+); removed str, Enum multiple inheritance"
+    status: resolved
+    commit: ""
+
+  - id: D-023
+    severity: low
+    task: S2-1
+    found_by: silent_failure_hunter
+    file: src/salus/models/sensor.py
+    line: 102
+    description: "if v is not None guard in _cost_non_negative flagged as dead code — confirmed NOT dead: Pydantic v2 does call field validators with None for float | None fields when None is explicitly passed"
+    resolution: "Guard retained; D-023 finding was a false positive from the review agent — verified by failing test without guard"
+    status: resolved
+    commit: ""

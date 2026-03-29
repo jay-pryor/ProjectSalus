@@ -1,0 +1,32 @@
+task_id: S2-1
+timestamp: 2026-03-29T00:00:00Z
+gate_type: phase
+description: "Define SensorDefinition and EffectorDefinition Pydantic models in src/salus/models/sensor.py"
+quality_gates:
+  G1_lint: pass
+  G2_format: pass
+  G3_import: pass
+  G4_type: pass   # informational only — 3 import-untyped errors for rasterio/osgeo/matplotlib_scalebar stubs, unchanged from prior tasks
+  G5_security: pass
+  G6_unit_test: pass     # 93 tests passing
+  G7_coverage: pass      # 89.58%; sensor.py at 100%
+  G8_secrets: pass       # detect-secrets scan: 0 findings
+  coverage_pct: 90
+review:
+  l1_standards:
+    testing: pass
+    error_handling: pass
+    logging: N/A
+    security: N/A
+  l2_agents:
+    silent_failure_hunter: {status: findings-resolved, findings: 5}   # D-018 through D-020, D-023 (false positive retained)
+    spec_compliance: {status: pass, findings: 0}
+    type_design_analyzer: {status: findings-resolved, findings: 4}    # D-021, D-022; D-023 false positive; D-018 overlap
+defect_ids: [D-018, D-019, D-020, D-021, D-022, D-023]
+overall: pass
+notes: >
+  All 6 defects logged and resolved before commit. D-023 (dead None guard) was confirmed
+  a false positive — Pydantic v2 does call field validators with None for float | None
+  fields, so the guard is required and was retained. StrEnum migration (D-022) and Self
+  return type (D-021) are clean mypy-compatible improvements. spec_compliance confirmed
+  zero scope creep and all acceptance criteria satisfied.
