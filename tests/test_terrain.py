@@ -39,6 +39,13 @@ class TestSiteModel:
         assert len(site.zones) == 1
         assert site.zones[0].name == "Test"
 
+    def test_dsm_shape_mismatch_in_constructor(self):
+        """SiteModel must reject a DSM whose shape differs from the DEM."""
+        dem = np.zeros((10, 10))
+        dsm = np.zeros((20, 20))
+        with pytest.raises(ValueError, match="shape"):
+            SiteModel(dem=dem, dsm=dsm, resolution=1.0, origin_x=0.0, origin_y=0.0)
+
     def test_surface_array_prefers_dsm(self):
         dem = np.zeros((10, 10))
         dsm = np.ones((10, 10))

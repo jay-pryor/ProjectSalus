@@ -40,9 +40,31 @@ def compute_viewshed(
     if max_range is not None and max_range <= 0.0:
         max_range = None
 
+    # Validate observer position and elevation before dispatch
+    obs_row, obs_col = _xy_to_rc(site, observer_x, observer_y)
+    dem_rows, dem_cols = site.dem.shape
+    if not (0 <= obs_row < dem_rows and 0 <= obs_col < dem_cols):
+        raise ValueError(
+            f"Observer position ({observer_x}, {observer_y}) is outside the raster extent"
+        )
+    surface = site.surface_array()
+    dem_at_obs = float(site.dem[obs_row, obs_col])
+    surface_at_obs = float(surface[obs_row, obs_col])
+    if np.isnan(dem_at_obs):
+        raise ValueError(
+            f"DEM value at observer position ({observer_x}, {observer_y}) is nodata (NaN) — "
+            "cannot compute viewshed"
+        )
+    abs_observer_elev = dem_at_obs + observer_height
+    if abs_observer_elev < surface_at_obs:
+        raise ValueError(
+            f"Observer height ({observer_height}m above DEM) places sensor below the surface "
+            f"at observer position (DEM={dem_at_obs:.1f}m, surface={surface_at_obs:.1f}m)"
+        )
+
     try:
         return _viewshed_gdal(site, observer_x, observer_y, observer_height, max_range)
-    except ImportError:
+    except (ImportError, OSError):
         return _viewshed_numpy(site, observer_x, observer_y, observer_height, max_range)
 
 
@@ -137,6 +159,14 @@ def _viewshed_gdal(
     surface = site.surface_array()
     rows, cols = surface.shape
 
+    # Sensor height is given relative to DEM (ground level).
+    # GDAL observerHeight is relative to the raster surface (DSM when available).
+    # Convert: effective_h = (DEM + sensor_height) - surface_at_observer
+    obs_row, obs_col = _xy_to_rc(site, observer_x, observer_y)
+    effective_observer_height = (
+        site.dem[obs_row, obs_col] + observer_height - surface[obs_row, obs_col]
+    )
+
     # Create in-memory raster
     driver = gdal.GetDriverByName("MEM")
     ds = driver.Create("", cols, rows, 1, gdal.GDT_Float64)
@@ -156,7 +186,10 @@ def _viewshed_gdal(
         srs = osr.SpatialReference()
         srs.ImportFromEPSG(site.crs_epsg)
         ds.SetProjection(srs.ExportToWkt())
-    ds.GetRasterBand(1).WriteArray(surface)
+    err = ds.GetRasterBand(1).WriteArray(surface)
+    if err != 0:
+        ds = None
+        raise RuntimeError(f"GDAL WriteArray failed with error code {err}")
 
     max_dist = max_range if max_range is not None else 0.0  # 0.0 = unlimited in GDAL
 
@@ -167,7 +200,7 @@ def _viewshed_gdal(
         creationOptions=[],
         observerX=observer_x,
         observerY=observer_y,
-        observerHeight=observer_height,
+        observerHeight=effective_observer_height,
         targetHeight=0.0,
         visibleVal=1,
         invisibleVal=0,
@@ -208,8 +241,8 @@ def _viewshed_numpy(
     rows, cols = surface.shape
     obs_row, obs_col = _xy_to_rc(site, observer_x, observer_y)
 
-    # Observer absolute elevation
-    obs_elev = surface[obs_row, obs_col] + observer_height
+    # Observer absolute elevation — height above DEM (ground level), not above surface
+    obs_elev = site.dem[obs_row, obs_col] + observer_height
 
     visible = np.zeros((rows, cols), dtype=bool)
     visible[obs_row, obs_col] = True
@@ -242,6 +275,10 @@ def _viewshed_numpy(
                 break
 
             elev = surface[ri, ci]
+            if np.isnan(elev):
+                # Treat nodata cells as fully opaque — stop the ray
+                break
+
             slope = (elev - obs_elev) / dist
 
             if slope > max_slope:

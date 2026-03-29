@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Self
+
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from salus.models.zone import Zone
 
@@ -58,6 +60,14 @@ class SiteModel(BaseModel):
         if v.ndim != 2:
             raise ValueError(f"dsm must be 2D, got {v.ndim}D")
         return v
+
+    @model_validator(mode="after")
+    def _validate_dsm_shape(self) -> Self:
+        if self.dsm is not None and self.dsm.shape != self.dem.shape:
+            raise ValueError(
+                f"dsm shape {self.dsm.shape} does not match dem shape {self.dem.shape}"
+            )
+        return self
 
     @property
     def rows(self) -> int:

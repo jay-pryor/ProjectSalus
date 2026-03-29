@@ -1,0 +1,62 @@
+task_id: S3-2
+timestamp: 2026-03-29T23:00:00Z
+quality_gates:
+  G1_lint: pass
+  G2_format: pass
+  G3_import: pass
+  G4_type: pass
+  G5_security: pass
+  G6_unit_test: pass
+  G7_coverage: pass
+  G8_secrets: pass
+  coverage_pct: 86.82
+review:
+  l1_standards:
+    testing: pass
+    error_handling: pass
+    logging: pass
+    security: pass
+  l2_agents:
+    silent_failure_hunter: {status: fail, findings: 9}
+    spec_compliance: {status: pass, findings: 0}
+    type_design_analyzer: {status: fail, findings: 5}
+    regression_reviewer: {status: pass, findings: 2}
+defect_ids: [D-051, D-052, D-053, D-054, D-055, D-056]
+notes: >
+  All High and new Medium defects resolved before commit.
+
+  D-051: GDAL fallback dispatch now catches (ImportError, OSError) to handle broken shared
+  libraries that raise OSError at import time.
+
+  D-052: _viewshed_numpy now checks np.isnan(elev) before slope computation; nodata cells
+  treated as fully opaque (ray broken) to prevent silent wrong visibility through nodata zones.
+
+  D-053: compute_viewshed NaN guard now uses explicit np.isnan(dem_at_obs) check before the
+  < comparison, preventing NaN from bypassing the below-surface validation and reaching GDAL.
+
+  D-054: GDAL WriteArray return value now checked; RuntimeError raised with code on failure.
+
+  D-055 (MEDIUM, pre-existing): Inexact nodata float equality in terrain.py (float32→float64
+  widening). Deferred — pre-existing code from S1 not introduced by S3-2; no change in risk
+  from DSM feature. Will address in a terrain hardening task.
+
+  D-056 (MEDIUM, pre-existing): SiteModel.resolution not validated as > 0. Deferred —
+  pre-existing issue; clip_viewshed_to_sensor already guards it. Not introduced by S3-2.
+
+  type-design-analyzer Warning D-TDA-01 (-> "SiteModel" should be -> Self): Fixed — imported
+  Self from typing; model_validator now returns Self.
+
+  type-design-analyzer Warning D-TDA-02 (bare np.ndarray Any propagation): Deferred —
+  pre-existing throughout the codebase; fixing requires npt.NDArray[np.float64] refactor
+  across multiple files. No runtime correctness impact.
+
+  regression-reviewer Low (NaN DEM at observer bypassed guard): Resolved by D-053 fix.
+
+  regression-reviewer Low (_xy_to_rc called 3 times): Informational only; duplication is
+  harmless since bounds are validated before dispatch. CLAUDE.md: don't add abstractions
+  for one-time operations.
+
+  Spec compliance: pass (0 findings). Two info-level scope-creep notes for the observer
+  bounds and below-surface guards — these are defensive correctness fixes required by the
+  DSM height semantics change and are acceptable additions.
+overall: pass

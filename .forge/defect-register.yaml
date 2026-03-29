@@ -537,6 +537,72 @@ defects:
     status: resolved
     commit: "66cdc1b"
 
+  - id: D-051
+    severity: high
+    task: S3-2
+    found_by: silent_failure_hunter
+    file: src/salus/engine/viewshed.py
+    line: 59
+    description: "GDAL fallback dispatch catches only ImportError; a broken GDAL shared library raises OSError at import time, bypassing the NumPy fallback and crashing with no diagnostic"
+    resolution: "Changed except ImportError to except (ImportError, OSError)"
+    status: resolved
+    commit: ""
+
+  - id: D-052
+    severity: high
+    task: S3-2
+    found_by: silent_failure_hunter
+    file: src/salus/engine/viewshed.py
+    line: 269
+    description: "In _viewshed_numpy, nodata cells (NaN elevation from terrain.py) produce NaN slope; NaN > -inf is False so ray continues past nodata cell as though unoccluded — viewshed silently wrong over nodata areas"
+    resolution: "Added np.isnan(elev) check before slope computation; treats nodata cells as fully opaque (break the ray)"
+    status: resolved
+    commit: ""
+
+  - id: D-053
+    severity: high
+    task: S3-2
+    found_by: silent_failure_hunter
+    file: src/salus/engine/viewshed.py
+    line: 52
+    description: "compute_viewshed below-surface guard uses plain < comparison; NaN < NaN evaluates to False so observer at a nodata DEM cell bypasses the guard and passes NaN observerHeight to GDAL (undefined behaviour)"
+    resolution: "Added explicit np.isnan(dem_at_obs) check before the < comparison; raises ValueError with clear message"
+    status: resolved
+    commit: ""
+
+  - id: D-054
+    severity: medium
+    task: S3-2
+    found_by: silent_failure_hunter
+    file: src/salus/engine/viewshed.py
+    line: 183
+    description: "GDAL WriteArray return value unchecked; gdal.UseExceptions() does not make WriteArray raise on error — a non-zero return code is silently discarded, and ViewshedGenerate runs on uninitialised raster data"
+    resolution: "Captured return value; raises RuntimeError with error code when err != 0; releases ds reference before raise"
+    status: resolved
+    commit: ""
+
+  - id: D-055
+    severity: medium
+    task: S3-2
+    found_by: silent_failure_hunter
+    file: src/salus/ingest/terrain.py
+    line: 48
+    description: "Nodata substitution uses exact float equality (dem == src.nodata); float32->float64 widening can miss some nodata cells, leaving large-magnitude sentinels that corrupt slope computation in _viewshed_numpy. Same pattern at line 63 for DSM."
+    resolution: "Deferred — pre-existing code in terrain.py, not introduced by S3-2; no change in risk level from DSM feature. Will address in a dedicated terrain hardening task."
+    status: open
+    commit: ""
+
+  - id: D-056
+    severity: medium
+    task: S3-2
+    found_by: silent_failure_hunter
+    file: src/salus/models/site.py
+    line: 29
+    description: "SiteModel resolution field not validated as > 0; zero resolution causes ZeroDivisionError deep in _xy_to_rc with no diagnostic message"
+    resolution: "Deferred — pre-existing issue not introduced by S3-2; clip_viewshed_to_sensor already has the guard. Will add to SiteModel in a dedicated hardening task."
+    status: open
+    commit: ""
+
   - id: D-049
     severity: medium
     task: S3-1

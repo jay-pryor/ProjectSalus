@@ -1,6 +1,12 @@
 """Tests for viewshed computation."""
 
+from pathlib import Path
+
 import numpy as np
+import pytest
+import rasterio
+from rasterio.crs import CRS
+from rasterio.transform import from_bounds
 
 from salus.engine.viewshed import compute_viewshed
 from salus.ingest.terrain import load_dem
@@ -81,3 +87,85 @@ class TestViewshed:
         vis_neg = compute_viewshed(site, cx, cy, observer_height=10.0, max_range=-50.0)
 
         np.testing.assert_array_equal(vis_none, vis_neg)
+
+    def test_observer_outside_raster_raises(self, flat_dem_path):
+        """Observer position outside the raster extent must raise ValueError."""
+        site = load_dem(flat_dem_path)
+        with pytest.raises(ValueError, match="outside"):
+            compute_viewshed(site, 0.0, 0.0, observer_height=2.0)
+
+
+class TestDSMViewshed:
+    """Tests for dual-surface (DSM) viewshed behaviour."""
+
+    def _write_tif(self, path: Path, data: np.ndarray) -> None:
+        transform = from_bounds(500000, 6100000, 500100, 6100100, 100, 100)
+        with rasterio.open(
+            path,
+            "w",
+            driver="GTiff",
+            height=100,
+            width=100,
+            count=1,
+            dtype="float64",
+            crs=CRS.from_epsg(28354),
+            transform=transform,
+        ) as dst:
+            dst.write(data, 1)
+
+    def test_dsm_wall_blocks_los(self, tmp_path: Path) -> None:
+        """A DSM wall must block LOS to targets directly behind it."""
+        dem = np.full((100, 100), 50.0)
+        dsm = dem.copy()
+        # Wall at column 50 spanning all rows — 30m above ground (80m absolute)
+        dsm[:, 50] = 80.0
+
+        dem_path = tmp_path / "dem.tif"
+        dsm_path = tmp_path / "dsm.tif"
+        self._write_tif(dem_path, dem)
+        self._write_tif(dsm_path, dsm)
+
+        site = load_dem(dem_path, dsm_path=dsm_path)
+        obs_x = site.origin_x + 10 * site.resolution  # col 10
+        obs_y = site.origin_y - 50 * site.resolution  # row 50
+
+        vis = compute_viewshed(site, obs_x, obs_y, observer_height=2.0)
+
+        # Cell directly behind the wall along the same row must not be visible
+        assert not vis[50, 60], "Target behind DSM wall should not be visible"
+        # Cell in front of the wall along the same row must be visible
+        assert vis[50, 30], "Target in front of DSM wall should be visible"
+
+    def test_no_dsm_flat_terrain_visible(self, tmp_path: Path) -> None:
+        """Without DSM, flat terrain must be visible on both sides of the same column."""
+        dem = np.full((100, 100), 50.0)
+        dem_path = tmp_path / "dem.tif"
+        self._write_tif(dem_path, dem)
+
+        site = load_dem(dem_path)  # No DSM — wall is not present
+        obs_x = site.origin_x + 10 * site.resolution
+        obs_y = site.origin_y - 50 * site.resolution
+
+        vis = compute_viewshed(site, obs_x, obs_y, observer_height=2.0)
+
+        # Without a DSM wall, the far side should be visible on flat terrain
+        assert vis[50, 60], "Target should be visible on flat DEM without DSM"
+
+    def test_observer_below_dsm_surface_raises(self, tmp_path: Path) -> None:
+        """Observer placed below the DSM surface at its position must raise ValueError."""
+        dem = np.full((100, 100), 50.0)
+        dsm = dem.copy()
+        dsm[50, 10] = 100.0  # 50m building at observer's cell
+
+        dem_path = tmp_path / "dem.tif"
+        dsm_path = tmp_path / "dsm.tif"
+        self._write_tif(dem_path, dem)
+        self._write_tif(dsm_path, dsm)
+
+        site = load_dem(dem_path, dsm_path=dsm_path)
+        obs_x = site.origin_x + 10 * site.resolution  # col 10
+        obs_y = site.origin_y - 50 * site.resolution  # row 50
+
+        # 2m above DEM = 52m absolute; DSM = 100m → sensor is inside the building
+        with pytest.raises(ValueError, match="below"):
+            compute_viewshed(site, obs_x, obs_y, observer_height=2.0)
