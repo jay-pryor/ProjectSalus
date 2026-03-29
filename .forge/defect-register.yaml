@@ -140,3 +140,14 @@ defects:
     resolution: "Added coverage.size == 0 guard with error message and sys.exit(1)"
     status: resolved
     commit: ""
+
+  - id: D-013
+    severity: high
+    task: S1-4
+    found_by: integration_test
+    file: src/salus/engine/viewshed.py
+    line: 80
+    description: "GDAL maxDistance sentinel is -1.0 when max_range is None — GDAL interprets negative distance as zero-range, returning all cells invisible (0.0% visible). Correct sentinel is 0.0 (unlimited)."
+    resolution: "Changed sentinel from -1.0 to 0.0; added 'is not None' check to avoid falsy trap on max_range=0.0"
+    status: resolved
+    commit: ""
