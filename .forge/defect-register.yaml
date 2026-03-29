@@ -261,3 +261,58 @@ defects:
     resolution: "Guard retained; D-023 finding was a false positive from the review agent — verified by failing test without guard"
     status: resolved
     commit: ""
+
+  - id: D-024
+    severity: high
+    task: S2-2
+    found_by: silent_failure_hunter
+    file: src/salus/ingest/sensors.py
+    line: 29
+    description: "path.open() in _load_yaml_records only catches yaml.YAMLError — OSError/PermissionError escape without path context and violate documented ValueError-only contract"
+    resolution: "Added except OSError block that re-raises with path context; OSError documented in docstring"
+    status: resolved
+    commit: ""
+
+  - id: D-025
+    severity: high
+    task: S2-2
+    found_by: silent_failure_hunter
+    file: src/salus/ingest/sensors.py
+    line: 38
+    description: "Return type list[dict] is inaccurate when YAML top-level is a list — raw list returned without element validation, making isinstance guard in caller appear redundant and removable"
+    resolution: "Element validation moved into _load_yaml_records; return type changed to list[dict[str, Any]]; isinstance guard removed from caller; test added"
+    status: resolved
+    commit: ""
+
+  - id: D-026
+    severity: medium
+    task: S2-2
+    found_by: silent_failure_hunter
+    file: src/salus/ingest/sensors.py
+    line: 71
+    description: "directory.iterdir() can raise PermissionError — not caught, propagates with no path context and is not in documented exception contract"
+    resolution: "Wrapped iterdir() in try/except PermissionError; re-raised with directory path and label in message; documented in docstring"
+    status: resolved
+    commit: ""
+
+  - id: D-027
+    severity: medium
+    task: S2-2
+    found_by: silent_failure_hunter
+    file: src/salus/ingest/sensors.py
+    line: 73
+    description: "Empty directory returns [] after warnings.warn — docstrings of load_sensors/load_effectors do not document that empty list is a possible return; silent empty-list downstream causes zero-coverage simulation"
+    resolution: "Added explicit empty-list warning to Returns section of load_sensors and load_effectors docstrings"
+    status: resolved
+    commit: ""
+
+  - id: D-028
+    severity: low
+    task: S2-2
+    found_by: silent_failure_hunter
+    file: src/salus/ingest/sensors.py
+    line: 19
+    description: "Return type annotation list[dict] on _load_yaml_records misleads static analysis — the list from yaml.safe_load may contain non-dict elements before element validation runs"
+    resolution: "Return type changed to list[dict[str, Any]]; element validation now inside _load_yaml_records so annotation is accurate"
+    status: resolved
+    commit: ""
