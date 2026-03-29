@@ -1,0 +1,31 @@
+task_id: S1-4
+timestamp: 2026-03-29T00:00:00Z
+gate_type: phase
+description: "Wire up CLI salus viewshed command"
+quality_gates:
+  G1_lint: pass
+  G2_format: pass
+  G3_import: pass
+  G4_type: pass
+  G5_security: pass
+  G6_unit_test: pass     # 34 tests passing
+  G7_coverage: pass      # 80.0% — at threshold
+  G8_secrets: N/A
+  coverage_pct: 80
+review:
+  l1_standards:
+    testing: pass
+    error_handling: pass
+    logging: N/A
+    security: pass
+  l2_agents:
+    silent_failure_hunter: {status: fail, findings: 7}   # 3 high, 3 medium, 1 low — all high+medium resolved
+    spec_compliance: N/A   # spec_compliance not invoked — CLI is new code, no regression risk
+defect_ids: [D-009, D-010, D-011, D-012]
+overall: pass
+notes: >
+  Silent failure hunter found unhandled exceptions around compute_viewshed and
+  render_coverage_map calls (raw tracebacks on failure), load_dem catching only
+  FileNotFoundError, and unguarded coverage.size division. All 4 high+medium
+  findings resolved. CLI now gives clean error messages and exits with code 1
+  on all failure paths.

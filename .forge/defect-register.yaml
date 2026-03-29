@@ -96,3 +96,47 @@ defects:
     resolution: "Added Image.open and format/size assertions to the test"
     status: resolved
     commit: ""
+
+  - id: D-009
+    severity: high
+    task: S1-4
+    found_by: silent_failure_hunter
+    file: src/salus/cli.py
+    line: 63
+    description: "compute_viewshed() called with no exception handling — any internal error produces a raw traceback; process exit code is unreliable"
+    resolution: "Wrapped in try/except Exception; emits click.echo error and sys.exit(1)"
+    status: resolved
+    commit: ""
+
+  - id: D-010
+    severity: high
+    task: S1-4
+    found_by: silent_failure_hunter
+    file: src/salus/cli.py
+    line: 68
+    description: "render_coverage_map() called with no exception handling — disk full / permission errors produce raw traceback; partial output file not cleaned up"
+    resolution: "Wrapped in try/except Exception; partial output file deleted on failure; sys.exit(1)"
+    status: resolved
+    commit: ""
+
+  - id: D-011
+    severity: medium
+    task: S1-4
+    found_by: silent_failure_hunter
+    file: src/salus/cli.py
+    line: 50
+    description: "load_dem() only catches FileNotFoundError — PermissionError, RasterioIOError, and corrupt file errors produce raw tracebacks"
+    resolution: "Added broad except Exception clause after FileNotFoundError with clean error message"
+    status: resolved
+    commit: ""
+
+  - id: D-012
+    severity: medium
+    task: S1-4
+    found_by: silent_failure_hunter
+    file: src/salus/cli.py
+    line: 66
+    description: "coverage.size == 0 not guarded — degenerate DEM would produce ZeroDivisionError or NaN printed silently as 'nan% visible'"
+    resolution: "Added coverage.size == 0 guard with error message and sys.exit(1)"
+    status: resolved
+    commit: ""
