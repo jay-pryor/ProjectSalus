@@ -1,0 +1,98 @@
+# Salus Defect Register
+# Auto-maintained — do not edit manually during active task execution
+# Format: see CLAUDE.md → Defect Register
+#
+# Severity: critical | high | medium | low
+# Status:   open | resolved
+#
+# Log findings here BEFORE fixing them.
+# Update status + commit after fixing.
+
+defects:
+  - id: D-001
+    severity: medium
+    task: baseline
+    found_by: G4_mypy
+    file: src/salus/report/maps.py
+    line: 49
+    description: "extent passed as list[float] to imshow; expects tuple[float, float, float, float] | None"
+    resolution: "Changed list literal to tuple literal"
+    status: resolved
+    commit: ""  # Will be set on next commit
+
+  - id: D-002
+    severity: medium
+    task: baseline
+    found_by: G7_coverage
+    file: src/salus/report/maps.py
+    line: null
+    description: "maps.py has no tests — total coverage at 61%, below 80% threshold"
+    resolution: "Added tests/test_maps.py with 12 tests; coverage now 81.4%"
+    status: resolved
+    commit: ""
+
+  - id: D-003
+    severity: high
+    task: S1-3
+    found_by: silent_failure_hunter
+    file: src/salus/report/maps.py
+    line: 72
+    description: "ScaleBar try/except block uses 'except Exception: pass' — import is at module level so ImportError is already handled; block silently swallows real runtime errors (bad axes state, matplotlib version mismatch) with no diagnostic"
+    resolution: "Moved ScaleBar import inside the try block (catches ImportError); separated into ImportError (silent skip) and Exception (warnings.warn) branches"
+    status: resolved
+    commit: ""
+
+  - id: D-004
+    severity: high
+    task: S1-3
+    found_by: silent_failure_hunter
+    file: src/salus/report/maps.py
+    line: 97
+    description: "plt.close(fig) is not in a try/finally block — if fig.savefig() raises (missing parent dir, disk full, permission denied), the figure handle is leaked"
+    resolution: "Wrapped fig.savefig in try/finally to guarantee plt.close(fig) is always called"
+    status: resolved
+    commit: ""
+
+  - id: D-005
+    severity: high
+    task: S1-3
+    found_by: silent_failure_hunter
+    file: src/salus/report/maps.py
+    line: 15
+    description: "np.gradient propagates NaN when DEM contains nodata cells; NaN flows through arctan/clip into imshow silently, rendering as transparent without any warning to the caller"
+    resolution: "Added NaN guard at top of _hillshade raising ValueError with clear message"
+    status: resolved
+    commit: ""
+
+  - id: D-006
+    severity: medium
+    task: S1-3
+    found_by: silent_failure_hunter
+    file: src/salus/ingest/terrain.py
+    line: 37
+    description: "EPSG parsing failure caught by 'except Exception: pass' sets crs_epsg to None silently — downstream code depending on CRS operates without one with no diagnostic"
+    resolution: "Added warnings.warn with CRS and exception detail so callers know CRS is unavailable"
+    status: resolved
+    commit: ""
+
+  - id: D-007
+    severity: medium
+    task: S1-3
+    found_by: silent_failure_hunter
+    file: tests/test_maps.py
+    line: 130
+    description: "isinstance check uses 'type(pytest.importorskip(\"pathlib\").Path())' — semantically misleading, importorskip is a skip-test mechanism not a type accessor; pathlib is stdlib and always available"
+    resolution: "Replaced with 'from pathlib import Path' import and direct isinstance(result, Path) check"
+    status: resolved
+    commit: ""
+
+  - id: D-008
+    severity: medium
+    task: S1-3
+    found_by: silent_failure_hunter
+    file: tests/test_maps.py
+    line: 65
+    description: "test_no_coverage_still_renders only asserts result.exists() — does not verify the output is a valid non-corrupt PNG"
+    resolution: "Added Image.open and format/size assertions to the test"
+    status: resolved
+    commit: ""
