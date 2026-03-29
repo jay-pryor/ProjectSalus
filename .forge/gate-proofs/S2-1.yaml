@@ -14,10 +14,10 @@ quality_gates:
   coverage_pct: 90
 review:
   l1_standards:
-    testing: pass
-    error_handling: pass
-    logging: N/A
-    security: N/A
+    testing: pass        # All MUST rules satisfied; minor SHOULD gap (loop vs parametrize) below defect threshold
+    error_handling: pass # All validators raise ValueError with offending value; no silent paths
+    logging: N/A         # Pure data model — no state changes or long-running operations
+    security: N/A        # No file I/O, path handling, external data, or user input
   l2_agents:
     silent_failure_hunter: {status: findings-resolved, findings: 5}   # D-018 through D-020, D-023 (false positive retained)
     spec_compliance: {status: pass, findings: 0}
