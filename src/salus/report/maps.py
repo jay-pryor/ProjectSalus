@@ -5,12 +5,22 @@ from __future__ import annotations
 import warnings
 from pathlib import Path
 
+import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import ListedColormap
 from shapely.geometry import MultiPolygon, Polygon
 
 from salus.models.site import SiteModel
+from salus.models.zone import Zone, ZoneType
+
+# Rendering style per ZoneType: (edge_colour, fill_colour, hatch, label)
+_ZONE_STYLE: dict[ZoneType, tuple[str, str, str, str]] = {
+    ZoneType.perimeter: ("#1a73e8", "#1a73e8", "", "Perimeter"),
+    ZoneType.inner: ("#f9a825", "#f9a825", "", "Inner"),
+    ZoneType.critical_asset: ("#e53935", "#e53935", "", "Critical Asset"),
+    ZoneType.exclusion: ("#6d4c41", "#6d4c41", "////", "Exclusion"),
+}
 
 
 def _hillshade(dem: np.ndarray, azimuth: float = 315, altitude: float = 45) -> np.ndarray:
@@ -41,6 +51,7 @@ def render_coverage_map(
     title: str = "Coverage Map",
     sensor_positions: list[tuple[float, float]] | None = None,
     boundary: Polygon | MultiPolygon | None = None,
+    zones: list[Zone] | None = None,
 ) -> Path:
     """Render a coverage map overlaid on terrain hillshade.
 
@@ -51,6 +62,10 @@ def render_coverage_map(
         title: Map title.
         sensor_positions: Optional list of (x, y) positions to mark on the map.
         boundary: Optional site boundary polygon to draw as an outline on the map.
+        zones: Optional list of :class:`~salus.models.zone.Zone` objects to draw
+            with distinct colours and labels. Critical asset zones are drawn in red,
+            perimeter in blue, inner in amber, and exclusion zones with hatching.
+            A legend entry is added for each zone type present.
 
     Returns:
         Path to the saved PNG.
@@ -81,6 +96,87 @@ def render_coverage_map(
                     continue
                 bx, by = geom.exterior.xy
                 ax.plot(bx, by, color="white", linewidth=2, zorder=5)
+
+        # Zone overlays
+        legend_handles: list[mpatches.Patch] = []
+        seen_zone_types: set[ZoneType] = set()
+        if zones:
+            for zone in zones:
+                style = _ZONE_STYLE.get(zone.zone_type)
+                if style is None:
+                    warnings.warn(
+                        f"No render style defined for zone type '{zone.zone_type}' "
+                        f"(zone '{zone.name}') — skipping.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+                    continue
+                edge_colour, fill_colour, hatch, label = style
+                if isinstance(zone.geometry, MultiPolygon):
+                    geom_list: list[Polygon] = list(zone.geometry.geoms)
+                elif isinstance(zone.geometry, Polygon):
+                    geom_list = [zone.geometry]
+                else:
+                    warnings.warn(
+                        f"Zone '{zone.name}' has unsupported geometry type "
+                        f"{type(zone.geometry).__name__} — skipping.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+                    continue
+                for geom in geom_list:
+                    if geom.is_empty:
+                        continue
+                    if geom.exterior is None:
+                        continue
+                    zx, zy = geom.exterior.xy
+                    ax.fill(
+                        zx,
+                        zy,
+                        facecolor=fill_colour,
+                        edgecolor=edge_colour,
+                        alpha=0.25,
+                        hatch=hatch,
+                        zorder=4,
+                    )
+                    ax.plot(zx, zy, color=edge_colour, linewidth=1.5, zorder=4)
+                # Label at centroid of first non-empty geometry
+                first_geom = next((g for g in geom_list if not g.is_empty), None)
+                if first_geom is not None:
+                    cx, cy = first_geom.centroid.x, first_geom.centroid.y
+                    if not (np.isnan(cx) or np.isnan(cy)):
+                        ax.text(
+                            cx,
+                            cy,
+                            zone.name,
+                            fontsize=7,
+                            ha="center",
+                            va="center",
+                            color=edge_colour,
+                            fontweight="bold",
+                            zorder=6,
+                        )
+                if zone.zone_type not in seen_zone_types:
+                    seen_zone_types.add(zone.zone_type)
+                    legend_handles.append(
+                        mpatches.Patch(
+                            facecolor=fill_colour,
+                            edgecolor=edge_colour,
+                            hatch=hatch,
+                            alpha=0.5,
+                            label=label,
+                        )
+                    )
+            if legend_handles:
+                try:
+                    ax.legend(
+                        handles=legend_handles,
+                        loc="lower left",
+                        fontsize=8,
+                        framealpha=0.8,
+                    )
+                except Exception as exc:
+                    warnings.warn(f"Zone legend could not be added: {exc}", stacklevel=2)
 
         # Sensor positions
         if sensor_positions:

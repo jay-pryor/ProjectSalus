@@ -756,3 +756,69 @@ defects:
     resolution: "Added UserWarning emitted when denominator == 0 and mask is not None; test updated to assert warning"
     status: resolved
     commit: "pending"
+
+  - id: D-069
+    severity: high
+    task: S3-5
+    found_by: silent_failure_hunter
+    file: src/salus/report/maps.py
+    line: 105
+    description: "Unguarded dict key lookup — _ZONE_STYLE[zone.zone_type] raises KeyError if zone_type not in dict. Any new ZoneType member added before _ZONE_STYLE is updated causes a silent crash mid-render."
+    resolution: "Added _ZONE_STYLE.get() with UserWarning+continue fallback for unknown zone types"
+    status: resolved
+    commit: "pending"
+
+  - id: D-070
+    severity: high
+    task: S3-5
+    found_by: silent_failure_hunter
+    file: src/salus/report/maps.py
+    line: 115
+    description: "geom.exterior accessed without None guard. Degenerate Shapely Polygon with is_empty=False can still have exterior=None, raising AttributeError and silently aborting remaining zone rendering."
+    resolution: "Added if geom.exterior is None: continue guard before .xy access"
+    status: resolved
+    commit: "pending"
+
+  - id: D-071
+    severity: high
+    task: S3-5
+    found_by: silent_failure_hunter
+    file: src/salus/report/maps.py
+    line: 121
+    description: "NaN centroid coordinates passed to ax.text() without guard. Degenerate geometries return NaN centroid; matplotlib accepts silently, producing a map with missing zone labels and no error."
+    resolution: "Added np.isnan(cx) or np.isnan(cy) guard; label silently skipped for degenerate centroids"
+    status: resolved
+    commit: "pending"
+
+  - id: D-072
+    severity: medium
+    task: S3-5
+    found_by: silent_failure_hunter
+    file: src/salus/report/maps.py
+    line: 107
+    description: "else-branch in geom_list construction assumes Polygon but Pydantic does not strictly validate Shapely types. An unexpected geometry type (e.g. GeometryCollection) passes through to .exterior.xy causing AttributeError."
+    resolution: "Replaced else with elif isinstance(zone.geometry, Polygon); added else branch with UserWarning+continue for unsupported geometry types"
+    status: resolved
+    commit: "pending"
+
+  - id: D-073
+    severity: medium
+    task: S3-5
+    found_by: silent_failure_hunter
+    file: src/salus/report/maps.py
+    line: 144
+    description: "ax.legend() call is unprotected. A legend rendering failure would abort fig.savefig(), losing the entire map. Wrapping defensively would allow a map to be saved without a legend rather than not at all."
+    resolution: "Wrapped ax.legend() in try/except; emits UserWarning on failure; map saved without legend"
+    status: resolved
+    commit: "pending"
+
+  - id: D-074
+    severity: medium
+    task: S3-5
+    found_by: spec_compliance
+    file: src/salus/report/maps.py
+    line: 116
+    description: "ax.fill() uses color= keyword which sets both facecolor and edgecolor together. This can suppress hatch visibility in some Matplotlib versions. Spec requires 'exclusion zones hatched' — must use facecolor=/edgecolor= separately."
+    resolution: "Changed ax.fill() to use facecolor= and edgecolor= as separate kwargs, ensuring hatch is always visible"
+    status: resolved
+    commit: "pending"
