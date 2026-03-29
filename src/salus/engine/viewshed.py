@@ -7,8 +7,14 @@ ray-marching implementation for environments without GDAL.
 from __future__ import annotations
 
 import numpy as np
+import numpy.typing as npt
 
+from salus.models.scenario import SensorPlacement
+from salus.models.sensor import SensorDefinition
 from salus.models.site import SiteModel
+
+# Azimuth coverage at or above this value means no wedge masking is needed.
+_FULL_ARC_DEG: float = 360.0
 
 
 def compute_viewshed(
@@ -38,6 +44,75 @@ def compute_viewshed(
         return _viewshed_gdal(site, observer_x, observer_y, observer_height, max_range)
     except ImportError:
         return _viewshed_numpy(site, observer_x, observer_y, observer_height, max_range)
+
+
+def clip_viewshed_to_sensor(
+    viewshed_array: npt.NDArray[np.bool_],
+    site: SiteModel,
+    sensor: SensorDefinition,
+    placement: SensorPlacement,
+) -> npt.NDArray[np.bool_]:
+    """Clip a raw viewshed to the sensor's range and azimuth arc constraints.
+
+    Applies two masks to the input viewshed:
+    - **Range mask**: retains cells whose distance from the sensor is within
+      [sensor.min_range_m, sensor.max_range_m].
+    - **Azimuth mask**: retains cells that fall within the sensor's horizontal
+      field of regard (azimuth_coverage_deg) centred on placement.bearing_deg.
+      Skipped when azimuth_coverage_deg >= 360°.
+
+    Note on the sensor's own position cell (dist == 0): np.arctan2(0, 0) returns
+    0.0, so the cell at the exact sensor position is assigned bearing north (0°).
+    Whether it is included depends on the azimuth arc and boresight. Use
+    min_range_m > 0 to explicitly exclude the sensor's dead zone.
+
+    Args:
+        viewshed_array: Boolean 2D array from compute_viewshed. Not modified.
+        site: Site terrain model (provides origin and resolution for cell coords).
+        sensor: Sensor capability definition (range limits, azimuth arc width).
+        placement: Sensor deployment position and boresight compass bearing.
+
+    Returns:
+        Boolean 2D array with cells outside sensor coverage set to False.
+
+    Raises:
+        ValueError: If viewshed_array is not 2D, or site.resolution is <= 0.
+    """
+    if viewshed_array.ndim != 2:
+        raise ValueError(f"viewshed_array must be 2D, got {viewshed_array.ndim}D")
+    if site.resolution <= 0.0:
+        raise ValueError(f"site.resolution must be > 0, got {site.resolution}")
+
+    # Normalise dtype — guards against callers passing integer or float arrays.
+    viewshed_bool: npt.NDArray[np.bool_] = viewshed_array.astype(bool)
+
+    rows, cols = viewshed_bool.shape
+
+    # Build per-cell coordinate grids aligned with site CRS (metres).
+    col_coords = site.origin_x + np.arange(cols, dtype=float) * site.resolution
+    row_coords = site.origin_y - np.arange(rows, dtype=float) * site.resolution
+    cell_x, cell_y = np.meshgrid(col_coords, row_coords)
+
+    dx = cell_x - placement.position_x
+    dy = cell_y - placement.position_y
+
+    # --- Range mask ---
+    dist = np.sqrt(dx**2 + dy**2)
+    range_mask: npt.NDArray[np.bool_] = (dist >= sensor.min_range_m) & (dist <= sensor.max_range_m)
+
+    # --- Azimuth mask ---
+    if sensor.azimuth_coverage_deg >= _FULL_ARC_DEG:
+        azimuth_mask: npt.NDArray[np.bool_] = np.ones((rows, cols), dtype=bool)
+    else:
+        # Compass bearing from placement to each cell: 0=north, 90=east, clockwise.
+        bearing_to_cell = np.degrees(np.arctan2(dx, dy)) % _FULL_ARC_DEG
+        half_arc = sensor.azimuth_coverage_deg / 2.0
+        boresight = placement.bearing_deg % _FULL_ARC_DEG
+        # Signed angular difference, wrapped to [-180, +180].
+        diff = (bearing_to_cell - boresight + 180.0) % _FULL_ARC_DEG - 180.0
+        azimuth_mask = np.abs(diff) <= half_arc
+
+    return viewshed_bool & range_mask & azimuth_mask
 
 
 def _xy_to_rc(site: SiteModel, x: float, y: float) -> tuple[int, int]:

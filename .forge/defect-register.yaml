@@ -338,3 +338,80 @@ defects:
     resolution: "Added inline comment explaining the deliberate reliance on Pydantic's runtime ValidationError"
     status: resolved
     commit: ""
+
+  - id: D-031
+    severity: medium
+    task: S2-5
+    found_by: l1_testing_standard
+    file: tests/test_viewshed_clipping.py
+    line: multiple
+    description: "Scalar NumPy bool array checks use bare assert clipped[r,c] / assert not clipped[r,c] — testing.md Rule 10 requires is np.True_ / is np.False_ for scalar element checks"
+    resolution: "Changed all scalar bool assertions to use is np.True_ / is np.False_ pattern throughout test_viewshed_clipping.py"
+    status: resolved
+    commit: ""
+
+  - id: D-032
+    severity: medium
+    task: S2-5
+    found_by: l1_testing_standard
+    file: tests/
+    line: N/A
+    description: "No test file for src/salus/models/scenario.py — testing.md Rule 7 requires tests/test_scenario_models.py for every new source module"
+    resolution: "Created tests/test_scenario_models.py with 13 tests covering SensorPlacement validation"
+    status: resolved
+    commit: ""
+
+  - id: D-033
+    severity: high
+    task: S2-5
+    found_by: silent_failure_hunter
+    file: src/salus/engine/viewshed.py
+    line: 98
+    description: "viewshed_array dtype is unchecked — passing an integer or float array causes bitwise AND to produce wrong integer result silently rather than a boolean mask"
+    resolution: "Added viewshed_array.astype(bool) normalisation at function entry; test added in TestInputGuards.test_integer_viewshed_array_normalised_to_bool"
+    status: resolved
+    commit: ""
+
+  - id: D-034
+    severity: medium
+    task: S2-5
+    found_by: silent_failure_hunter
+    file: src/salus/engine/viewshed.py
+    line: 72
+    description: "viewshed_array.shape unpacked without ndim check — non-2D array raises undiagnosable ValueError at the unpack line with no context"
+    resolution: "Added explicit ndim != 2 guard before unpack with clear ValueError message; test added in TestInputGuards.test_non_2d_viewshed_raises"
+    status: resolved
+    commit: ""
+
+  - id: D-035
+    severity: medium
+    task: S2-5
+    found_by: silent_failure_hunter
+    file: src/salus/engine/viewshed.py
+    line: 75
+    description: "site.resolution is not validated before use in clip_viewshed_to_sensor — resolution==0.0 produces all-identical coordinate grids and silent all-False viewshed with no error"
+    resolution: "Added explicit resolution <= 0.0 guard with ValueError; test added in TestInputGuards.test_zero_resolution_raises"
+    status: resolved
+    commit: ""
+
+  - id: D-036
+    severity: medium
+    task: S2-5
+    found_by: spec_compliance
+    file: tests/test_scenario_models.py
+    line: N/A
+    description: "Gate-proof claimed 13 tests in test_scenario_models.py but only 12 exist — one validation path untested"
+    resolution: "Added test_bearing_90_east_valid as 13th test to test_scenario_models.py"
+    status: resolved
+    commit: ""
+
+  - id: D-037
+    severity: medium
+    task: S2-5
+    found_by: type_design_analyzer
+    file: src/salus/engine/viewshed.py
+    line: 49
+    description: "viewshed_array parameter and return type of clip_viewshed_to_sensor annotated as bare np.ndarray — should use npt.NDArray[np.bool_] to encode boolean dtype; same issue on range_mask and azimuth_mask locals"
+    resolution: "Changed parameter, return type, and local variable annotations to npt.NDArray[np.bool_]; added numpy.typing import"
+    status: resolved
+    commit: ""
