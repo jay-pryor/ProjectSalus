@@ -502,7 +502,7 @@ defects:
     description: "clip_viewshed_to_sensor result unchecked for empty array; ValueError from it propagates uncaught outside try/except block, producing unformatted traceback"
     resolution: "Wrapped clip_viewshed_to_sensor call in its own try/except; added clipped.size == 0 guard with failed++ and continue"
     status: resolved
-    commit: ""
+    commit: "66cdc1b"
 
   - id: D-046
     severity: medium
@@ -513,7 +513,7 @@ defects:
     description: "load_sensors returning empty list passes silently; sensor_map becomes {}, every placement hits the 'not found' branch producing opaque failure with no explanation"
     resolution: "Added explicit empty-list check after load_sensors(); exits 1 with clear message naming the directory"
     status: resolved
-    commit: ""
+    commit: "66cdc1b"
 
   - id: D-047
     severity: medium
@@ -524,7 +524,7 @@ defects:
     description: "output_file.unlink() in render error handler not wrapped in try/except; OSError from unlink propagates out of loop, bypassing failed counter and final summary"
     resolution: "Replaced bare unlink() with unlink(missing_ok=True) inside try/except OSError; logs warning on failure"
     status: resolved
-    commit: ""
+    commit: "66cdc1b"
 
   - id: D-048
     severity: medium
@@ -535,4 +535,4 @@ defects:
     description: "_safe_filename can return empty string when sensor name is all non-word chars, silently producing '_coverage.png' and potential name collision between placements"
     resolution: "Added fallback constant _FALLBACK_SENSOR_FILENAME='sensor'; _safe_filename returns it when result would be empty"
     status: resolved
-    commit: ""
+    commit: "66cdc1b"
