@@ -1,0 +1,52 @@
+task_id: S4-4
+timestamp: 2026-03-30T12:30:00Z
+quality_gates:
+  G1_lint: pass
+  G2_format: pass
+  G3_import: pass
+  G4_type: pass
+  G5_security: pass
+  G6_unit_test: pass
+  G7_coverage: pass
+  G8_secrets: N/A — detect-secrets not installed
+  coverage_pct: 87.71
+review:
+  l1_standards:
+    testing: pass
+    error_handling: pass
+    logging: "N/A — pure computation, no I/O or state"
+    security: "N/A — no file I/O, no user input paths"
+  l2_agents:
+    silent_failure_hunter: {status: fail, findings: 5}
+    spec_compliance: {status: pass, findings: 0}
+defect_ids: [D-089, D-090, D-091, D-092, D-093]
+notes: >
+  D-089 (HIGH): Non-finite placement.position_x/y → silent all-False mask.
+  Added isfinite guards on both coordinates; raises ValueError.
+  Test: test_nonfinite_placement_x_raises.
+
+  D-090 (HIGH): sensor.max_range_m=inf bypasses > 0 Pydantic validator →
+  all-True mask. Added isfinite guard in compute_acoustic_coverage.
+
+  D-091 (HIGH): sensor.min_range_m=inf bypasses >= 0 Pydantic validator →
+  all-False mask. Added isfinite guard in compute_acoustic_coverage.
+
+  D-092 (HIGH): Non-finite site.origin_x/y propagates to all-NaN dist →
+  all-False mask. Added isfinite guards on both site origin fields.
+
+  D-093 (MEDIUM): math.pow() OverflowError on extreme negative ambient_noise_db
+  (finite but < -6165). Replaced with np.float64 exponentiation inside
+  np.errstate(over='ignore'); overflow → inf → capped at max_range_m.
+  Test: test_extreme_negative_noise_does_not_raise.
+
+  Design note: guards for D-090 to D-092 are added in compute_acoustic_coverage
+  rather than in SensorDefinition/SiteModel validators to avoid modifying
+  existing passing code in other modules (scope control). The fix is local to
+  the acoustic model.
+
+  spec-compliance: 0 findings. Function exactly matches spec signature and model.
+  No terrain occlusion (range circle only). min_range_m dead zone applied.
+  No azimuth clipping (spec: "Apply range mask only").
+
+  All 388 suite tests pass. Coverage 87.71%.
+overall: pass

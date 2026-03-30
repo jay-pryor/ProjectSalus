@@ -976,3 +976,58 @@ defects:
     resolution: "Added math.isfinite(site.resolution) or site.resolution <= 0.0 guard at the start of compute_rf_coverage; raises ValueError immediately."
     status: resolved
     commit: "pending"
+
+  - id: D-089
+    severity: high
+    task: S4-4
+    found_by: silent_failure_hunter
+    file: src/salus/engine/acoustic.py
+    line: 80
+    description: "Non-finite placement.position_x/y propagates silently into dx/dy/dist computations. dist becomes all-NaN or all-inf; boolean comparisons return False for every cell; function returns all-False coverage with no error raised."
+    resolution: "Added math.isfinite guards on placement.position_x/y at entry to compute_acoustic_coverage; raises ValueError naming the offending coordinate. Added test_nonfinite_placement_x_raises."
+    status: resolved
+    commit: "pending"
+
+  - id: D-090
+    severity: high
+    task: S4-4
+    found_by: silent_failure_hunter
+    file: src/salus/engine/acoustic.py
+    line: 70
+    description: "sensor.max_range_m validated > 0 but not isfinite. float('inf') passes the Pydantic validator. effective_range = inf; every finite dist satisfies dist <= inf; function returns all-True coverage mask silently."
+    resolution: "Added math.isfinite(sensor.max_range_m) guard in compute_acoustic_coverage; raises ValueError immediately."
+    status: resolved
+    commit: "pending"
+
+  - id: D-091
+    severity: high
+    task: S4-4
+    found_by: silent_failure_hunter
+    file: src/salus/engine/acoustic.py
+    line: 84
+    description: "sensor.min_range_m validated >= 0 but not isfinite. float('inf') passes the Pydantic validator. dist >= inf is False for every finite dist; all-False coverage mask returned silently."
+    resolution: "Added math.isfinite(sensor.min_range_m) guard in compute_acoustic_coverage; raises ValueError immediately."
+    status: resolved
+    commit: "pending"
+
+  - id: D-092
+    severity: high
+    task: S4-4
+    found_by: silent_failure_hunter
+    file: src/salus/engine/acoustic.py
+    line: 76
+    description: "site.origin_x/y have no finiteness validators in SiteModel. Non-finite origins propagate into coordinate meshgrid producing all-NaN dist and an all-False coverage mask with no error raised."
+    resolution: "Added math.isfinite guards on site.origin_x and site.origin_y in compute_acoustic_coverage; raises ValueError naming the offending attribute."
+    status: resolved
+    commit: "pending"
+
+  - id: D-093
+    severity: medium
+    task: S4-4
+    found_by: silent_failure_hunter
+    file: src/salus/engine/acoustic.py
+    line: 70
+    description: "math.pow(10.0, exponent) raises uncaught OverflowError when ambient_noise_db is a very large negative finite value (below approximately -6165). The crash carries no context, making it difficult to diagnose."
+    resolution: "Replaced math.pow with np.float64 arithmetic inside np.errstate(over='ignore'); overflow saturates to inf and is capped by min(effective_range, max_range_m) rather than raising. Added test_extreme_negative_noise_does_not_raise."
+    status: resolved
+    commit: "pending"
