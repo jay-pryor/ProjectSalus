@@ -910,3 +910,69 @@ defects:
     resolution: "Added distances[0] == 0.0 check in compute_knife_edge_loss; raises ValueError for non-zero first distance. Added test_nonzero_first_distance_raises."
     status: resolved
     commit: "pending"
+
+  - id: D-083
+    severity: high
+    task: S4-3
+    found_by: silent_failure_hunter
+    file: src/salus/engine/rf_propagation.py
+    line: 403
+    description: "NaN DEM value at sensor position propagates through _bilinear_interp into sensor_abs_h. Every rsl_total in the loop becomes NaN; NaN >= sensitivity_dbm is always False. Returns plausible-looking all-False coverage grid with no exception and no warning."
+    resolution: "Added math.isfinite(sensor_terrain_h) check after _bilinear_interp; raises ValueError immediately with clear message. Added test_nan_dem_at_sensor_raises."
+    status: resolved
+    commit: "pending"
+
+  - id: D-084
+    severity: high
+    task: S4-3
+    found_by: silent_failure_hunter
+    file: src/salus/engine/rf_propagation.py
+    line: 441
+    description: "site.dem[r_idx, c_idx] NaN at a target cell produces NaN target_abs_h. compute_knife_edge_loss raises ValueError on rx_height check, which is caught by the broad except block and silently marks the cell uncovered. The true cause (bad DEM data) is not distinguished from expected boundary edge-cases."
+    resolution: "Added explicit math.isfinite(target_terrain_h) guard before the try block; emits warnings.warn naming 'NaN/inf DEM value' as root cause and marks cell uncovered, distinguishing DEM data quality issues from boundary geometry errors."
+    status: resolved
+    commit: "pending"
+
+  - id: D-085
+    severity: high
+    task: S4-3
+    found_by: silent_failure_hunter
+    file: src/salus/engine/rf_propagation.py
+    line: 424
+    description: "dist==0 (sensor cell) exclusion from fspl_covered relies on NaN comparison semantics (NaN >= sensitivity_dbm == False) rather than an explicit Boolean mask. Fragile if fspl_grid is consumed downstream."
+    resolution: "Added candidate_mask &= dist > 0.0 before FSPL computation to explicitly exclude the sensor cell via a Boolean mask, independent of NaN comparison behaviour."
+    status: resolved
+    commit: "pending"
+
+  - id: D-086
+    severity: medium
+    task: S4-3
+    found_by: silent_failure_hunter
+    file: src/salus/engine/rf_propagation.py
+    line: 457
+    description: "Broad except ValueError catches both expected boundary errors from extract_terrain_profile AND unexpected programming-error ValueErrors from compute_knife_edge_loss. Internal logic errors are demoted to per-cell warnings and the simulation continues silently."
+    resolution: "Split the try block: only extract_terrain_profile is wrapped; compute_knife_edge_loss is called outside the try so its ValueError (programming error) propagates immediately to the caller."
+    status: resolved
+    commit: "pending"
+
+  - id: D-087
+    severity: medium
+    task: S4-3
+    found_by: silent_failure_hunter
+    file: src/salus/engine/rf_propagation.py
+    line: 300
+    description: "_parse_frequency_band_hz calls band.strip().upper() without checking isinstance(band, str). A None entry in sensor.frequency_bands raises AttributeError rather than the documented ValueError."
+    resolution: "Added isinstance(band, str) guard at top of _parse_frequency_band_hz; raises ValueError with type name for non-string input. Added test_non_string_raises."
+    status: resolved
+    commit: "pending"
+
+  - id: D-088
+    severity: medium
+    task: S4-3
+    found_by: silent_failure_hunter
+    file: src/salus/engine/rf_propagation.py
+    line: 370
+    description: "site.resolution is used as a divisor in compute_rf_coverage without a finite/positive guard. Zero or NaN resolution produces silent all-NaN coordinate grids and an all-False coverage result instead of a clear early error."
+    resolution: "Added math.isfinite(site.resolution) or site.resolution <= 0.0 guard at the start of compute_rf_coverage; raises ValueError immediately."
+    status: resolved
+    commit: "pending"

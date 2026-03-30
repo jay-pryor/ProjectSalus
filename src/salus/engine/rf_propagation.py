@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import math
+import warnings
 
 import numpy as np
 import numpy.typing as npt
 
+from salus.models.scenario import SensorPlacement
+from salus.models.sensor import SensorDefinition
 from salus.models.site import SiteModel
 
 # Speed of light in vacuum (m/s) — ITU-R P.525
@@ -260,3 +263,236 @@ def compute_knife_edge_loss(
     nu = h * math.sqrt(2.0 * total_dist / denominator)
 
     return _knife_edge_loss_db(nu)
+
+
+# ---------------------------------------------------------------------------
+# S4-3: RF Coverage Grid
+# ---------------------------------------------------------------------------
+
+# Assumed consumer drone control-link transmit power (dBm). Representative
+# value for 2.4/5.8 GHz ISM-band remote controllers (ITU-R M.2171 reference).
+_DRONE_TX_POWER_DBM: float = 20.0
+
+# Assumed drone AGL for RF path-loss computation (m). Conservative ground-level
+# estimate — if coverage exists at terrain level, it holds at any height above.
+_TARGET_HEIGHT_AGL_M: float = 0.0
+
+# Full azimuth circle constant used for arc bypass logic.
+_FULL_ARC_DEG: float = 360.0
+
+
+def _parse_frequency_band_hz(band: str) -> float:
+    """Parse a frequency band descriptor string to Hz.
+
+    Recognises suffix formats GHz, MHz, kHz, Hz (case-insensitive).
+    Example: ``'2.4 GHz'`` → ``2.4e9``, ``'900 MHz'`` → ``9e8``.
+
+    Args:
+        band: Frequency band string, e.g. ``'2.4 GHz'``.
+
+    Returns:
+        Frequency in Hz as a float.
+
+    Raises:
+        ValueError: If the string cannot be parsed.
+    """
+    if not isinstance(band, str):
+        raise ValueError(
+            f"Expected a string for frequency band, got {type(band).__name__}: {band!r}"
+        )
+    s = band.strip().upper()
+    for suffix, multiplier in (("GHZ", 1e9), ("MHZ", 1e6), ("KHZ", 1e3), ("HZ", 1.0)):
+        if s.endswith(suffix):
+            try:
+                return float(s[: -len(suffix)].strip()) * multiplier
+            except ValueError:
+                raise ValueError(
+                    f"Cannot parse frequency value from band string: {band!r}"
+                ) from None
+    raise ValueError(
+        f"Cannot parse frequency band string {band!r}: "
+        "expected suffix GHz, MHz, kHz, or Hz (case-insensitive)"
+    )
+
+
+def compute_rf_coverage(
+    site: SiteModel,
+    sensor: SensorDefinition,
+    placement: SensorPlacement,
+    sensitivity_dbm: float,
+    *,
+    frequency_hz: float | None = None,
+) -> npt.NDArray[np.bool_]:
+    """Compute RF detection coverage for a sensor placement over the terrain grid.
+
+    For each grid cell, models the drone-to-sensor RF path as:
+
+        RSL = _DRONE_TX_POWER_DBM - (FSPL + knife_edge_loss)
+
+    A cell is marked covered (True) when ``RSL >= sensitivity_dbm``.
+
+    FSPL is computed vectorially for all candidates at once. Knife-edge loss is
+    computed per cell only for cells where FSPL alone already gives sufficient
+    signal (``RSL_fspl >= sensitivity_dbm``); cells blocked by free-space loss
+    alone are definitively uncovered and skip the expensive terrain profile step.
+    Azimuth arc and range constraints are applied before any propagation math.
+
+    Args:
+        site: Site terrain model.
+        sensor: Sensor capability definition (range, azimuth arc).
+        placement: Deployed sensor position and boresight bearing.
+        sensitivity_dbm: Minimum detectable received signal level in dBm.
+        frequency_hz: Operating frequency in Hz. If ``None``, the first entry of
+            ``sensor.frequency_bands`` is parsed. Raises ``ValueError`` if no
+            frequency can be determined.
+
+    Returns:
+        Boolean ``NDArray`` of shape ``site.dem.shape``. ``True`` = RF coverage.
+
+    Raises:
+        ValueError: If ``sensitivity_dbm`` is non-finite; if ``site.resolution``
+            is not a finite positive number; if ``frequency_hz`` cannot be
+            determined or is not a finite positive number; if the sensor position
+            is outside the DEM extent; or if the DEM has NaN/inf at the sensor
+            position.
+    """
+    if not math.isfinite(sensitivity_dbm):
+        raise ValueError(f"sensitivity_dbm must be finite, got {sensitivity_dbm}")
+
+    # --- Validate site resolution (used as divisor throughout) ---
+    if not math.isfinite(site.resolution) or site.resolution <= 0.0:
+        raise ValueError(f"site.resolution must be a finite positive number, got {site.resolution}")
+
+    # --- Resolve operating frequency ---
+    if frequency_hz is None:
+        if not sensor.frequency_bands:
+            raise ValueError(
+                "frequency_hz not provided and sensor.frequency_bands is empty; "
+                "cannot determine operating frequency"
+            )
+        frequency_hz = _parse_frequency_band_hz(sensor.frequency_bands[0])
+    if not math.isfinite(frequency_hz) or frequency_hz <= 0.0:
+        raise ValueError(f"frequency_hz must be a finite positive number, got {frequency_hz}")
+
+    rows, cols = site.dem.shape
+
+    # --- Validate sensor position is within DEM ---
+    sensor_col_f = (placement.position_x - site.origin_x) / site.resolution
+    sensor_row_f = (site.origin_y - placement.position_y) / site.resolution
+    if not (0.0 <= sensor_col_f <= cols - 1 and 0.0 <= sensor_row_f <= rows - 1):
+        raise ValueError(
+            f"Sensor position ({placement.position_x}, {placement.position_y}) "
+            "is outside the DEM extent."
+        )
+
+    # --- Build coordinate grids ---
+    col_coords = site.origin_x + np.arange(cols, dtype=np.float64) * site.resolution
+    row_coords = site.origin_y - np.arange(rows, dtype=np.float64) * site.resolution
+    cell_x, cell_y = np.meshgrid(col_coords, row_coords)
+
+    dx = cell_x - placement.position_x
+    dy = cell_y - placement.position_y
+
+    # --- Range mask ---
+    dist: npt.NDArray[np.float64] = np.sqrt(dx**2 + dy**2)
+    range_mask: npt.NDArray[np.bool_] = (dist >= sensor.min_range_m) & (dist <= sensor.max_range_m)
+
+    # --- Azimuth mask ---
+    if sensor.azimuth_coverage_deg >= _FULL_ARC_DEG:
+        azimuth_mask: npt.NDArray[np.bool_] = np.ones((rows, cols), dtype=bool)
+    else:
+        bearing_to_cell = np.degrees(np.arctan2(dx, dy)) % _FULL_ARC_DEG
+        half_arc = sensor.azimuth_coverage_deg / 2.0
+        boresight = placement.bearing_deg % _FULL_ARC_DEG
+        diff = (bearing_to_cell - boresight + 180.0) % _FULL_ARC_DEG - 180.0
+        azimuth_mask = np.abs(diff) <= half_arc
+
+    candidate_mask: npt.NDArray[np.bool_] = range_mask & azimuth_mask
+
+    # --- Sensor absolute elevation ---
+    sensor_terrain_h = float(
+        _bilinear_interp(
+            site.dem,
+            np.array([sensor_row_f]),
+            np.array([sensor_col_f]),
+        )[0]
+    )
+    if not math.isfinite(sensor_terrain_h):
+        raise ValueError(
+            f"DEM has NaN/inf at sensor position ({placement.position_x}, "
+            f"{placement.position_y}); cannot compute sensor absolute elevation."
+        )
+    sensor_agl = (
+        placement.height_override_m
+        if placement.height_override_m is not None
+        else sensor.mounting_height_m
+    )
+    sensor_abs_h = sensor_terrain_h + sensor_agl
+
+    # --- Vectorised FSPL for all candidate cells ---
+    # Explicitly exclude the sensor cell (dist == 0) from candidates: FSPL is
+    # undefined at zero distance and the cell is typically inside min_range_m.
+    candidate_mask &= dist > 0.0
+    safe_dist: npt.NDArray[np.float64] = np.where(dist > 0.0, dist, np.nan)
+    fspl_grid: npt.NDArray[np.float64] = (
+        20.0 * np.log10(safe_dist) + 20.0 * math.log10(frequency_hz) + _FSPL_CONSTANT_DB
+    )
+    rsl_fspl: npt.NDArray[np.float64] = _DRONE_TX_POWER_DBM - fspl_grid
+
+    # Cells covered by FSPL alone — these are candidates for knife-edge refinement.
+    # Cells where FSPL already blocks (rsl_fspl < sensitivity_dbm) are definitively
+    # uncovered: knife-edge adds loss, never reduces it.
+    fspl_covered: npt.NDArray[np.bool_] = candidate_mask & (rsl_fspl >= sensitivity_dbm)
+
+    # --- Knife-edge refinement ---
+    coverage: npt.NDArray[np.bool_] = fspl_covered.copy()
+
+    cand_rows_arr, cand_cols_arr = np.nonzero(fspl_covered)
+    for r_idx, c_idx in zip(cand_rows_arr.tolist(), cand_cols_arr.tolist()):
+        cell_x_val = site.origin_x + c_idx * site.resolution
+        cell_y_val = site.origin_y - r_idx * site.resolution
+        target_terrain_h = float(site.dem[r_idx, c_idx])
+
+        # Guard: DEM nodata (NaN/inf) at target cell — warn and skip.
+        if not math.isfinite(target_terrain_h):
+            warnings.warn(
+                f"NaN/inf DEM value at cell ({r_idx}, {c_idx}); "
+                "marking cell uncovered (check DEM for nodata gaps).",
+                stacklevel=2,
+            )
+            coverage[r_idx, c_idx] = False
+            continue
+
+        target_abs_h = target_terrain_h + _TARGET_HEIGHT_AGL_M
+
+        # extract_terrain_profile may raise ValueError for edge cells that fall
+        # just outside the DEM after floating-point coordinate rounding. Catch
+        # only that step; let compute_knife_edge_loss errors propagate — they
+        # indicate a programming error (bad profile shape, non-zero start, etc).
+        try:
+            profile = extract_terrain_profile(
+                site,
+                placement.position_x,
+                placement.position_y,
+                cell_x_val,
+                cell_y_val,
+            )
+        except ValueError as exc:
+            warnings.warn(
+                f"Terrain profile extraction failed for cell ({r_idx}, {c_idx}): {exc}",
+                stacklevel=2,
+            )
+            coverage[r_idx, c_idx] = False
+            continue
+
+        ke_loss = compute_knife_edge_loss(
+            profile,
+            tx_height=sensor_abs_h,
+            rx_height=target_abs_h,
+            frequency_hz=frequency_hz,
+        )
+
+        rsl_total = _DRONE_TX_POWER_DBM - (float(fspl_grid[r_idx, c_idx]) + ke_loss)
+        coverage[r_idx, c_idx] = rsl_total >= sensitivity_dbm
+
+    return coverage
