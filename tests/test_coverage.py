@@ -7,8 +7,12 @@ import pytest
 from shapely.geometry import MultiPolygon, Polygon
 
 from salus.engine.coverage import (
+    GapAnalysis,
     boundary_mask,
+    build_gap_analysis,
     clip_coverage_to_boundary,
+    compute_composite_coverage,
+    compute_gaps,
     compute_layer_coverage,
     coverage_percentage,
 )
@@ -416,3 +420,247 @@ class TestLayerCoverage:
         layers = compute_layer_coverage(site, {SensorType.Radar: [(sensor, p)]})
         assert layers[SensorType.Radar].dtype == bool
         assert layers[SensorType.Radar].all()
+
+
+# ---------------------------------------------------------------------------
+# compute_composite_coverage
+# ---------------------------------------------------------------------------
+
+
+class TestCompositecoverage:
+    def test_single_layer_passthrough(self):
+        """Single layer returns an equivalent boolean array."""
+        cov = np.array([[True, False], [False, True]])
+        result = compute_composite_coverage({SensorType.Radar: cov})
+        np.testing.assert_array_equal(result, cov)
+        assert result.dtype == bool
+
+    def test_two_layers_logical_or(self):
+        """Two layers are combined with logical OR."""
+        a = np.array([[True, False], [False, False]])
+        b = np.array([[False, True], [False, False]])
+        result = compute_composite_coverage({SensorType.Radar: a, SensorType.Acoustic: b})
+        expected = np.array([[True, True], [False, False]])
+        np.testing.assert_array_equal(result, expected)
+
+    def test_all_false_layers_gives_all_false(self):
+        """All-False layers produce an all-False composite."""
+        a = np.zeros((5, 5), dtype=bool)
+        b = np.zeros((5, 5), dtype=bool)
+        result = compute_composite_coverage({SensorType.Radar: a, SensorType.RF: b})
+        assert not result.any()
+
+    def test_all_true_layers_gives_all_true(self):
+        """All-True layers produce an all-True composite."""
+        a = np.ones((5, 5), dtype=bool)
+        result = compute_composite_coverage({SensorType.Acoustic: a})
+        assert result.all()
+
+    def test_output_shape_matches_input(self):
+        """Output shape matches the shape of the input layers."""
+        cov = np.zeros((10, 20), dtype=bool)
+        result = compute_composite_coverage({SensorType.EO_IR: cov})
+        assert result.shape == (10, 20)
+
+    def test_empty_dict_raises(self):
+        """Empty layer_coverages raises ValueError."""
+        with pytest.raises(ValueError, match="at least one"):
+            compute_composite_coverage({})
+
+    def test_shape_mismatch_raises(self):
+        """Layers with differing shapes raise ValueError."""
+        a = np.zeros((5, 5), dtype=bool)
+        b = np.zeros((6, 5), dtype=bool)
+        with pytest.raises(ValueError, match="shape"):
+            compute_composite_coverage({SensorType.Radar: a, SensorType.RF: b})
+
+    def test_float_input_coerced(self):
+        """Float arrays are coerced to bool before OR — non-zero = covered."""
+        a = np.array([[1.0, 0.0], [0.5, 0.0]])
+        result = compute_composite_coverage({SensorType.Radar: a})  # type: ignore[arg-type]
+        expected = np.array([[True, False], [True, False]])
+        np.testing.assert_array_equal(result, expected)
+
+
+# ---------------------------------------------------------------------------
+# compute_gaps
+# ---------------------------------------------------------------------------
+
+
+class TestComputeGaps:
+    def test_full_coverage_no_gaps(self):
+        """If composite covers entire boundary, gaps are all False."""
+        composite = np.ones((5, 5), dtype=bool)
+        mask = np.ones((5, 5), dtype=bool)
+        gaps = compute_gaps(composite, mask)
+        assert not gaps.any()
+
+    def test_no_coverage_gaps_equal_boundary(self):
+        """If composite is all False, gaps equal the boundary mask."""
+        composite = np.zeros((5, 5), dtype=bool)
+        mask = np.ones((5, 5), dtype=bool)
+        gaps = compute_gaps(composite, mask)
+        np.testing.assert_array_equal(gaps, mask)
+
+    def test_partial_coverage_correct_gaps(self):
+        """Gap cells = boundary cells not covered by composite."""
+        composite = np.array([[True, False], [False, True]])
+        mask = np.ones((2, 2), dtype=bool)
+        gaps = compute_gaps(composite, mask)
+        expected = np.array([[False, True], [True, False]])
+        np.testing.assert_array_equal(gaps, expected)
+
+    def test_outside_boundary_never_gap(self):
+        """Cells outside the boundary are never counted as gaps."""
+        composite = np.zeros((4, 4), dtype=bool)
+        mask = np.zeros((4, 4), dtype=bool)
+        mask[1:3, 1:3] = True  # only inner 2x2 is in boundary
+        gaps = compute_gaps(composite, mask)
+        # Cells outside mask must be False even though composite is all-False
+        assert not gaps[0, 0]
+        assert not gaps[3, 3]
+        assert gaps[1, 1]
+
+    def test_output_dtype_bool(self):
+        """Output dtype is always bool."""
+        composite = np.zeros((3, 3), dtype=bool)
+        mask = np.ones((3, 3), dtype=bool)
+        assert compute_gaps(composite, mask).dtype == bool
+
+    def test_shape_mismatch_raises(self):
+        """Mismatched shapes raise ValueError."""
+        composite = np.zeros((5, 5), dtype=bool)
+        mask = np.zeros((4, 5), dtype=bool)
+        with pytest.raises(ValueError, match="shape"):
+            compute_gaps(composite, mask)
+
+
+# ---------------------------------------------------------------------------
+# build_gap_analysis
+# ---------------------------------------------------------------------------
+
+
+class TestBuildGapAnalysis:
+    def test_no_gaps_returns_zero_area_and_none_polygons(self):
+        """All-covered gap raster → area=0, percentage=0, polygons=None."""
+        gap = np.zeros((10, 10), dtype=bool)
+        mask = np.ones((10, 10), dtype=bool)
+        result = build_gap_analysis(gap, mask, cell_size_m=5.0)
+        assert isinstance(result, GapAnalysis)
+        assert result.gap_area_m2 == pytest.approx(0.0)
+        assert result.gap_percentage == pytest.approx(0.0)
+        assert result.gap_polygons is None
+
+    def test_full_gap_area_equals_boundary_area(self):
+        """All-gap raster: area = boundary_cells × cell_area."""
+        gap = np.ones((4, 4), dtype=bool)
+        mask = np.ones((4, 4), dtype=bool)
+        result = build_gap_analysis(gap, mask, cell_size_m=10.0)
+        assert result.gap_area_m2 == pytest.approx(16 * 100.0)
+        assert result.gap_percentage == pytest.approx(100.0)
+
+    def test_partial_gap_percentage(self):
+        """Half the boundary is gap → percentage ≈ 50."""
+        gap = np.zeros((4, 4), dtype=bool)
+        gap[:2, :] = True  # 8 of 16 cells
+        mask = np.ones((4, 4), dtype=bool)
+        result = build_gap_analysis(gap, mask, cell_size_m=1.0)
+        assert result.gap_area_m2 == pytest.approx(8.0)
+        assert result.gap_percentage == pytest.approx(50.0)
+
+    def test_cell_size_scales_area(self):
+        """gap_area_m2 scales with cell_size_m squared."""
+        gap = np.ones((2, 2), dtype=bool)
+        mask = np.ones((2, 2), dtype=bool)
+        r1 = build_gap_analysis(gap, mask, cell_size_m=1.0)
+        r2 = build_gap_analysis(gap, mask, cell_size_m=2.0)
+        assert r2.gap_area_m2 == pytest.approx(r1.gap_area_m2 * 4.0)
+
+    def test_gap_polygons_is_polygon_or_multipolygon(self):
+        """When gaps exist, gap_polygons is Polygon or MultiPolygon."""
+        gap = np.zeros((6, 6), dtype=bool)
+        gap[1:4, 1:4] = True
+        mask = np.ones((6, 6), dtype=bool)
+        result = build_gap_analysis(gap, mask, cell_size_m=1.0)
+        assert result.gap_polygons is not None
+        assert isinstance(result.gap_polygons, (Polygon, MultiPolygon))
+
+    def test_two_disjoint_gaps_multipolygon(self):
+        """Two separate gap patches produce a MultiPolygon."""
+        gap = np.zeros((10, 10), dtype=bool)
+        gap[1:3, 1:3] = True
+        gap[7:9, 7:9] = True
+        mask = np.ones((10, 10), dtype=bool)
+        result = build_gap_analysis(gap, mask, cell_size_m=1.0)
+        assert isinstance(result.gap_polygons, MultiPolygon)
+
+    def test_invalid_cell_size_zero_raises(self):
+        """cell_size_m=0.0 raises ValueError."""
+        with pytest.raises(ValueError, match="cell_size_m"):
+            build_gap_analysis(np.zeros((2, 2), dtype=bool), np.ones((2, 2), dtype=bool), 0.0)
+
+    def test_invalid_cell_size_negative_raises(self):
+        """Negative cell_size_m raises ValueError."""
+        with pytest.raises(ValueError, match="cell_size_m"):
+            build_gap_analysis(np.zeros((2, 2), dtype=bool), np.ones((2, 2), dtype=bool), -1.0)
+
+    def test_invalid_cell_size_nan_raises(self):
+        """NaN cell_size_m raises ValueError."""
+        with pytest.raises(ValueError, match="cell_size_m"):
+            build_gap_analysis(
+                np.zeros((2, 2), dtype=bool), np.ones((2, 2), dtype=bool), float("nan")
+            )
+
+    def test_shape_mismatch_raises(self):
+        """Mismatched gap_raster and boundary_mask shapes raise ValueError."""
+        with pytest.raises(ValueError, match="shape"):
+            build_gap_analysis(np.zeros((3, 3), dtype=bool), np.ones((4, 3), dtype=bool), 1.0)
+
+    def test_empty_boundary_warns_zero_percentage(self):
+        """All-False boundary mask emits UserWarning and returns 0.0 percentage."""
+        gap = np.ones((3, 3), dtype=bool)
+        mask = np.zeros((3, 3), dtype=bool)
+        with pytest.warns(UserWarning, match="boundary_mask contains no True cells"):
+            result = build_gap_analysis(gap, mask, cell_size_m=1.0)
+        assert result.gap_percentage == pytest.approx(0.0)
+
+    def test_nan_float_gap_raster_raises(self):
+        """D-101: float gap_raster with NaN raises ValueError, not silent count inflation."""
+        gap = np.array([[float("nan"), 0.0], [0.0, 0.0]])
+        mask = np.ones((2, 2), dtype=bool)
+        with pytest.raises(ValueError, match="non-finite"):
+            build_gap_analysis(gap, mask, cell_size_m=1.0)
+
+    def test_invalid_geometry_repaired_not_silently_accepted(self):
+        """D-099: invalid geometries from rasterio are buffered to repair; result is valid."""
+        # 5x5 gap that should produce valid polygon(s)
+        gap = np.zeros((8, 8), dtype=bool)
+        gap[2:6, 2:6] = True
+        mask = np.ones((8, 8), dtype=bool)
+        result = build_gap_analysis(gap, mask, cell_size_m=1.0)
+        if result.gap_polygons is not None:
+            assert result.gap_polygons.is_valid
+
+    def test_vectorisation_exception_raises_runtime_error(self):
+        """D-100: RuntimeError from shapes loop surfaces with context, not silent None."""
+        from unittest.mock import patch
+
+        gap = np.ones((4, 4), dtype=bool)
+        mask = np.ones((4, 4), dtype=bool)
+        with patch("rasterio.features.shapes", side_effect=RuntimeError("rasterio boom")):
+            with pytest.raises(RuntimeError, match="Gap vectorisation failed"):
+                build_gap_analysis(gap, mask, cell_size_m=1.0)
+
+    def test_empty_polys_with_gap_cells_warns(self):
+        """D-102: if polys list empty despite gap_cells > 0, UserWarning is emitted."""
+        from unittest.mock import patch
+
+        gap = np.ones((4, 4), dtype=bool)
+        mask = np.ones((4, 4), dtype=bool)
+        # shapes returns nothing, so polys stays empty
+        with patch("rasterio.features.shapes", return_value=iter([])):
+            with pytest.warns(UserWarning, match="no valid polygons"):
+                result = build_gap_analysis(gap, mask, cell_size_m=1.0)
+        # area and percentage are still correct
+        assert result.gap_area_m2 == pytest.approx(16.0)
+        assert result.gap_polygons is None

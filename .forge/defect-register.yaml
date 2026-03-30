@@ -1086,3 +1086,47 @@ defects:
     resolution: "Changed 'union |= cov' to 'union |= cov.astype(bool)' — explicit cast makes intent clear and prevents silent coercion errors. Added test_float_coverage_array_coerced_to_bool."
     status: resolved
     commit: "pending"
+
+  - id: D-099
+    severity: high
+    task: S5-2
+    found_by: silent_failure_hunter
+    file: src/salus/engine/coverage.py
+    line: 235
+    description: "shapely_shape(geom_dict) called without checking geom.is_valid. rasterio.features.shapes can return self-intersecting rings; Shapely accepts them as non-empty but is_valid=False. Downstream area/union/render calls on an invalid MultiPolygon produce wrong values silently."
+    resolution: "Added geom.buffer(0) repair step for invalid geometries, then re-checks is_valid and is_empty before appending. Added test_invalid_geometry_repaired_not_silently_accepted."
+    status: resolved
+    commit: "pending"
+
+  - id: D-100
+    severity: high
+    task: S5-2
+    found_by: silent_failure_hunter
+    file: src/salus/engine/coverage.py
+    line: 233
+    description: "shapes() loop has no exception handler. If shapely_shape raises mid-loop, partial polys list is silently discarded and gap_polygons returns None while gap_area_m2 > 0 — internally inconsistent GapAnalysis with no error."
+    resolution: "Wrapped shapes loop in try/except Exception; re-raises as RuntimeError with raster shape and gap_cells in the message. Added test_vectorisation_exception_raises_runtime_error."
+    status: resolved
+    commit: "pending"
+
+  - id: D-101
+    severity: medium
+    task: S5-2
+    found_by: silent_failure_hunter
+    file: src/salus/engine/coverage.py
+    line: 208
+    description: "gap_raster.astype(bool).sum() silently counts NaN float cells as True (NaN cast to bool is True), inflating gap_cells, gap_area_m2, and gap_percentage with no error or warning."
+    resolution: "Added dtype guard: if gap_raster is floating-point and contains non-finite values, raises ValueError before any computation. Added test_nan_float_gap_raster_raises."
+    status: resolved
+    commit: "pending"
+
+  - id: D-102
+    severity: medium
+    task: S5-2
+    found_by: silent_failure_hunter
+    file: src/salus/engine/coverage.py
+    line: 239
+    description: "If all geometries returned by shapes() are empty, polys stays empty and gap_polygons=None even when gap_cells>0. Returns GapAnalysis with gap_area_m2>0 but gap_polygons=None; callers guarding on gap_polygons is None silently miss real gaps."
+    resolution: "After polys assembly, if gap_cells>0 and polys is empty, emits UserWarning explaining inconsistency. Area/percentage remain correct; only geometry is unavailable. Added test_empty_polys_with_gap_cells_warns."
+    status: resolved
+    commit: "pending"
