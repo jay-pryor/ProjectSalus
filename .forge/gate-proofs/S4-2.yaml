@@ -1,0 +1,58 @@
+task_id: S4-2
+timestamp: 2026-03-30T10:30:00Z
+quality_gates:
+  G1_lint: pass
+  G2_format: pass
+  G3_import: pass
+  G4_type: pass
+  G5_security: pass
+  G6_unit_test: pass
+  G7_coverage: pass
+  G8_secrets: N/A — detect-secrets not installed
+  coverage_pct: 87.63
+review:
+  l1_standards:
+    testing: pass
+    error_handling: pass
+    logging: "N/A — pure math/numpy functions, no I/O or state"
+    security: "N/A — no file I/O, no user input paths"
+  l2_agents:
+    silent_failure_hunter: {status: fail, findings: 8}
+    spec_compliance: {status: pass, findings: 1}
+defect_ids: [D-077, D-078, D-079, D-080, D-081, D-082]
+notes: >
+  D-077 (HIGH): NaN heights from DEM nodata propagated silently into np.argmax —
+  added np.isfinite(heights).all() guard in compute_knife_edge_loss; raises
+  ValueError. Test: test_nan_height_in_profile_raises.
+
+  D-078 (HIGH): Out-of-bounds DEM coordinates silently clamped in _bilinear_interp —
+  added bounds check in extract_terrain_profile before interpolation; raises
+  ValueError naming "outside the DEM". Test: test_out_of_bounds_coordinates_raises.
+
+  D-079 (HIGH): wavelength * d1 * d2 underflow to 0.0 → sqrt(inf) → infinite loss —
+  added `denominator <= 0.0` guard returning 0.0 (no loss). _knife_edge_loss_db
+  non-finite nu check provides second-line defence.
+
+  D-080 (MEDIUM): _knife_edge_loss_db(nan) bypassed threshold guard (IEEE 754) then
+  crashed with opaque error inside math.sqrt — added math.isfinite(nu) guard at top
+  of function; raises ValueError. Tests: test_nan_nu_raises, test_inf_nu_raises.
+
+  D-081 (MEDIUM): Non-finite coordinates propagated through math.sqrt to all-NaN
+  linspace arrays — added per-coordinate isfinite check at top of
+  extract_terrain_profile; raises ValueError naming offending parameter.
+  Tests: test_nonfinite_x1_raises, test_nonfinite_y2_raises.
+
+  D-082 (MEDIUM): Non-zero distances[0] shifted LOS baseline silently —
+  added distances[0] == 0.0 check in compute_knife_edge_loss; raises ValueError.
+  Test: test_nonzero_first_distance_raises.
+
+  spec-compliance info (_bilinear_interp): Private helper not in spec is a necessary
+  implementation detail; no new public API — accepted.
+
+  LOW findings (not fixed per policy — LOW findings informational):
+  - .astype(int) platform-dependent int width: acceptable for current platform targets.
+  - No site.resolution <= 0.0 guard: SiteModel Pydantic validation enforces positive
+    resolution at construction; not a silent failure path in this module.
+
+  All 37 knife-edge tests pass. All 345 suite tests pass. Coverage 87.63%.
+overall: pass

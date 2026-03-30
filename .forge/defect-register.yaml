@@ -844,3 +844,69 @@ defects:
     resolution: "Updated docstring: removed 'positive value' claim; noted that sub-metre distances can produce negative dB and that the formula is a far-field approximation."
     status: resolved
     commit: "pending"
+
+  - id: D-077
+    severity: high
+    task: S4-2
+    found_by: silent_failure_hunter
+    file: src/salus/engine/rf_propagation.py
+    line: 212
+    description: "NaN heights from DEM nodata propagate into clearance array. np.argmax on an all-NaN or NaN-containing array returns index 0 silently, selecting the wrong obstruction. Loss calculation proceeds on garbage input."
+    resolution: "Added np.isfinite(heights).all() check in compute_knife_edge_loss; raises ValueError for any non-finite height value. Added test_nan_height_in_profile_raises."
+    status: resolved
+    commit: "pending"
+
+  - id: D-078
+    severity: high
+    task: S4-2
+    found_by: silent_failure_hunter
+    file: src/salus/engine/rf_propagation.py
+    line: 143
+    description: "Out-of-bounds sample coordinates are silently clamped to DEM edge values in _bilinear_interp. Coordinates outside the DEM extent return the nearest edge height with no warning or error, corrupting the terrain profile."
+    resolution: "Added out-of-bounds check in extract_terrain_profile before calling _bilinear_interp; raises ValueError if any fractional pixel index falls outside [0, nrows-1] or [0, ncols-1]. Added test_out_of_bounds_coordinates_raises."
+    status: resolved
+    commit: "pending"
+
+  - id: D-079
+    severity: high
+    task: S4-2
+    found_by: silent_failure_hunter
+    file: src/salus/engine/rf_propagation.py
+    line: 222
+    description: "wavelength * d1 * d2 can underflow to 0.0 for very short d1 or d2 (subnormal float). This causes division by zero inside math.sqrt(), returning inf, which propagates to _knife_edge_loss_db as nu=inf and returns an infinite loss value."
+    resolution: "Added denominator <= 0.0 guard before math.sqrt; returns 0.0 (no loss) when denominator underflows. The _knife_edge_loss_db guard on non-finite nu also serves as a second line of defence."
+    status: resolved
+    commit: "pending"
+
+  - id: D-080
+    severity: medium
+    task: S4-2
+    found_by: silent_failure_hunter
+    file: src/salus/engine/rf_propagation.py
+    line: 52
+    description: "_knife_edge_loss_db(nan) passes the nu <= -0.78 guard (NaN comparison is False), then enters math.sqrt() which raises ValueError on NaN. Exception leaks from a private function with no context, surprising callers."
+    resolution: "Added math.isfinite(nu) guard at top of _knife_edge_loss_db; raises ValueError with clear message. Added test_nan_nu_raises and test_inf_nu_raises."
+    status: resolved
+    commit: "pending"
+
+  - id: D-081
+    severity: medium
+    task: S4-2
+    found_by: silent_failure_hunter
+    file: src/salus/engine/rf_propagation.py
+    line: 125
+    description: "Non-finite x1/y1/x2/y2 inputs to extract_terrain_profile are not validated. Inf coordinates propagate into math.sqrt() for path_length yielding inf, then into np.linspace producing all-NaN arrays, causing obscure downstream failures."
+    resolution: "Added finite check for all four coordinates at top of extract_terrain_profile using math.isfinite; raises ValueError naming the offending parameter. Added test_nonfinite_x1_raises and test_nonfinite_y2_raises."
+    status: resolved
+    commit: "pending"
+
+  - id: D-082
+    severity: medium
+    task: S4-2
+    found_by: silent_failure_hunter
+    file: src/salus/engine/rf_propagation.py
+    line: 192
+    description: "compute_knife_edge_loss does not verify distances[0] == 0.0. A manually-constructed profile with non-zero first distance shifts the entire LOS baseline, computing wrong clearance values silently."
+    resolution: "Added distances[0] == 0.0 check in compute_knife_edge_loss; raises ValueError for non-zero first distance. Added test_nonzero_first_distance_raises."
+    status: resolved
+    commit: "pending"
