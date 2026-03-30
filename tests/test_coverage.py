@@ -1,4 +1,4 @@
-"""Tests for coverage boundary masking and percentage computation."""
+"""Tests for coverage boundary masking, percentage computation, and layer union."""
 
 from __future__ import annotations
 
@@ -6,8 +6,44 @@ import numpy as np
 import pytest
 from shapely.geometry import MultiPolygon, Polygon
 
-from salus.engine.coverage import boundary_mask, clip_coverage_to_boundary, coverage_percentage
+from salus.engine.coverage import (
+    boundary_mask,
+    clip_coverage_to_boundary,
+    compute_layer_coverage,
+    coverage_percentage,
+)
 from salus.ingest.terrain import load_dem
+from salus.models.scenario import SensorPlacement
+from salus.models.sensor import SensorDefinition, SensorType
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _placement(x: float, y: float) -> SensorPlacement:
+    return SensorPlacement(
+        sensor_name="TestSensor",
+        position_x=x,
+        position_y=y,
+        bearing_deg=0.0,
+        height_override_m=None,
+    )
+
+
+def _sensor(stype: SensorType, max_range_m: float = 30.0) -> SensorDefinition:
+    return SensorDefinition(
+        name="TestSensor",
+        type=stype,
+        max_range_m=max_range_m,
+        fov_deg=360.0,
+        azimuth_coverage_deg=360.0,
+        elevation_coverage_deg=90.0,
+        mounting_height_m=5.0,
+        min_range_m=0.0,
+        frequency_bands=["2.4 GHz"] if stype == SensorType.RF else [],
+        acoustic_sensitivity_db=0.0,
+    )
 
 
 class TestBoundaryMask:
@@ -222,3 +258,161 @@ class TestCoveragePercentage:
         mask = rng.choice([True, False], size=(50, 50))
         pct = coverage_percentage(cov, mask)
         assert 0.0 <= pct <= 100.0
+
+
+# ---------------------------------------------------------------------------
+# compute_layer_coverage
+# ---------------------------------------------------------------------------
+
+
+class TestLayerCoverage:
+    def test_single_sensor_single_type_shape(self, flat_dem_path):
+        """Result array shape matches site DEM for a single sensor."""
+        site = load_dem(flat_dem_path)
+        sensor = _sensor(SensorType.Radar, max_range_m=30.0)
+        placement = _placement(site.origin_x + 50.0, site.origin_y - 50.0)
+        layers = compute_layer_coverage(site, {SensorType.Radar: [(sensor, placement)]})
+        assert SensorType.Radar in layers
+        assert layers[SensorType.Radar].shape == site.dem.shape
+        assert layers[SensorType.Radar].dtype == bool
+
+    def test_empty_sensor_list_produces_all_false(self, flat_dem_path):
+        """A sensor type with an empty pair list produces an all-False array."""
+        site = load_dem(flat_dem_path)
+        layers = compute_layer_coverage(site, {SensorType.Acoustic: []})
+        assert layers[SensorType.Acoustic].shape == site.dem.shape
+        assert not layers[SensorType.Acoustic].any()
+
+    def test_empty_dict_returns_empty_result(self, flat_dem_path):
+        """An empty placements dict returns an empty result dict."""
+        site = load_dem(flat_dem_path)
+        layers = compute_layer_coverage(site, {})
+        assert layers == {}
+
+    def test_union_two_sensors_covers_more_than_either_alone(self, flat_dem_path):
+        """Two sensors at opposite corners unioned cover more than either alone."""
+        site = load_dem(flat_dem_path)
+        sensor = _sensor(SensorType.Acoustic, max_range_m=30.0)
+        p1 = _placement(site.origin_x + 5.0, site.origin_y - 5.0)
+        p2 = _placement(site.origin_x + 95.0, site.origin_y - 95.0)
+        layers_both = compute_layer_coverage(
+            site, {SensorType.Acoustic: [(sensor, p1), (sensor, p2)]}
+        )
+        layers_p1 = compute_layer_coverage(site, {SensorType.Acoustic: [(sensor, p1)]})
+        layers_p2 = compute_layer_coverage(site, {SensorType.Acoustic: [(sensor, p2)]})
+        assert layers_both[SensorType.Acoustic].sum() > layers_p1[SensorType.Acoustic].sum()
+        assert layers_both[SensorType.Acoustic].sum() > layers_p2[SensorType.Acoustic].sum()
+
+    def test_union_is_logical_or_of_individuals(self, flat_dem_path):
+        """Layer union equals logical OR of individual coverage arrays."""
+        site = load_dem(flat_dem_path)
+        sensor = _sensor(SensorType.Acoustic, max_range_m=30.0)
+        p1 = _placement(site.origin_x + 5.0, site.origin_y - 5.0)
+        p2 = _placement(site.origin_x + 95.0, site.origin_y - 95.0)
+        layers_both = compute_layer_coverage(
+            site, {SensorType.Acoustic: [(sensor, p1), (sensor, p2)]}
+        )
+        layers_p1 = compute_layer_coverage(site, {SensorType.Acoustic: [(sensor, p1)]})
+        layers_p2 = compute_layer_coverage(site, {SensorType.Acoustic: [(sensor, p2)]})
+        expected = layers_p1[SensorType.Acoustic] | layers_p2[SensorType.Acoustic]
+        np.testing.assert_array_equal(layers_both[SensorType.Acoustic], expected)
+
+    def test_multiple_sensor_types_returned(self, flat_dem_path):
+        """All sensor types in input dict appear as keys in the result."""
+        site = load_dem(flat_dem_path)
+        radar = _sensor(SensorType.Radar, max_range_m=30.0)
+        acoustic = _sensor(SensorType.Acoustic, max_range_m=30.0)
+        p = _placement(site.origin_x + 50.0, site.origin_y - 50.0)
+        layers = compute_layer_coverage(
+            site,
+            {
+                SensorType.Radar: [(radar, p)],
+                SensorType.Acoustic: [(acoustic, p)],
+            },
+        )
+        assert SensorType.Radar in layers
+        assert SensorType.Acoustic in layers
+        assert len(layers) == 2
+
+    def test_multiple_types_independent_arrays(self, flat_dem_path):
+        """Radar and Acoustic layers are independent boolean arrays."""
+        site = load_dem(flat_dem_path)
+        radar = _sensor(SensorType.Radar, max_range_m=30.0)
+        acoustic = _sensor(SensorType.Acoustic, max_range_m=30.0)
+        p = _placement(site.origin_x + 50.0, site.origin_y - 50.0)
+        layers = compute_layer_coverage(
+            site,
+            {SensorType.Radar: [(radar, p)], SensorType.Acoustic: [(acoustic, p)]},
+        )
+        # Arrays are not the same object
+        assert layers[SensorType.Radar] is not layers[SensorType.Acoustic]
+
+    def test_rf_sensor_type_routed_correctly(self, flat_dem_path):
+        """RF sensor type is accepted and returns a valid coverage array."""
+        site = load_dem(flat_dem_path)
+        sensor = _sensor(SensorType.RF, max_range_m=30.0)
+        p = _placement(site.origin_x + 50.0, site.origin_y - 50.0)
+        layers = compute_layer_coverage(site, {SensorType.RF: [(sensor, p)]})
+        assert layers[SensorType.RF].shape == site.dem.shape
+        assert layers[SensorType.RF].dtype == bool
+
+    def test_result_is_bool_dtype(self, flat_dem_path):
+        """Output arrays are always dtype bool regardless of sensor type."""
+        site = load_dem(flat_dem_path)
+        for stype in (SensorType.Radar, SensorType.EO_IR, SensorType.Acoustic):
+            sensor = _sensor(stype, max_range_m=30.0)
+            p = _placement(site.origin_x + 50.0, site.origin_y - 50.0)
+            layers = compute_layer_coverage(site, {stype: [(sensor, p)]})
+            assert layers[stype].dtype == bool, f"dtype mismatch for {stype}"
+
+    def test_sensitivity_kwarg_forwarded_to_rf(self, flat_dem_path):
+        """Lower sensitivity_dbm threshold yields more RF coverage than higher threshold."""
+        site = load_dem(flat_dem_path)
+        sensor = _sensor(SensorType.RF, max_range_m=80.0)
+        p = _placement(site.origin_x + 50.0, site.origin_y - 50.0)
+        layers_sensitive = compute_layer_coverage(
+            site, {SensorType.RF: [(sensor, p)]}, sensitivity_dbm=-100.0
+        )
+        layers_insensitive = compute_layer_coverage(
+            site, {SensorType.RF: [(sensor, p)]}, sensitivity_dbm=-40.0
+        )
+        assert layers_sensitive[SensorType.RF].sum() >= layers_insensitive[SensorType.RF].sum()
+
+    def test_ambient_noise_kwarg_forwarded_to_acoustic(self, flat_dem_path):
+        """Higher ambient_noise_db reduces acoustic coverage."""
+        site = load_dem(flat_dem_path)
+        sensor = _sensor(SensorType.Acoustic, max_range_m=50.0)
+        p = _placement(site.origin_x + 50.0, site.origin_y - 50.0)
+        layers_quiet = compute_layer_coverage(
+            site, {SensorType.Acoustic: [(sensor, p)]}, ambient_noise_db=0.0
+        )
+        layers_noisy = compute_layer_coverage(
+            site, {SensorType.Acoustic: [(sensor, p)]}, ambient_noise_db=40.0
+        )
+        assert layers_quiet[SensorType.Acoustic].sum() >= layers_noisy[SensorType.Acoustic].sum()
+
+    def test_none_return_raises_value_error(self, flat_dem_path, monkeypatch):
+        """D-097: None returned from dispatcher raises ValueError with sensor name."""
+        from salus.engine import dispatcher as disp_mod
+
+        monkeypatch.setattr(disp_mod, "compute_sensor_coverage", lambda *a, **kw: None)
+        site = load_dem(flat_dem_path)
+        sensor = _sensor(SensorType.Radar, max_range_m=30.0)
+        p = _placement(site.origin_x + 50.0, site.origin_y - 50.0)
+        with pytest.raises(ValueError, match="returned None"):
+            compute_layer_coverage(site, {SensorType.Radar: [(sensor, p)]})
+
+    def test_float_coverage_array_coerced_to_bool(self, flat_dem_path, monkeypatch):
+        """D-098: float array from dispatcher is coerced to bool without silent corruption."""
+        import numpy as np
+
+        from salus.engine import dispatcher as disp_mod
+
+        site = load_dem(flat_dem_path)
+        float_cov = np.full(site.dem.shape, 1.0, dtype=np.float64)
+        monkeypatch.setattr(disp_mod, "compute_sensor_coverage", lambda *a, **kw: float_cov)
+        sensor = _sensor(SensorType.Radar, max_range_m=30.0)
+        p = _placement(site.origin_x + 50.0, site.origin_y - 50.0)
+        layers = compute_layer_coverage(site, {SensorType.Radar: [(sensor, p)]})
+        assert layers[SensorType.Radar].dtype == bool
+        assert layers[SensorType.Radar].all()

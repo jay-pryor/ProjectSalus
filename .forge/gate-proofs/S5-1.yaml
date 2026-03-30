@@ -1,0 +1,41 @@
+task_id: S5-1
+timestamp: 2026-03-30T14:00:00Z
+quality_gates:
+  G1_lint: pass
+  G2_format: pass
+  G3_import: pass
+  G4_type: pass
+  G5_security: pass
+  G6_unit_test: pass
+  G7_coverage: pass
+  G8_secrets: N/A — detect-secrets not installed
+  coverage_pct: 90.28
+review:
+  l1_standards:
+    testing: pass
+    error_handling: pass
+    logging: "N/A — pure computation, no file I/O"
+    security: "N/A — no file I/O, no user input paths"
+  l2_agents:
+    silent_failure_hunter: {status: fail, findings: 4}
+    spec_compliance: {status: pass, findings: 0}
+defect_ids: [D-097, D-098]
+notes: >
+  D-097 (MEDIUM): compute_sensor_coverage return not checked for None before .shape access;
+  None produces AttributeError rather than documented ValueError. Fixed: None guard added
+  before shape check; raises ValueError with sensor name. Test: test_none_return_raises_value_error.
+
+  D-098 (MEDIUM): union |= cov silently coerces non-bool dtypes via NumPy, producing
+  plausible-looking but physically wrong boolean union. Fixed: changed to
+  union |= cov.astype(bool) — explicit cast, intent clear. Test: test_float_coverage_array_coerced_to_bool.
+
+  D-099/100 (LOW, not logged): zero-dimension site guard and generator exhaustion — both
+  low severity; site.rows/cols are set from rasterio raster dimensions (never zero in
+  practice) and the public API annotation clearly requires list, not an iterator.
+
+  spec_compliance: 0 findings. Function signature, union logic, and return type all match
+  spec exactly. Extra keyword defaults (sensitivity_dbm, ambient_noise_db) are pass-through
+  arguments required by the underlying dispatcher, not scope creep.
+
+  All 418 suite tests pass. Coverage 90.28%.
+overall: pass

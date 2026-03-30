@@ -1,4 +1,4 @@
-"""Coverage analysis — boundary masking and coverage percentage computation."""
+"""Coverage analysis — boundary masking, coverage percentage, and layer unions."""
 
 from __future__ import annotations
 
@@ -8,7 +8,77 @@ import numpy as np
 import numpy.typing as npt
 from shapely.geometry import MultiPolygon, Polygon
 
+from salus.models.scenario import SensorPlacement
+from salus.models.sensor import SensorDefinition, SensorType
 from salus.models.site import SiteModel
+
+_DEFAULT_SENSITIVITY_DBM: float = -70.0
+_DEFAULT_AMBIENT_NOISE_DB: float = 0.0
+
+
+def compute_layer_coverage(
+    site: SiteModel,
+    placements_by_type: dict[SensorType, list[tuple[SensorDefinition, SensorPlacement]]],
+    *,
+    sensitivity_dbm: float = _DEFAULT_SENSITIVITY_DBM,
+    ambient_noise_db: float = _DEFAULT_AMBIENT_NOISE_DB,
+) -> dict[SensorType, npt.NDArray[np.bool_]]:
+    """Compute per-layer coverage by unioning all sensors of each type.
+
+    For each sensor type key in *placements_by_type*, computes individual
+    coverage arrays for every ``(SensorDefinition, SensorPlacement)`` pair and
+    combines them with logical OR.  A cell is covered by a layer if **any**
+    sensor of that type can detect it.
+
+    Empty sensor lists produce an all-False array of shape
+    ``(site.rows, site.cols)``.
+
+    Args:
+        site: The site terrain model.
+        placements_by_type: Mapping from :class:`~salus.models.sensor.SensorType`
+            to a list of ``(sensor_definition, placement)`` pairs.
+        sensitivity_dbm: Detection threshold for RF sensors (dBm).
+        ambient_noise_db: Ambient noise level for acoustic sensors (dB).
+
+    Returns:
+        Mapping from each :class:`~salus.models.sensor.SensorType` present in
+        *placements_by_type* to a boolean 2D array of shape
+        ``(site.rows, site.cols)`` — True where at least one sensor of that
+        type provides coverage.
+
+    Raises:
+        ValueError: If any individual sensor coverage array has a shape that
+            does not match ``(site.rows, site.cols)``.
+    """
+    from salus.engine.dispatcher import compute_sensor_coverage
+
+    result: dict[SensorType, npt.NDArray[np.bool_]] = {}
+
+    for sensor_type, pairs in placements_by_type.items():
+        union: npt.NDArray[np.bool_] = np.zeros((site.rows, site.cols), dtype=bool)
+
+        for sensor_def, placement in pairs:
+            cov = compute_sensor_coverage(
+                site,
+                sensor_def,
+                placement,
+                sensitivity_dbm=sensitivity_dbm,
+                ambient_noise_db=ambient_noise_db,
+            )
+            if cov is None:  # D-097: guard against unexpected None return
+                raise ValueError(
+                    f"compute_sensor_coverage returned None for sensor '{sensor_def.name}'"
+                )
+            if cov.shape != (site.rows, site.cols):
+                raise ValueError(
+                    f"Coverage array shape {cov.shape} does not match site shape "
+                    f"({site.rows}, {site.cols}) for sensor '{sensor_def.name}'"
+                )
+            union |= cov.astype(bool)  # D-098: explicit cast guards non-bool dtypes
+
+        result[sensor_type] = union
+
+    return result
 
 
 def boundary_mask(site: SiteModel, boundary: Polygon | MultiPolygon) -> npt.NDArray[np.bool_]:

@@ -1064,3 +1064,25 @@ defects:
     resolution: "Replaced if-chain with match statement plus assert_never(unreachable) — mypy catches unhandled SensorType variants at type-check time."
     status: resolved
     commit: "pending"
+
+  - id: D-097
+    severity: medium
+    task: S5-1
+    found_by: silent_failure_hunter
+    file: src/salus/engine/coverage.py
+    line: 61
+    description: "compute_sensor_coverage return value not checked for None before .shape is accessed. A None return produces AttributeError rather than the documented ValueError, masking the root cause."
+    resolution: "Added 'if cov is None: raise ValueError(...)' guard immediately after compute_sensor_coverage call. Added test_none_return_raises_value_error using monkeypatch."
+    status: resolved
+    commit: "pending"
+
+  - id: D-098
+    severity: medium
+    task: S5-1
+    found_by: silent_failure_hunter
+    file: src/salus/engine/coverage.py
+    line: 73
+    description: "union |= cov has no dtype check. A floating-point coverage array from a buggy sensor backend is silently coerced via NumPy: non-zero floats become True, producing a plausible-looking but physically wrong boolean union."
+    resolution: "Changed 'union |= cov' to 'union |= cov.astype(bool)' — explicit cast makes intent clear and prevents silent coercion errors. Added test_float_coverage_array_coerced_to_bool."
+    status: resolved
+    commit: "pending"
