@@ -1,0 +1,48 @@
+task_id: S4-5
+timestamp: 2026-03-30T13:00:00Z
+quality_gates:
+  G1_lint: pass
+  G2_format: pass
+  G3_import: pass
+  G4_type: pass
+  G5_security: pass
+  G6_unit_test: pass
+  G7_coverage: pass
+  G8_secrets: N/A — detect-secrets not installed
+  coverage_pct: 90.22
+review:
+  l1_standards:
+    testing: pass
+    error_handling: pass
+    logging: "N/A — pure computation dispatch, no file I/O or persistent state"
+    security: "N/A — no file I/O, no user input paths"
+  l2_agents:
+    silent_failure_hunter: {status: fail, findings: 4}
+    spec_compliance: {status: pass, findings: 0}
+    regression_reviewer: {status: pass, findings: 1}
+defect_ids: [D-094, D-095, D-096]
+notes: >
+  D-094 (HIGH): NaN/inf height_override_m bypasses Pydantic validator (NaN < 0.0 is
+  False in IEEE 754), sensor_agl becomes NaN, compute_viewshed produces silent all-False
+  result. Added math.isfinite(sensor_agl) guard in _viewshed_coverage; raises ValueError.
+  Tests: test_nonfinite_height_override_raises, test_inf_height_override_raises.
+
+  D-095 (HIGH): OSError in compute_viewshed silently fell back to NumPy viewshed with no
+  diagnostic. Split except (ImportError, OSError) into separate branches; OSError branch
+  emits warnings.warn with exc detail. Test: test_oserror_fallback_emits_warning
+  (monkeypatches _viewshed_gdal to raise OSError).
+
+  D-096 (MEDIUM): If-chain dispatch was not statically exhaustive; a new SensorType would
+  fall through to ValueError at runtime. Replaced with match statement + assert_never —
+  mypy catches unhandled variants at type-check time.
+
+  Regression reviewer: no regressions. viewshed.py change (split except clause + warn)
+  preserves all existing passing behaviour; only the OSError branch now emits a warning
+  before the fallback that was previously silent.
+
+  spec-compliance: 0 findings. Dispatcher matches spec routing exactly: Radar/EO_IR →
+  viewshed, RF → rf_coverage, Acoustic → acoustic_coverage. Default constants match spec.
+  No additional sensor types or dispatch branches added.
+
+  All 405 suite tests pass. Coverage 90.22%.
+overall: pass

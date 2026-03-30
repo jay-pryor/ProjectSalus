@@ -1031,3 +1031,36 @@ defects:
     resolution: "Replaced math.pow with np.float64 arithmetic inside np.errstate(over='ignore'); overflow saturates to inf and is capped by min(effective_range, max_range_m) rather than raising. Added test_extreme_negative_noise_does_not_raise."
     status: resolved
     commit: "pending"
+
+  - id: D-094
+    severity: high
+    task: S4-5
+    found_by: silent_failure_hunter
+    file: src/salus/engine/dispatcher.py
+    line: 78
+    description: "NaN height_override_m passes SensorPlacement._height_override_non_negative (NaN < 0.0 is False in IEEE 754). sensor_agl becomes NaN, propagates to compute_viewshed as observer_height, and the numpy fallback produces an all-False viewshed with no exception or warning."
+    resolution: "Added math.isfinite(sensor_agl) guard in _viewshed_coverage; raises ValueError with clear message. Added tests test_nonfinite_height_override_raises and test_inf_height_override_raises."
+    status: resolved
+    commit: "pending"
+
+  - id: D-095
+    severity: high
+    task: S4-5
+    found_by: silent_failure_hunter
+    file: src/salus/engine/viewshed.py
+    line: 67
+    description: "OSError in compute_viewshed silently falls back to NumPy ray-marching without any warning. OSError can indicate DEM file errors distinct from GDAL being unavailable, resulting in a silently degraded viewshed."
+    resolution: "Split except (ImportError, OSError) into separate branches; OSError branch emits warnings.warn with exc detail before falling back. Added test_oserror_fallback_emits_warning using monkeypatch."
+    status: resolved
+    commit: "pending"
+
+  - id: D-096
+    severity: medium
+    task: S4-5
+    found_by: silent_failure_hunter
+    file: src/salus/engine/dispatcher.py
+    line: 60
+    description: "If-chain dispatch is not statically exhaustive. A new SensorType added without a matching branch silently falls through to ValueError at runtime rather than being caught by mypy."
+    resolution: "Replaced if-chain with match statement plus assert_never(unreachable) — mypy catches unhandled SensorType variants at type-check time."
+    status: resolved
+    commit: "pending"

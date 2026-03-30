@@ -6,6 +6,8 @@ ray-marching implementation for environments without GDAL.
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import numpy.typing as npt
 
@@ -64,7 +66,14 @@ def compute_viewshed(
 
     try:
         return _viewshed_gdal(site, observer_x, observer_y, observer_height, max_range)
-    except (ImportError, OSError):
+    except ImportError:
+        return _viewshed_numpy(site, observer_x, observer_y, observer_height, max_range)
+    except OSError as exc:
+        warnings.warn(
+            f"GDAL raised OSError ({exc}); falling back to NumPy viewshed — "
+            "results may differ from GDAL output.",
+            stacklevel=2,
+        )
         return _viewshed_numpy(site, observer_x, observer_y, observer_height, max_range)
 
 
