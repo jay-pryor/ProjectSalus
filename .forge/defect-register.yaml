@@ -822,3 +822,25 @@ defects:
     resolution: "Changed ax.fill() to use facecolor= and edgecolor= as separate kwargs, ensuring hatch is always visible"
     status: resolved
     commit: "pending"
+
+  - id: D-075
+    severity: high
+    task: S4-1
+    found_by: silent_failure_hunter
+    file: src/salus/engine/rf_propagation.py
+    line: 35
+    description: "NaN and Inf bypass the > 0.0 guards on distance_m and frequency_hz (IEEE 754: NaN comparisons always False, Inf > 0 is True). math.log10(nan) and math.log10(inf) return nan/inf silently with no exception, propagating bad values into link budget calculations."
+    resolution: "Replaced <= 0.0 guards with math.isfinite() + <= 0.0 compound check; raises ValueError for NaN, +/-inf, and non-positive values. Added 4 tests."
+    status: resolved
+    commit: "pending"
+
+  - id: D-076
+    severity: medium
+    task: S4-1
+    found_by: silent_failure_hunter
+    file: src/salus/engine/rf_propagation.py
+    line: 29
+    description: "Docstring states return is 'positive value' but FSPL is negative for sub-metre distances at any practical frequency. Incorrect contract misleads callers."
+    resolution: "Updated docstring: removed 'positive value' claim; noted that sub-metre distances can produce negative dB and that the formula is a far-field approximation."
+    status: resolved
+    commit: "pending"

@@ -1,0 +1,41 @@
+task_id: S4-1
+timestamp: 2026-03-30T09:00:00Z
+quality_gates:
+  G1_lint: pass
+  G2_format: pass
+  G3_import: pass
+  G4_type: pass
+  G5_security: pass
+  G6_unit_test: pass
+  G7_coverage: pass
+  G8_secrets: pass
+  coverage_pct: 86.85
+review:
+  l1_standards:
+    testing: pass
+    error_handling: pass
+    logging: "N/A — pure math function, no I/O or state"
+    security: "N/A — no file I/O, no user input paths"
+  l2_agents:
+    silent_failure_hunter: {status: fail, findings: 5}
+    spec_compliance: {status: pass, findings: 2}
+defect_ids: [D-075, D-076]
+notes: >
+  D-075 (HIGH): NaN/Inf bypass of positivity guards — replaced `<= 0.0` checks
+  with `not math.isfinite(x) or x <= 0.0` compound guard on both inputs.
+  Covers NaN (NaN comparisons always False in IEEE 754), +inf, and -inf.
+  Four tests added for nan/inf on both parameters.
+
+  D-076 (MEDIUM): Docstring claimed return was always "positive value" — false
+  for sub-metre distances (FSPL formula is a far-field approximation). Updated
+  docstring to state value may be negative at sub-metre distances and clarify
+  the far-field constraint.
+
+  spec-compliance info (docstring scope): Narrowed module docstring from
+  "FSPL and knife-edge diffraction" to "FSPL" only — diffraction is S4-2.
+
+  spec-compliance info (ValueError guards): Guards are beyond spec but add
+  safety without changing specified behaviour — accepted.
+
+  All 22 RF propagation tests pass. Total suite: 308 passed.
+overall: pass
