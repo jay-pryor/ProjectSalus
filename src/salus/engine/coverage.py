@@ -15,6 +15,32 @@ from salus.models.site import SiteModel
 
 
 @dataclass(frozen=True)
+class CoverageStats:
+    """Aggregate coverage statistics for a multi-sensor site analysis.
+
+    Attributes:
+        total_coverage_pct: Percentage of the full raster covered by at least
+            one sensor (0–100).
+        per_layer_coverage_pct: Coverage percentage for each sensor type layer
+            over the full raster.
+        per_zone_coverage_pct: Coverage percentage for each named zone, keyed
+            by zone name.  Empty if no zones are defined.
+        gap_area_m2: Total uncovered area within the raster in square metres.
+        redundancy_map: Integer 2D array where each cell value is the number
+            of sensor-type layers that cover it (0 = uncovered).
+        largest_contiguous_gap_m2: Area in square metres of the single largest
+            contiguous block of uncovered cells.  0.0 if there are no gaps.
+    """
+
+    total_coverage_pct: float
+    per_layer_coverage_pct: dict[SensorType, float]
+    per_zone_coverage_pct: dict[str, float]
+    gap_area_m2: float
+    redundancy_map: npt.NDArray[np.intp]
+    largest_contiguous_gap_m2: float
+
+
+@dataclass(frozen=True)
 class GapAnalysis:
     """Result of a coverage gap analysis within a site boundary.
 
@@ -270,6 +296,115 @@ def build_gap_analysis(
         gap_area_m2=gap_area_m2,
         gap_percentage=gap_percentage,
         gap_polygons=gap_polygons,
+    )
+
+
+def compute_coverage_stats(
+    site: SiteModel,
+    layer_coverages: dict[SensorType, npt.NDArray[np.bool_]],
+    composite: npt.NDArray[np.bool_],
+    gaps: npt.NDArray[np.bool_],
+    zones: list,
+) -> CoverageStats:
+    """Compute aggregate coverage statistics for a multi-sensor site analysis.
+
+    Args:
+        site: The site terrain model (provides resolution for area calculation).
+        layer_coverages: Per-sensor-type boolean coverage arrays (output of
+            :func:`compute_layer_coverage`).
+        composite: Any-sensor composite coverage array (output of
+            :func:`compute_composite_coverage`).
+        gaps: Uncovered cell mask (output of :func:`compute_gaps`).
+        zones: List of :class:`~salus.models.zone.Zone` objects defining named
+            regions.  Empty list = no per-zone statistics computed.
+
+    Returns:
+        :class:`CoverageStats` with total/per-layer/per-zone coverage percentages,
+        gap area, redundancy map, and largest contiguous gap area.
+
+    Raises:
+        ValueError: If any layer array, *composite*, or *gaps* has a shape
+            different from ``(site.rows, site.cols)``.
+        ValueError: If *site.resolution* is not finite or not positive.
+    """
+    import math
+
+    import scipy.ndimage
+
+    from salus.models.zone import Zone
+
+    expected_shape = (site.rows, site.cols)
+
+    if not math.isfinite(site.resolution) or site.resolution <= 0.0:
+        raise ValueError(f"site.resolution must be a finite positive number, got {site.resolution}")
+
+    for sensor_type, arr in layer_coverages.items():
+        if arr.shape != expected_shape:
+            raise ValueError(
+                f"Layer {sensor_type!r} shape {arr.shape} does not match "
+                f"site shape {expected_shape}"
+            )
+    if composite.shape != expected_shape:
+        raise ValueError(
+            f"composite shape {composite.shape} does not match site shape {expected_shape}"
+        )
+    if gaps.shape != expected_shape:
+        raise ValueError(f"gaps shape {gaps.shape} does not match site shape {expected_shape}")
+
+    cell_area_m2 = site.resolution * site.resolution
+    total_cells = site.rows * site.cols
+
+    # D-103: guard against zero-dimension DEM causing ZeroDivisionError
+    if total_cells == 0:
+        raise ValueError(
+            f"site has zero cells (rows={site.rows}, cols={site.cols}); "
+            "DEM must have at least one cell"
+        )
+
+    # Total coverage %
+    total_coverage_pct = float(composite.astype(bool).sum()) / float(total_cells) * 100.0
+
+    # Per-layer coverage %
+    per_layer_coverage_pct: dict[SensorType, float] = {
+        sensor_type: float(arr.astype(bool).sum()) / float(total_cells) * 100.0
+        for sensor_type, arr in layer_coverages.items()
+    }
+
+    # Per-zone coverage % — rasterize each zone polygon then apply coverage_percentage
+    per_zone_coverage_pct: dict[str, float] = {}
+    for zone in zones:
+        if not isinstance(zone, Zone):
+            raise ValueError(f"zones must contain Zone objects, got {type(zone).__name__}")
+        # D-104: duplicate zone names would silently overwrite statistics
+        if zone.name in per_zone_coverage_pct:
+            raise ValueError(f"Duplicate zone name {zone.name!r}; zone names must be unique")
+        zone_mask = boundary_mask(site, zone.geometry)
+        per_zone_coverage_pct[zone.name] = coverage_percentage(composite, zone_mask)
+
+    # Gap area
+    gap_area_m2 = float(gaps.astype(bool).sum()) * cell_area_m2
+
+    # Redundancy map — count sensor layers covering each cell
+    redundancy_map: npt.NDArray[np.intp] = np.zeros(expected_shape, dtype=np.intp)
+    for arr in layer_coverages.values():
+        redundancy_map += arr.astype(np.intp)
+
+    # Largest contiguous gap (connected components, 4-connectivity)
+    gap_bool = gaps.astype(bool)
+    largest_contiguous_gap_m2 = 0.0
+    if gap_bool.any():
+        labelled, num_features = scipy.ndimage.label(gap_bool)
+        if num_features > 0:
+            counts = scipy.ndimage.sum(gap_bool, labelled, range(1, num_features + 1))
+            largest_contiguous_gap_m2 = float(max(counts)) * cell_area_m2
+
+    return CoverageStats(
+        total_coverage_pct=total_coverage_pct,
+        per_layer_coverage_pct=per_layer_coverage_pct,
+        per_zone_coverage_pct=per_zone_coverage_pct,
+        gap_area_m2=gap_area_m2,
+        redundancy_map=redundancy_map,
+        largest_contiguous_gap_m2=largest_contiguous_gap_m2,
     )
 
 

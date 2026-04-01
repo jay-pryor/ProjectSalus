@@ -1130,3 +1130,25 @@ defects:
     resolution: "After polys assembly, if gap_cells>0 and polys is empty, emits UserWarning explaining inconsistency. Area/percentage remain correct; only geometry is unavailable. Added test_empty_polys_with_gap_cells_warns."
     status: resolved
     commit: "pending"
+
+  - id: D-103
+    severity: high
+    task: S5-3
+    found_by: silent_failure_hunter
+    file: src/salus/engine/coverage.py
+    line: 358
+    description: "total_cells=0 when site.rows or site.cols is zero causes ZeroDivisionError on total_coverage_pct and per_layer_coverage_pct divisions. SiteModel._validate_dem only checks ndim==2, not non-zero dimensions. Error is unhelpful with no indication of cause."
+    resolution: "Added guard after shape checks: if total_cells==0 raise ValueError with rows/cols in message."
+    status: resolved
+    commit: "pending"
+
+  - id: D-104
+    severity: medium
+    task: S5-3
+    found_by: silent_failure_hunter
+    file: src/salus/engine/coverage.py
+    line: 371
+    description: "Duplicate zone names silently overwrite per_zone_coverage_pct entries. Second zone with same name replaces first, losing statistics with no warning — PDF report could show incorrect zone coverage."
+    resolution: "Added uniqueness check before assignment: if zone.name in per_zone_coverage_pct raise ValueError. Added test_duplicate_zone_name_raises."
+    status: resolved
+    commit: "pending"

@@ -7,11 +7,13 @@ import pytest
 from shapely.geometry import MultiPolygon, Polygon
 
 from salus.engine.coverage import (
+    CoverageStats,
     GapAnalysis,
     boundary_mask,
     build_gap_analysis,
     clip_coverage_to_boundary,
     compute_composite_coverage,
+    compute_coverage_stats,
     compute_gaps,
     compute_layer_coverage,
     coverage_percentage,
@@ -19,6 +21,7 @@ from salus.engine.coverage import (
 from salus.ingest.terrain import load_dem
 from salus.models.scenario import SensorPlacement
 from salus.models.sensor import SensorDefinition, SensorType
+from salus.models.zone import Zone, ZoneType
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -664,3 +667,260 @@ class TestBuildGapAnalysis:
         # area and percentage are still correct
         assert result.gap_area_m2 == pytest.approx(16.0)
         assert result.gap_polygons is None
+
+
+# ---------------------------------------------------------------------------
+# compute_coverage_stats
+# ---------------------------------------------------------------------------
+
+
+class TestCoverageStats:
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+    def _make_layers_and_composite(self, shape=(10, 10)):
+        radar = np.zeros(shape, dtype=bool)
+        radar[:5, :] = True  # top half
+        acoustic = np.zeros(shape, dtype=bool)
+        acoustic[:, 5:] = True  # right half
+        layers = {SensorType.Radar: radar, SensorType.Acoustic: acoustic}
+        composite = compute_composite_coverage(layers)
+        return layers, composite
+
+    def _make_zone(self, site, name="TestZone"):
+        min_x, max_x, min_y, max_y = site.extent
+        mid_x = (min_x + max_x) / 2
+        from shapely.geometry import box
+
+        return Zone(
+            name=name,
+            zone_type=ZoneType.perimeter,
+            geometry=box(min_x, min_y, mid_x, max_y),
+        )
+
+    # ------------------------------------------------------------------
+    # Return type
+    # ------------------------------------------------------------------
+    def test_returns_coverage_stats(self, flat_dem_path):
+        site = load_dem(flat_dem_path)
+        layers, composite = self._make_layers_and_composite(site.dem.shape)
+        gaps = compute_gaps(composite, np.ones(site.dem.shape, dtype=bool))
+        result = compute_coverage_stats(site, layers, composite, gaps, [])
+        assert isinstance(result, CoverageStats)
+
+    # ------------------------------------------------------------------
+    # Total coverage %
+    # ------------------------------------------------------------------
+    def test_total_coverage_full(self, flat_dem_path):
+        site = load_dem(flat_dem_path)
+        cov = np.ones(site.dem.shape, dtype=bool)
+        gaps = np.zeros(site.dem.shape, dtype=bool)
+        result = compute_coverage_stats(site, {SensorType.Radar: cov}, cov, gaps, [])
+        assert result.total_coverage_pct == pytest.approx(100.0)
+
+    def test_total_coverage_none(self, flat_dem_path):
+        site = load_dem(flat_dem_path)
+        cov = np.zeros(site.dem.shape, dtype=bool)
+        gaps = np.ones(site.dem.shape, dtype=bool)
+        result = compute_coverage_stats(site, {SensorType.Radar: cov}, cov, gaps, [])
+        assert result.total_coverage_pct == pytest.approx(0.0)
+
+    def test_total_coverage_in_range(self, flat_dem_path):
+        site = load_dem(flat_dem_path)
+        layers, composite = self._make_layers_and_composite(site.dem.shape)
+        gaps = compute_gaps(composite, np.ones(site.dem.shape, dtype=bool))
+        result = compute_coverage_stats(site, layers, composite, gaps, [])
+        assert 0.0 <= result.total_coverage_pct <= 100.0
+
+    # ------------------------------------------------------------------
+    # Per-layer coverage %
+    # ------------------------------------------------------------------
+    def test_per_layer_keys_match_input(self, flat_dem_path):
+        site = load_dem(flat_dem_path)
+        layers, composite = self._make_layers_and_composite(site.dem.shape)
+        gaps = compute_gaps(composite, np.ones(site.dem.shape, dtype=bool))
+        result = compute_coverage_stats(site, layers, composite, gaps, [])
+        assert set(result.per_layer_coverage_pct.keys()) == set(layers.keys())
+
+    def test_per_layer_coverage_values_in_range(self, flat_dem_path):
+        site = load_dem(flat_dem_path)
+        layers, composite = self._make_layers_and_composite(site.dem.shape)
+        gaps = compute_gaps(composite, np.ones(site.dem.shape, dtype=bool))
+        result = compute_coverage_stats(site, layers, composite, gaps, [])
+        for pct in result.per_layer_coverage_pct.values():
+            assert 0.0 <= pct <= 100.0
+
+    def test_per_layer_full_coverage(self, flat_dem_path):
+        site = load_dem(flat_dem_path)
+        cov = np.ones(site.dem.shape, dtype=bool)
+        gaps = np.zeros(site.dem.shape, dtype=bool)
+        result = compute_coverage_stats(site, {SensorType.Radar: cov}, cov, gaps, [])
+        assert result.per_layer_coverage_pct[SensorType.Radar] == pytest.approx(100.0)
+
+    # ------------------------------------------------------------------
+    # Per-zone coverage %
+    # ------------------------------------------------------------------
+    def test_no_zones_empty_dict(self, flat_dem_path):
+        site = load_dem(flat_dem_path)
+        cov = np.ones(site.dem.shape, dtype=bool)
+        gaps = np.zeros(site.dem.shape, dtype=bool)
+        result = compute_coverage_stats(site, {SensorType.Radar: cov}, cov, gaps, [])
+        assert result.per_zone_coverage_pct == {}
+
+    def test_per_zone_full_coverage(self, flat_dem_path):
+        site = load_dem(flat_dem_path)
+        cov = np.ones(site.dem.shape, dtype=bool)
+        gaps = np.zeros(site.dem.shape, dtype=bool)
+        zone = self._make_zone(site, "TestZone")
+        result = compute_coverage_stats(site, {SensorType.Radar: cov}, cov, gaps, [zone])
+        assert "TestZone" in result.per_zone_coverage_pct
+        assert result.per_zone_coverage_pct["TestZone"] == pytest.approx(100.0)
+
+    def test_per_zone_no_coverage(self, flat_dem_path):
+        site = load_dem(flat_dem_path)
+        cov = np.zeros(site.dem.shape, dtype=bool)
+        gaps = np.ones(site.dem.shape, dtype=bool)
+        zone = self._make_zone(site, "EmptyZone")
+        result = compute_coverage_stats(site, {SensorType.Radar: cov}, cov, gaps, [zone])
+        assert result.per_zone_coverage_pct["EmptyZone"] == pytest.approx(0.0)
+
+    def test_per_zone_name_is_key(self, flat_dem_path):
+        site = load_dem(flat_dem_path)
+        cov = np.ones(site.dem.shape, dtype=bool)
+        gaps = np.zeros(site.dem.shape, dtype=bool)
+        z1 = self._make_zone(site, "Alpha")
+        z2 = self._make_zone(site, "Beta")
+        result = compute_coverage_stats(site, {SensorType.Radar: cov}, cov, gaps, [z1, z2])
+        assert set(result.per_zone_coverage_pct.keys()) == {"Alpha", "Beta"}
+
+    # ------------------------------------------------------------------
+    # Gap area
+    # ------------------------------------------------------------------
+    def test_gap_area_zero_when_full_coverage(self, flat_dem_path):
+        site = load_dem(flat_dem_path)
+        cov = np.ones(site.dem.shape, dtype=bool)
+        gaps = np.zeros(site.dem.shape, dtype=bool)
+        result = compute_coverage_stats(site, {SensorType.Radar: cov}, cov, gaps, [])
+        assert result.gap_area_m2 == pytest.approx(0.0)
+
+    def test_gap_area_scales_with_resolution(self, flat_dem_path):
+        site = load_dem(flat_dem_path)
+        gaps = np.ones(site.dem.shape, dtype=bool)
+        cov = np.zeros(site.dem.shape, dtype=bool)
+        result = compute_coverage_stats(site, {SensorType.Radar: cov}, cov, gaps, [])
+        expected = float(site.rows * site.cols) * site.resolution**2
+        assert result.gap_area_m2 == pytest.approx(expected)
+
+    # ------------------------------------------------------------------
+    # Redundancy map
+    # ------------------------------------------------------------------
+    def test_redundancy_map_shape(self, flat_dem_path):
+        site = load_dem(flat_dem_path)
+        layers, composite = self._make_layers_and_composite(site.dem.shape)
+        gaps = compute_gaps(composite, np.ones(site.dem.shape, dtype=bool))
+        result = compute_coverage_stats(site, layers, composite, gaps, [])
+        assert result.redundancy_map.shape == site.dem.shape
+
+    def test_redundancy_map_dtype_integer(self, flat_dem_path):
+        site = load_dem(flat_dem_path)
+        layers, composite = self._make_layers_and_composite(site.dem.shape)
+        gaps = compute_gaps(composite, np.ones(site.dem.shape, dtype=bool))
+        result = compute_coverage_stats(site, layers, composite, gaps, [])
+        assert np.issubdtype(result.redundancy_map.dtype, np.integer)
+
+    def test_redundancy_map_max_equals_layer_count(self, flat_dem_path):
+        """Cells covered by all layers have redundancy == number of layers."""
+        site = load_dem(flat_dem_path)
+        # Both layers cover the whole DEM
+        cov = np.ones(site.dem.shape, dtype=bool)
+        layers = {SensorType.Radar: cov, SensorType.Acoustic: cov}
+        composite = compute_composite_coverage(layers)
+        gaps = compute_gaps(composite, np.ones(site.dem.shape, dtype=bool))
+        result = compute_coverage_stats(site, layers, composite, gaps, [])
+        assert result.redundancy_map.max() == 2
+
+    def test_redundancy_map_zero_for_uncovered(self, flat_dem_path):
+        """Cells covered by no layer have redundancy == 0."""
+        site = load_dem(flat_dem_path)
+        cov = np.zeros(site.dem.shape, dtype=bool)
+        layers = {SensorType.Radar: cov}
+        composite = compute_composite_coverage(layers)
+        gaps = compute_gaps(composite, np.ones(site.dem.shape, dtype=bool))
+        result = compute_coverage_stats(site, layers, composite, gaps, [])
+        assert result.redundancy_map.max() == 0
+
+    # ------------------------------------------------------------------
+    # Largest contiguous gap
+    # ------------------------------------------------------------------
+    def test_largest_gap_zero_when_full_coverage(self, flat_dem_path):
+        site = load_dem(flat_dem_path)
+        cov = np.ones(site.dem.shape, dtype=bool)
+        gaps = np.zeros(site.dem.shape, dtype=bool)
+        result = compute_coverage_stats(site, {SensorType.Radar: cov}, cov, gaps, [])
+        assert result.largest_contiguous_gap_m2 == pytest.approx(0.0)
+
+    def test_largest_gap_single_block(self, flat_dem_path):
+        """Single contiguous gap block — largest equals total gap area."""
+        site = load_dem(flat_dem_path)
+        cov = np.ones(site.dem.shape, dtype=bool)
+        cov[20:40, 20:40] = False  # 20×20 = 400 uncovered cells
+        composite = cov
+        gaps = ~cov
+        result = compute_coverage_stats(site, {SensorType.Radar: cov}, composite, gaps, [])
+        expected = 400.0 * site.resolution**2
+        assert result.largest_contiguous_gap_m2 == pytest.approx(expected)
+
+    def test_largest_gap_picks_bigger_of_two(self, flat_dem_path):
+        """Two disjoint gaps — largest contiguous is the bigger one."""
+        site = load_dem(flat_dem_path)
+        cov = np.ones(site.dem.shape, dtype=bool)
+        cov[5:10, 5:10] = False  # 5×5 = 25 cells
+        cov[50:70, 50:70] = False  # 20×20 = 400 cells
+        composite = cov
+        gaps = ~cov
+        result = compute_coverage_stats(site, {SensorType.Radar: cov}, composite, gaps, [])
+        expected = 400.0 * site.resolution**2
+        assert result.largest_contiguous_gap_m2 == pytest.approx(expected)
+
+    # ------------------------------------------------------------------
+    # Input guards
+    # ------------------------------------------------------------------
+    def test_layer_shape_mismatch_raises(self, flat_dem_path):
+        site = load_dem(flat_dem_path)
+        bad = np.ones((50, 50), dtype=bool)
+        composite = np.ones(site.dem.shape, dtype=bool)
+        gaps = np.zeros(site.dem.shape, dtype=bool)
+        with pytest.raises(ValueError, match="shape"):
+            compute_coverage_stats(site, {SensorType.Radar: bad}, composite, gaps, [])
+
+    def test_composite_shape_mismatch_raises(self, flat_dem_path):
+        site = load_dem(flat_dem_path)
+        cov = np.ones(site.dem.shape, dtype=bool)
+        bad_composite = np.ones((50, 50), dtype=bool)
+        gaps = np.zeros(site.dem.shape, dtype=bool)
+        with pytest.raises(ValueError, match="shape"):
+            compute_coverage_stats(site, {SensorType.Radar: cov}, bad_composite, gaps, [])
+
+    def test_gaps_shape_mismatch_raises(self, flat_dem_path):
+        site = load_dem(flat_dem_path)
+        cov = np.ones(site.dem.shape, dtype=bool)
+        bad_gaps = np.zeros((50, 50), dtype=bool)
+        with pytest.raises(ValueError, match="shape"):
+            compute_coverage_stats(site, {SensorType.Radar: cov}, cov, bad_gaps, [])
+
+    def test_invalid_zone_type_raises(self, flat_dem_path):
+        site = load_dem(flat_dem_path)
+        cov = np.ones(site.dem.shape, dtype=bool)
+        gaps = np.zeros(site.dem.shape, dtype=bool)
+        with pytest.raises(ValueError, match="Zone"):
+            compute_coverage_stats(site, {SensorType.Radar: cov}, cov, gaps, ["not-a-zone"])
+
+    def test_duplicate_zone_name_raises(self, flat_dem_path):
+        """D-104: two zones with the same name raises ValueError."""
+        site = load_dem(flat_dem_path)
+        cov = np.ones(site.dem.shape, dtype=bool)
+        gaps = np.zeros(site.dem.shape, dtype=bool)
+        z1 = self._make_zone(site, "SameName")
+        z2 = self._make_zone(site, "SameName")
+        with pytest.raises(ValueError, match="Duplicate zone name"):
+            compute_coverage_stats(site, {SensorType.Radar: cov}, cov, gaps, [z1, z2])
