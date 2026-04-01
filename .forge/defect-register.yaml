@@ -1283,7 +1283,7 @@ defects:
     description: "Boundary load failure falls back to full-DEM bitmask and sets loaded_boundary=None. All statistics (total_coverage_pct, gap_area_m2, largest_contiguous_gap_m2) are computed against the wrong denominator with no indication to the user beyond a single stderr warning line."
     resolution: "Changed boundary load failure from warn+fallback to hard error (sys.exit(1)) with clear message. Users must fix their boundary file; silent fallback produced incorrect statistics."
     status: resolved
-    commit: "pending"
+    commit: "940b303"
 
   - id: D-117
     severity: high
@@ -1294,7 +1294,7 @@ defects:
     description: "compute_layer_coverage return value is not checked for emptiness before being passed to compute_composite_coverage. An empty dict raises 'layer_coverages must contain at least one entry' from the composite step, giving a misleading error with no indication of which sensor was the root cause."
     resolution: "Added explicit emptiness check after compute_layer_coverage: if not layer_coverages: print specific diagnostic and sys.exit(1)."
     status: resolved
-    commit: "pending"
+    commit: "940b303"
 
   - id: D-118
     severity: medium
@@ -1305,7 +1305,7 @@ defects:
     description: "A zero-element coverage array in layer_coverages causes render_layer_coverage_maps to raise. This is caught as a warning and rendering continues, but the same defective data is then used for composite/gaps/redundancy maps — potentially writing malformed output files with no further error signal."
     resolution: "Added pre-render validation loop: if any arr.size==0 in layer_coverages, print error and sys.exit(1) before any render call."
     status: resolved
-    commit: "pending"
+    commit: "940b303"
 
   - id: D-119
     severity: medium
@@ -1316,7 +1316,7 @@ defects:
     description: "sensor_positions is built from all sc.sensor_placements without filtering out placements whose sensor_name was not found in sensor_map. Invalid-sensor positions appear as markers on all rendered maps even though those sensors did not participate in coverage computation."
     resolution: "Filtered sensor_positions list comprehension to only include placements where sensor_map.get(p.sensor_name) is not None."
     status: resolved
-    commit: "pending"
+    commit: "940b303"
 
   - id: D-120
     severity: medium
@@ -1327,4 +1327,4 @@ defects:
     description: "test_los_sensor_produces_png weakened from exact count (len(pngs)==1) to len(pngs)>=1. Loses precision in detecting accidental extra per-sensor output files."
     resolution: "Updated test to assert exact per-sensor filename (Echodyne_EchoGuard_coverage.png) exists, replacing the imprecise >=1 count."
     status: resolved
-    commit: "pending"
+    commit: "940b303"
