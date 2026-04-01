@@ -1328,3 +1328,14 @@ defects:
     resolution: "Updated test to assert exact per-sensor filename (Echodyne_EchoGuard_coverage.png) exists, replacing the imprecise >=1 count."
     status: resolved
     commit: "940b303"
+
+  - id: D-121
+    severity: medium
+    task: S6-1
+    found_by: silent_failure_hunter
+    file: src/salus/models/threat.py
+    line: 0
+    description: "NaN bypasses all </<=/=> numeric field validators in ThreatProfile (rcs_m2, max_speed_ms, typical_altitude_m) and ThreatCorridor (altitude_m, width_m, start_distance_m). IEEE-754: NaN comparisons always return False, so validators silently accept NaN, producing models with NaN field values that corrupt downstream engine calculations."
+    resolution: "Added math.isfinite(v) guard to all six numeric field validators. Added 6 NaN regression tests."
+    status: resolved
+    commit: "pending"

@@ -1,0 +1,13 @@
+# DJI Mavic 3 — Low Slow small UAS threat profile
+# Representative of the most common commercial off-the-shelf (COTS) drone threat.
+# Source: DJI Mavic 3 product specifications; cUAS detection modelling defaults.
+# Last updated: 2026-04-01
+
+name: "DJI Mavic 3 — Low Slow"
+rcs_m2: 0.01          # confidence: medium — published estimates 0.005–0.02 m² for sub-250g rotary wing
+rf_signature: "2.4 GHz and 5.8 GHz OcuSync 3 control/video link; active during most of flight"
+max_speed_ms: 19.0    # confidence: high — DJI published max speed 19 m/s (sport mode)
+typical_altitude_m: 50.0   # confidence: medium — low-altitude ingress profile; actual varies
+approach_vectors:
+  - "any"
+evasion_capability: none

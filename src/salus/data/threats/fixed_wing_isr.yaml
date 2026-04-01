@@ -1,0 +1,14 @@
+# Fixed-Wing ISR UAS — Intelligence, Surveillance and Reconnaissance threat profile
+# Representative of a larger, longer-range fixed-wing autonomous drone.
+# Higher altitude, RF-silent autonomous operation makes RF detection unreliable.
+# Source: Publicly available ISR UAS threat assessments.
+# Last updated: 2026-04-01
+
+name: "Fixed-Wing ISR — High Altitude"
+rcs_m2: 0.1           # confidence: medium — larger airframe; estimated 0.05–0.2 m²
+rf_signature: "Minimal — autonomous GPS waypoint navigation; infrequent uplink bursts only"
+max_speed_ms: 40.0    # confidence: medium — typical fixed-wing ISR cruise 30–50 m/s
+typical_altitude_m: 150.0  # confidence: medium — typical ISR operating altitude 100–200m AGL
+approach_vectors:
+  - "any"
+evasion_capability: advanced

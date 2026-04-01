@@ -1,0 +1,14 @@
+# FPV Racing Drone — Fast Low Approach threat profile
+# Representative of a high-speed, low-altitude attack drone based on FPV racing platform.
+# High speed and small RCS make this a challenging detection target.
+# Source: Industry estimates; cUAS operational assessments.
+# Last updated: 2026-04-01
+
+name: "FPV Racing Drone — Fast Approach"
+rcs_m2: 0.005         # confidence: medium — very small airframe, <250g typical; estimated
+rf_signature: "5.8 GHz analogue video link; may be pre-programmed (RF-silent ingress)"
+max_speed_ms: 35.0    # confidence: high — FPV racing drones routinely exceed 30 m/s
+typical_altitude_m: 20.0   # confidence: medium — terrain-hugging low-altitude approach
+approach_vectors:
+  - "any"
+evasion_capability: basic

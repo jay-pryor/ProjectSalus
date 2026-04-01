@@ -10,6 +10,7 @@ import yaml
 from pydantic import BaseModel, ValidationError
 
 from salus.models.sensor import EffectorDefinition, SensorDefinition
+from salus.models.threat import ThreatProfile
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -152,3 +153,25 @@ def load_effectors(directory: str | Path) -> list[EffectorDefinition]:
         ValueError: If any file contains invalid YAML or fails validation.
     """
     return _load_definitions(directory, EffectorDefinition, "effector")
+
+
+def load_threats(directory: str | Path) -> list[ThreatProfile]:
+    """Load all ThreatProfile records from YAML files in *directory*.
+
+    Each YAML file may contain a single threat mapping or a list of mappings.
+
+    Args:
+        directory: Path to the directory containing threat YAML files.
+
+    Returns:
+        List of validated ThreatProfile instances. Returns an empty list
+        (with a warning) if no YAML files are found — callers should check
+        that the list is non-empty before proceeding.
+
+    Raises:
+        FileNotFoundError: If *directory* does not exist.
+        PermissionError: If *directory* cannot be listed.
+        OSError: If any YAML file cannot be opened.
+        ValueError: If any file contains invalid YAML or fails validation.
+    """
+    return _load_definitions(directory, ThreatProfile, "threat")

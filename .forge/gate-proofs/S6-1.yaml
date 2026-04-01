@@ -1,0 +1,33 @@
+task_id: S6-1
+timestamp: 2026-04-01T13:00:00Z
+quality_gates:
+  G1_lint: pass
+  G2_format: pass
+  G3_import: pass
+  G4_type: pass  # pre-existing yaml stubs warning in sensors.py; not introduced by this task
+  G5_security: pass
+  G6_unit_test: pass
+  G7_coverage: pass
+  G8_secrets: pass
+  coverage_pct: 89.78
+review:
+  l1_standards:
+    testing: pass
+    error_handling: pass
+    logging: "N/A — pure data models and YAML loader; no file-based logging required"
+    security: "N/A — no user-supplied paths; YAML loader uses safe_load (existing pattern)"
+  l2_agents:
+    silent_failure_hunter: {status: fail, findings: 1}
+    spec_compliance: {status: pass, findings: 0}
+defect_ids: [D-121]
+notes: >
+  D-121 (MEDIUM): NaN bypassed all numeric field validators in ThreatProfile and
+  ThreatCorridor via IEEE-754 NaN-comparison semantics (NaN <= 0.0 is False).
+  Fixed: added math.isfinite(v) guard to all six affected validators. Six NaN
+  regression tests added.
+
+  spec_compliance: 0 findings. All required fields present on both models.
+  EvasionCapability is a StrEnum with none/basic/advanced. All 3 threat YAML
+  profiles (DJI Mavic, FPV Racing, Fixed-Wing ISR) present and validated.
+  load_threats added to ingest/sensors.py. 563 suite tests pass. G8 clean.
+overall: pass
