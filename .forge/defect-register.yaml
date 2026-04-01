@@ -1339,3 +1339,36 @@ defects:
     resolution: "Added math.isfinite(v) guard to all six numeric field validators. Added 6 NaN regression tests."
     status: resolved
     commit: "pending"
+
+  - id: D-122
+    severity: medium
+    task: S6-2
+    found_by: silent_failure_hunter
+    file: src/salus/engine/threat_corridor.py
+    line: 96
+    description: "NaN/Inf in protected_point coordinates propagates silently: .astype(int) on NaN produces implementation-defined large integer with RuntimeWarning only; in_bounds becomes all-False, function returns CorridorResult with coverage_pct=0 indistinguishable from a legitimately uncovered corridor."
+    resolution: "Added math.isfinite(px) and math.isfinite(py) guard before array construction. Added 2 regression tests."
+    status: resolved
+    commit: "pending"
+
+  - id: D-123
+    severity: low
+    task: S6-2
+    found_by: silent_failure_hunter
+    file: src/salus/engine/threat_corridor.py
+    line: 143
+    description: "When protected_point is outside the grid, in_bounds[0]=False breaks the gap loop immediately, reporting last_gap_before_target_m=0 even though total_cells>0 in-bounds uncovered cells exist. Misleading metric but only occurs when caller places asset outside the raster."
+    resolution: "Deferred — caller configuration error; no fix required per Low severity policy."
+    status: deferred
+    commit: ""
+
+  - id: D-124
+    severity: low
+    task: S6-2
+    found_by: silent_failure_hunter
+    file: src/salus/engine/threat_corridor.py
+    line: 154
+    description: "time_in_coverage_s uses covered_cells * site.resolution as covered distance, but linspace spacing != resolution when start_distance_m is not an exact multiple of resolution. Sub-resolution systematic bias in timing estimate."
+    resolution: "Deferred — sub-resolution error in edge case; acceptable approximation per Low severity policy."
+    status: deferred
+    commit: ""

@@ -1,0 +1,39 @@
+task_id: S6-2
+timestamp: 2026-04-01T14:00:00Z
+quality_gates:
+  G1_lint: pass
+  G2_format: pass
+  G3_import: pass
+  G4_type: pass
+  G5_security: pass
+  G6_unit_test: pass
+  G7_coverage: pass
+  G8_secrets: pass
+  coverage_pct: 90.10
+review:
+  l1_standards:
+    testing: pass
+    error_handling: pass
+    logging: "N/A — pure computation function; no file I/O or external calls"
+    security: "N/A — no user-supplied paths or external data; all inputs are validated"
+  l2_agents:
+    silent_failure_hunter: {status: fail, findings: 3}
+    spec_compliance: {status: pass, findings: 0}
+    regression_reviewer: {status: pass, findings: 0}
+defect_ids: [D-122, D-123, D-124]
+notes: >
+  D-122 (MEDIUM): NaN/Inf in protected_point coordinates produced a silently
+  wrong CorridorResult via .astype(int) on NaN. Fixed: added math.isfinite()
+  guard before array construction; 2 NaN/Inf regression tests added.
+
+  D-123 (LOW, DEFERRED): last_gap_before_target_m=0 when asset is outside
+  grid but corridor cells are in-bounds. Caller configuration error; no fix.
+
+  D-124 (LOW, DEFERRED): time_in_coverage_s uses nominal resolution as sample
+  spacing; sub-resolution bias when start_distance_m not divisible by resolution.
+  Acceptable approximation; no fix.
+
+  spec_compliance: 0 findings. All 4 metrics returned in CorridorResult.
+  regression_reviewer: 0 findings. New file only; no existing API modified.
+  592 suite tests pass. G8 clean.
+overall: pass
