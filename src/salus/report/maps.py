@@ -648,3 +648,131 @@ def _add_cartographic_elements(ax: plt.Axes) -> None:  # type: ignore[name-defin
         xycoords="axes fraction",
         arrowprops=dict(arrowstyle="->", lw=2),
     )
+
+
+# Colour per redundancy level: 0=uncovered, 1=single, 2=double, 3+=triple+
+_REDUNDANCY_COLOURS: list[str] = [
+    "#e74c3c",  # 0 sensors — red
+    "#f1c40f",  # 1 sensor  — yellow
+    "#2ecc71",  # 2 sensors — green
+    "#27ae60",  # 3+ sensors — dark green
+]
+
+
+def render_redundancy_map(
+    site: SiteModel,
+    redundancy_map: np.ndarray,
+    output_path: str | Path,
+    title: str = "Sensor Redundancy Map",
+    sensor_positions: list[tuple[float, float]] | None = None,
+    boundary: Polygon | MultiPolygon | None = None,
+    zones: list[Zone] | None = None,
+) -> Path:
+    """Render a redundancy heat map coloured by sensor count per cell.
+
+    Colour scale:
+    - Red    (0 sensors) — uncovered cell
+    - Yellow (1 sensor)  — single coverage; no redundancy
+    - Green  (2 sensors) — double coverage
+    - Dark green (3+)    — triple or higher coverage
+
+    Args:
+        site: The site terrain model.
+        redundancy_map: Integer array (dtype intp) giving the number of sensor
+            layers covering each cell — output of
+            :func:`~salus.engine.coverage.compute_coverage_stats`.
+        output_path: Where to save the PNG.
+        title: Map title.
+        sensor_positions: Optional list of ``(x, y)`` sensor positions to mark.
+        boundary: Optional boundary polygon to draw as an outline.
+        zones: Optional zone overlays.
+
+    Returns:
+        Path to the saved PNG.
+
+    Raises:
+        ValueError: If *redundancy_map* is not a 2-D array or has zero elements.
+    """
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    if redundancy_map.ndim != 2:
+        raise ValueError(f"redundancy_map must be 2-D, got ndim={redundancy_map.ndim}.")
+    if redundancy_map.size == 0:
+        raise ValueError("redundancy_map has zero elements — cannot render map.")
+    if not np.issubdtype(redundancy_map.dtype, np.integer):  # D-114
+        raise ValueError(f"redundancy_map must have an integer dtype, got {redundancy_map.dtype}.")
+    if np.any(redundancy_map < 0):  # D-112
+        raise ValueError(
+            f"redundancy_map contains negative values (min={redundancy_map.min()}) — "
+            "fill nodata before rendering."
+        )
+    if redundancy_map.shape != site.dem.shape:  # D-113
+        raise ValueError(
+            f"redundancy_map shape {redundancy_map.shape} does not match "
+            f"DEM shape {site.dem.shape}."
+        )
+
+    min_x, max_x, min_y, max_y = site.extent
+    extent = (min_x, max_x, min_y, max_y)
+
+    # Clamp counts to 0–3 bucket (3 = "3 or more")
+    bucketed = np.clip(redundancy_map.astype(np.intp), 0, 3)
+
+    fig, ax = plt.subplots(1, 1, figsize=(12, 10))
+    try:
+        hs = _hillshade(site.dem)
+        ax.imshow(hs, cmap="gray", extent=extent, origin="upper", alpha=0.7, zorder=1)
+
+        _add_basemap(ax, site)
+
+        cmap = ListedColormap(_REDUNDANCY_COLOURS)
+        ax.imshow(
+            bucketed,
+            cmap=cmap,
+            vmin=0,
+            vmax=3,
+            extent=extent,
+            origin="upper",
+            alpha=0.65,
+            zorder=2,
+        )
+
+        _render_boundary(ax, boundary)
+        _render_zones(ax, zones)
+
+        if sensor_positions:
+            for x, y in sensor_positions:
+                ax.plot(
+                    x,
+                    y,
+                    "r^",
+                    markersize=12,
+                    markeredgecolor="black",
+                    markeredgewidth=1,
+                    zorder=7,
+                )
+
+        ax.set_title(title, fontsize=14, fontweight="bold")
+        ax.set_xlabel("Easting (m)")
+        ax.set_ylabel("Northing (m)")
+        _add_cartographic_elements(ax)
+
+        legend_handles = [
+            mpatches.Patch(
+                facecolor=_REDUNDANCY_COLOURS[0], alpha=0.75, label="0 sensors (uncovered)"
+            ),
+            mpatches.Patch(facecolor=_REDUNDANCY_COLOURS[1], alpha=0.75, label="1 sensor"),
+            mpatches.Patch(facecolor=_REDUNDANCY_COLOURS[2], alpha=0.75, label="2 sensors"),
+            mpatches.Patch(facecolor=_REDUNDANCY_COLOURS[3], alpha=0.75, label="3+ sensors"),
+        ]
+        try:  # D-115: guard against Matplotlib legend failures
+            ax.legend(handles=legend_handles, loc="lower left", fontsize=9, framealpha=0.8)
+        except Exception as exc:
+            warnings.warn(f"Redundancy legend could not be added: {exc}", stacklevel=2)
+
+        fig.tight_layout()
+        fig.savefig(output_path, dpi=200, bbox_inches="tight")
+    finally:
+        plt.close(fig)
+
+    return output_path

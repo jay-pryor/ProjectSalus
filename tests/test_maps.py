@@ -22,6 +22,7 @@ from salus.report.maps import (
     render_coverage_map,
     render_gap_map,
     render_layer_coverage_maps,
+    render_redundancy_map,
 )
 
 
@@ -610,3 +611,134 @@ class TestRenderLayerCoverageMapsGuards:
         layers = {SensorType.Radar: np.ones((0, 0), dtype=bool)}
         with pytest.raises(ValueError, match="zero elements"):
             render_layer_coverage_maps(site, layers, tmp_path)
+
+
+class TestRenderRedundancyMap:
+    def _make_redundancy(self, site: object, value: int = 0) -> np.ndarray:
+        from salus.models.site import SiteModel
+
+        assert isinstance(site, SiteModel)
+        return np.full(site.dem.shape, value, dtype=np.intp)
+
+    def test_returns_path(self, flat_dem_path, tmp_path):
+        site = load_dem(flat_dem_path)
+        rmap = self._make_redundancy(site, value=1)
+        out = tmp_path / "redundancy.png"
+        result = render_redundancy_map(site, rmap, out)
+        assert isinstance(result, Path)
+
+    def test_file_exists(self, flat_dem_path, tmp_path):
+        site = load_dem(flat_dem_path)
+        rmap = self._make_redundancy(site, value=2)
+        out = tmp_path / "redundancy.png"
+        render_redundancy_map(site, rmap, out)
+        assert out.exists()
+
+    def test_output_is_valid_png(self, flat_dem_path, tmp_path):
+        site = load_dem(flat_dem_path)
+        rmap = self._make_redundancy(site, value=1)
+        out = tmp_path / "redundancy.png"
+        render_redundancy_map(site, rmap, out)
+        img = Image.open(out)
+        assert img.format == "PNG"
+
+    def test_all_zeros_renders(self, flat_dem_path, tmp_path):
+        """All uncovered cells (0) should still render without error."""
+        site = load_dem(flat_dem_path)
+        rmap = self._make_redundancy(site, value=0)
+        out = tmp_path / "redundancy_zeros.png"
+        render_redundancy_map(site, rmap, out)
+        assert out.exists()
+
+    def test_high_redundancy_clamped(self, flat_dem_path, tmp_path):
+        """Values above 3 are clamped to 3 (dark green bucket)."""
+        site = load_dem(flat_dem_path)
+        rmap = np.full(site.dem.shape, 10, dtype=np.intp)
+        out = tmp_path / "redundancy_high.png"
+        render_redundancy_map(site, rmap, out)
+        assert out.exists()
+
+    def test_mixed_values_renders(self, flat_dem_path, tmp_path):
+        """Array with values 0, 1, 2, 3 renders without error."""
+        site = load_dem(flat_dem_path)
+        rmap = np.zeros(site.dem.shape, dtype=np.intp)
+        h, w = rmap.shape
+        rmap[: h // 4, :] = 0
+        rmap[h // 4 : h // 2, :] = 1
+        rmap[h // 2 : 3 * h // 4, :] = 2
+        rmap[3 * h // 4 :, :] = 3
+        out = tmp_path / "redundancy_mixed.png"
+        render_redundancy_map(site, rmap, out)
+        assert out.exists()
+
+    def test_accepts_str_path(self, flat_dem_path, tmp_path):
+        site = load_dem(flat_dem_path)
+        rmap = self._make_redundancy(site, value=1)
+        out = str(tmp_path / "redundancy_str.png")
+        result = render_redundancy_map(site, rmap, out)
+        assert isinstance(result, Path)
+
+    def test_creates_parent_dir(self, flat_dem_path, tmp_path):
+        """Parent directory is created if it does not exist."""
+        site = load_dem(flat_dem_path)
+        rmap = self._make_redundancy(site, value=1)
+        out = tmp_path / "new_subdir" / "redundancy.png"
+        assert not out.parent.exists()
+        render_redundancy_map(site, rmap, out)
+        assert out.exists()
+
+    def test_with_sensor_positions_and_boundary(self, flat_dem_path, tmp_path):
+        site = load_dem(flat_dem_path)
+        rmap = self._make_redundancy(site, value=2)
+        min_x, max_x, min_y, max_y = site.extent
+        boundary = Polygon([(min_x, min_y), (max_x, min_y), (max_x, max_y), (min_x, max_y)])
+        cx, cy = (min_x + max_x) / 2, (min_y + max_y) / 2
+        out = tmp_path / "redundancy_annotated.png"
+        render_redundancy_map(
+            site,
+            rmap,
+            out,
+            sensor_positions=[(cx, cy)],
+            boundary=boundary,
+        )
+        assert out.exists()
+
+    def test_non_2d_raises(self, flat_dem_path, tmp_path):
+        """Non-2D redundancy_map raises ValueError."""
+        site = load_dem(flat_dem_path)
+        rmap = np.ones(site.dem.size, dtype=np.intp)  # 1-D
+        out = tmp_path / "redundancy.png"
+        with pytest.raises(ValueError, match="2-D"):
+            render_redundancy_map(site, rmap, out)
+
+    def test_zero_size_raises(self, flat_dem_path, tmp_path):
+        """Zero-size array raises ValueError."""
+        site = load_dem(flat_dem_path)
+        rmap = np.zeros((0, 0), dtype=np.intp)
+        out = tmp_path / "redundancy.png"
+        with pytest.raises(ValueError, match="zero elements"):
+            render_redundancy_map(site, rmap, out)
+
+    def test_negative_values_raise(self, flat_dem_path, tmp_path):
+        """D-112: negative sentinel values raise ValueError."""
+        site = load_dem(flat_dem_path)
+        rmap = np.full(site.dem.shape, -1, dtype=np.intp)
+        out = tmp_path / "redundancy.png"
+        with pytest.raises(ValueError, match="negative values"):
+            render_redundancy_map(site, rmap, out)
+
+    def test_shape_mismatch_raises(self, flat_dem_path, tmp_path):
+        """D-113: shape mismatch with DEM raises ValueError."""
+        site = load_dem(flat_dem_path)
+        rmap = np.ones((site.dem.shape[0] + 1, site.dem.shape[1]), dtype=np.intp)
+        out = tmp_path / "redundancy.png"
+        with pytest.raises(ValueError, match="does not match"):
+            render_redundancy_map(site, rmap, out)
+
+    def test_float_dtype_raises(self, flat_dem_path, tmp_path):
+        """D-114: float dtype raises ValueError."""
+        site = load_dem(flat_dem_path)
+        rmap = np.ones(site.dem.shape, dtype=np.float64)
+        out = tmp_path / "redundancy.png"
+        with pytest.raises(ValueError, match="integer dtype"):
+            render_redundancy_map(site, rmap, out)
