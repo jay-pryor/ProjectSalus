@@ -700,7 +700,7 @@ defects:
     description: "Figure handle leak in render_coverage_map — fig is created before the try/finally block that calls plt.close(fig). If _hillshade raises ValueError (NaN DEM) or boundary rendering raises, the figure handle leaks."
     resolution: "Widened try/finally to wrap entire rendering body from fig creation to savefig; plt.close(fig) now called regardless of any rendering error"
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-064
     severity: high
@@ -733,7 +733,7 @@ defects:
     description: "Empty Polygon in boundary MultiPolygon — geom.exterior is None if geom.is_empty, raising AttributeError. Also leaks figure handle since the try/finally only covers fig.savefig."
     resolution: "Added if geom.is_empty: continue guard before accessing geom.exterior; figure leak resolved via D-063 fix"
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-067
     severity: medium
@@ -744,7 +744,7 @@ defects:
     description: "clip_coverage_to_boundary checks shape but not ndim. A 3D array with a matching .shape tuple (e.g. shape (100, 100, 1)) would pass the guard and produce silently wrong results from the & operation."
     resolution: "Added ndim != 2 check raising ValueError before the shape check"
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-068
     severity: medium
@@ -755,7 +755,7 @@ defects:
     description: "coverage_percentage returns 0.0 silently when mask is all-False (zero denominator). Caller receives 0.0 with no indication that the mask was degenerate (e.g. boundary missed the raster due to CRS mismatch), vs genuinely 0% coverage."
     resolution: "Added UserWarning emitted when denominator == 0 and mask is not None; test updated to assert warning"
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-069
     severity: high
@@ -766,7 +766,7 @@ defects:
     description: "Unguarded dict key lookup — _ZONE_STYLE[zone.zone_type] raises KeyError if zone_type not in dict. Any new ZoneType member added before _ZONE_STYLE is updated causes a silent crash mid-render."
     resolution: "Added _ZONE_STYLE.get() with UserWarning+continue fallback for unknown zone types"
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-070
     severity: high
@@ -777,7 +777,7 @@ defects:
     description: "geom.exterior accessed without None guard. Degenerate Shapely Polygon with is_empty=False can still have exterior=None, raising AttributeError and silently aborting remaining zone rendering."
     resolution: "Added if geom.exterior is None: continue guard before .xy access"
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-071
     severity: high
@@ -788,7 +788,7 @@ defects:
     description: "NaN centroid coordinates passed to ax.text() without guard. Degenerate geometries return NaN centroid; matplotlib accepts silently, producing a map with missing zone labels and no error."
     resolution: "Added np.isnan(cx) or np.isnan(cy) guard; label silently skipped for degenerate centroids"
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-072
     severity: medium
@@ -799,7 +799,7 @@ defects:
     description: "else-branch in geom_list construction assumes Polygon but Pydantic does not strictly validate Shapely types. An unexpected geometry type (e.g. GeometryCollection) passes through to .exterior.xy causing AttributeError."
     resolution: "Replaced else with elif isinstance(zone.geometry, Polygon); added else branch with UserWarning+continue for unsupported geometry types"
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-073
     severity: medium
@@ -810,7 +810,7 @@ defects:
     description: "ax.legend() call is unprotected. A legend rendering failure would abort fig.savefig(), losing the entire map. Wrapping defensively would allow a map to be saved without a legend rather than not at all."
     resolution: "Wrapped ax.legend() in try/except; emits UserWarning on failure; map saved without legend"
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-074
     severity: medium
@@ -821,7 +821,7 @@ defects:
     description: "ax.fill() uses color= keyword which sets both facecolor and edgecolor together. This can suppress hatch visibility in some Matplotlib versions. Spec requires 'exclusion zones hatched' — must use facecolor=/edgecolor= separately."
     resolution: "Changed ax.fill() to use facecolor= and edgecolor= as separate kwargs, ensuring hatch is always visible"
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-075
     severity: high
@@ -832,7 +832,7 @@ defects:
     description: "NaN and Inf bypass the > 0.0 guards on distance_m and frequency_hz (IEEE 754: NaN comparisons always False, Inf > 0 is True). math.log10(nan) and math.log10(inf) return nan/inf silently with no exception, propagating bad values into link budget calculations."
     resolution: "Replaced <= 0.0 guards with math.isfinite() + <= 0.0 compound check; raises ValueError for NaN, +/-inf, and non-positive values. Added 4 tests."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-076
     severity: medium
@@ -843,7 +843,7 @@ defects:
     description: "Docstring states return is 'positive value' but FSPL is negative for sub-metre distances at any practical frequency. Incorrect contract misleads callers."
     resolution: "Updated docstring: removed 'positive value' claim; noted that sub-metre distances can produce negative dB and that the formula is a far-field approximation."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-077
     severity: high
@@ -854,7 +854,7 @@ defects:
     description: "NaN heights from DEM nodata propagate into clearance array. np.argmax on an all-NaN or NaN-containing array returns index 0 silently, selecting the wrong obstruction. Loss calculation proceeds on garbage input."
     resolution: "Added np.isfinite(heights).all() check in compute_knife_edge_loss; raises ValueError for any non-finite height value. Added test_nan_height_in_profile_raises."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-078
     severity: high
@@ -865,7 +865,7 @@ defects:
     description: "Out-of-bounds sample coordinates are silently clamped to DEM edge values in _bilinear_interp. Coordinates outside the DEM extent return the nearest edge height with no warning or error, corrupting the terrain profile."
     resolution: "Added out-of-bounds check in extract_terrain_profile before calling _bilinear_interp; raises ValueError if any fractional pixel index falls outside [0, nrows-1] or [0, ncols-1]. Added test_out_of_bounds_coordinates_raises."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-079
     severity: high
@@ -876,7 +876,7 @@ defects:
     description: "wavelength * d1 * d2 can underflow to 0.0 for very short d1 or d2 (subnormal float). This causes division by zero inside math.sqrt(), returning inf, which propagates to _knife_edge_loss_db as nu=inf and returns an infinite loss value."
     resolution: "Added denominator <= 0.0 guard before math.sqrt; returns 0.0 (no loss) when denominator underflows. The _knife_edge_loss_db guard on non-finite nu also serves as a second line of defence."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-080
     severity: medium
@@ -887,7 +887,7 @@ defects:
     description: "_knife_edge_loss_db(nan) passes the nu <= -0.78 guard (NaN comparison is False), then enters math.sqrt() which raises ValueError on NaN. Exception leaks from a private function with no context, surprising callers."
     resolution: "Added math.isfinite(nu) guard at top of _knife_edge_loss_db; raises ValueError with clear message. Added test_nan_nu_raises and test_inf_nu_raises."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-081
     severity: medium
@@ -898,7 +898,7 @@ defects:
     description: "Non-finite x1/y1/x2/y2 inputs to extract_terrain_profile are not validated. Inf coordinates propagate into math.sqrt() for path_length yielding inf, then into np.linspace producing all-NaN arrays, causing obscure downstream failures."
     resolution: "Added finite check for all four coordinates at top of extract_terrain_profile using math.isfinite; raises ValueError naming the offending parameter. Added test_nonfinite_x1_raises and test_nonfinite_y2_raises."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-082
     severity: medium
@@ -909,7 +909,7 @@ defects:
     description: "compute_knife_edge_loss does not verify distances[0] == 0.0. A manually-constructed profile with non-zero first distance shifts the entire LOS baseline, computing wrong clearance values silently."
     resolution: "Added distances[0] == 0.0 check in compute_knife_edge_loss; raises ValueError for non-zero first distance. Added test_nonzero_first_distance_raises."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-083
     severity: high
@@ -920,7 +920,7 @@ defects:
     description: "NaN DEM value at sensor position propagates through _bilinear_interp into sensor_abs_h. Every rsl_total in the loop becomes NaN; NaN >= sensitivity_dbm is always False. Returns plausible-looking all-False coverage grid with no exception and no warning."
     resolution: "Added math.isfinite(sensor_terrain_h) check after _bilinear_interp; raises ValueError immediately with clear message. Added test_nan_dem_at_sensor_raises."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-084
     severity: high
@@ -931,7 +931,7 @@ defects:
     description: "site.dem[r_idx, c_idx] NaN at a target cell produces NaN target_abs_h. compute_knife_edge_loss raises ValueError on rx_height check, which is caught by the broad except block and silently marks the cell uncovered. The true cause (bad DEM data) is not distinguished from expected boundary edge-cases."
     resolution: "Added explicit math.isfinite(target_terrain_h) guard before the try block; emits warnings.warn naming 'NaN/inf DEM value' as root cause and marks cell uncovered, distinguishing DEM data quality issues from boundary geometry errors."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-085
     severity: high
@@ -942,7 +942,7 @@ defects:
     description: "dist==0 (sensor cell) exclusion from fspl_covered relies on NaN comparison semantics (NaN >= sensitivity_dbm == False) rather than an explicit Boolean mask. Fragile if fspl_grid is consumed downstream."
     resolution: "Added candidate_mask &= dist > 0.0 before FSPL computation to explicitly exclude the sensor cell via a Boolean mask, independent of NaN comparison behaviour."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-086
     severity: medium
@@ -953,7 +953,7 @@ defects:
     description: "Broad except ValueError catches both expected boundary errors from extract_terrain_profile AND unexpected programming-error ValueErrors from compute_knife_edge_loss. Internal logic errors are demoted to per-cell warnings and the simulation continues silently."
     resolution: "Split the try block: only extract_terrain_profile is wrapped; compute_knife_edge_loss is called outside the try so its ValueError (programming error) propagates immediately to the caller."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-087
     severity: medium
@@ -964,7 +964,7 @@ defects:
     description: "_parse_frequency_band_hz calls band.strip().upper() without checking isinstance(band, str). A None entry in sensor.frequency_bands raises AttributeError rather than the documented ValueError."
     resolution: "Added isinstance(band, str) guard at top of _parse_frequency_band_hz; raises ValueError with type name for non-string input. Added test_non_string_raises."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-088
     severity: medium
@@ -975,7 +975,7 @@ defects:
     description: "site.resolution is used as a divisor in compute_rf_coverage without a finite/positive guard. Zero or NaN resolution produces silent all-NaN coordinate grids and an all-False coverage result instead of a clear early error."
     resolution: "Added math.isfinite(site.resolution) or site.resolution <= 0.0 guard at the start of compute_rf_coverage; raises ValueError immediately."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-089
     severity: high
@@ -986,7 +986,7 @@ defects:
     description: "Non-finite placement.position_x/y propagates silently into dx/dy/dist computations. dist becomes all-NaN or all-inf; boolean comparisons return False for every cell; function returns all-False coverage with no error raised."
     resolution: "Added math.isfinite guards on placement.position_x/y at entry to compute_acoustic_coverage; raises ValueError naming the offending coordinate. Added test_nonfinite_placement_x_raises."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-090
     severity: high
@@ -997,7 +997,7 @@ defects:
     description: "sensor.max_range_m validated > 0 but not isfinite. float('inf') passes the Pydantic validator. effective_range = inf; every finite dist satisfies dist <= inf; function returns all-True coverage mask silently."
     resolution: "Added math.isfinite(sensor.max_range_m) guard in compute_acoustic_coverage; raises ValueError immediately."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-091
     severity: high
@@ -1008,7 +1008,7 @@ defects:
     description: "sensor.min_range_m validated >= 0 but not isfinite. float('inf') passes the Pydantic validator. dist >= inf is False for every finite dist; all-False coverage mask returned silently."
     resolution: "Added math.isfinite(sensor.min_range_m) guard in compute_acoustic_coverage; raises ValueError immediately."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-092
     severity: high
@@ -1019,7 +1019,7 @@ defects:
     description: "site.origin_x/y have no finiteness validators in SiteModel. Non-finite origins propagate into coordinate meshgrid producing all-NaN dist and an all-False coverage mask with no error raised."
     resolution: "Added math.isfinite guards on site.origin_x and site.origin_y in compute_acoustic_coverage; raises ValueError naming the offending attribute."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-093
     severity: medium
@@ -1030,7 +1030,7 @@ defects:
     description: "math.pow(10.0, exponent) raises uncaught OverflowError when ambient_noise_db is a very large negative finite value (below approximately -6165). The crash carries no context, making it difficult to diagnose."
     resolution: "Replaced math.pow with np.float64 arithmetic inside np.errstate(over='ignore'); overflow saturates to inf and is capped by min(effective_range, max_range_m) rather than raising. Added test_extreme_negative_noise_does_not_raise."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-094
     severity: high
@@ -1041,7 +1041,7 @@ defects:
     description: "NaN height_override_m passes SensorPlacement._height_override_non_negative (NaN < 0.0 is False in IEEE 754). sensor_agl becomes NaN, propagates to compute_viewshed as observer_height, and the numpy fallback produces an all-False viewshed with no exception or warning."
     resolution: "Added math.isfinite(sensor_agl) guard in _viewshed_coverage; raises ValueError with clear message. Added tests test_nonfinite_height_override_raises and test_inf_height_override_raises."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-095
     severity: high
@@ -1052,7 +1052,7 @@ defects:
     description: "OSError in compute_viewshed silently falls back to NumPy ray-marching without any warning. OSError can indicate DEM file errors distinct from GDAL being unavailable, resulting in a silently degraded viewshed."
     resolution: "Split except (ImportError, OSError) into separate branches; OSError branch emits warnings.warn with exc detail before falling back. Added test_oserror_fallback_emits_warning using monkeypatch."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-096
     severity: medium
@@ -1063,7 +1063,7 @@ defects:
     description: "If-chain dispatch is not statically exhaustive. A new SensorType added without a matching branch silently falls through to ValueError at runtime rather than being caught by mypy."
     resolution: "Replaced if-chain with match statement plus assert_never(unreachable) — mypy catches unhandled SensorType variants at type-check time."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-097
     severity: medium
@@ -1074,7 +1074,7 @@ defects:
     description: "compute_sensor_coverage return value not checked for None before .shape is accessed. A None return produces AttributeError rather than the documented ValueError, masking the root cause."
     resolution: "Added 'if cov is None: raise ValueError(...)' guard immediately after compute_sensor_coverage call. Added test_none_return_raises_value_error using monkeypatch."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-098
     severity: medium
@@ -1085,7 +1085,7 @@ defects:
     description: "union |= cov has no dtype check. A floating-point coverage array from a buggy sensor backend is silently coerced via NumPy: non-zero floats become True, producing a plausible-looking but physically wrong boolean union."
     resolution: "Changed 'union |= cov' to 'union |= cov.astype(bool)' — explicit cast makes intent clear and prevents silent coercion errors. Added test_float_coverage_array_coerced_to_bool."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-099
     severity: high
@@ -1096,7 +1096,7 @@ defects:
     description: "shapely_shape(geom_dict) called without checking geom.is_valid. rasterio.features.shapes can return self-intersecting rings; Shapely accepts them as non-empty but is_valid=False. Downstream area/union/render calls on an invalid MultiPolygon produce wrong values silently."
     resolution: "Added geom.buffer(0) repair step for invalid geometries, then re-checks is_valid and is_empty before appending. Added test_invalid_geometry_repaired_not_silently_accepted."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-100
     severity: high
@@ -1107,7 +1107,7 @@ defects:
     description: "shapes() loop has no exception handler. If shapely_shape raises mid-loop, partial polys list is silently discarded and gap_polygons returns None while gap_area_m2 > 0 — internally inconsistent GapAnalysis with no error."
     resolution: "Wrapped shapes loop in try/except Exception; re-raises as RuntimeError with raster shape and gap_cells in the message. Added test_vectorisation_exception_raises_runtime_error."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-101
     severity: medium
@@ -1118,7 +1118,7 @@ defects:
     description: "gap_raster.astype(bool).sum() silently counts NaN float cells as True (NaN cast to bool is True), inflating gap_cells, gap_area_m2, and gap_percentage with no error or warning."
     resolution: "Added dtype guard: if gap_raster is floating-point and contains non-finite values, raises ValueError before any computation. Added test_nan_float_gap_raster_raises."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-102
     severity: medium
@@ -1129,7 +1129,7 @@ defects:
     description: "If all geometries returned by shapes() are empty, polys stays empty and gap_polygons=None even when gap_cells>0. Returns GapAnalysis with gap_area_m2>0 but gap_polygons=None; callers guarding on gap_polygons is None silently miss real gaps."
     resolution: "After polys assembly, if gap_cells>0 and polys is empty, emits UserWarning explaining inconsistency. Area/percentage remain correct; only geometry is unavailable. Added test_empty_polys_with_gap_cells_warns."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-103
     severity: high
@@ -1140,7 +1140,7 @@ defects:
     description: "total_cells=0 when site.rows or site.cols is zero causes ZeroDivisionError on total_coverage_pct and per_layer_coverage_pct divisions. SiteModel._validate_dem only checks ndim==2, not non-zero dimensions. Error is unhelpful with no indication of cause."
     resolution: "Added guard after shape checks: if total_cells==0 raise ValueError with rows/cols in message."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-104
     severity: medium
@@ -1151,7 +1151,7 @@ defects:
     description: "Duplicate zone names silently overwrite per_zone_coverage_pct entries. Second zone with same name replaces first, losing statistics with no warning — PDF report could show incorrect zone coverage."
     resolution: "Added uniqueness check before assignment: if zone.name in per_zone_coverage_pct raise ValueError. Added test_duplicate_zone_name_raises."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-105
     severity: medium
@@ -1162,7 +1162,7 @@ defects:
     description: "render_composite_coverage_map does not ensure output_path.parent exists before savefig. Missing parent directory raises FileNotFoundError inside try block with no useful context."
     resolution: "Added output_path.parent.mkdir(parents=True, exist_ok=True) immediately after Path(output_path) conversion."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-106
     severity: medium
@@ -1173,7 +1173,7 @@ defects:
     description: "render_gap_map does not ensure output_path.parent exists before savefig. Same failure mode as D-105."
     resolution: "Added output_path.parent.mkdir(parents=True, exist_ok=True) immediately after Path(output_path) conversion."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-107
     severity: high
@@ -1184,7 +1184,7 @@ defects:
     description: "Division by zero when gaps.size==0 in render_gap_map: gaps.astype(bool).sum() / gaps.size produces nan (NumPy RuntimeWarning, no exception) and title renders as 'nan% gap'. Same issue at line 342 in render_layer_coverage_maps for coverage.size==0."
     resolution: "Added 'if gaps.size == 0: raise ValueError(...)' guard in render_gap_map and 'if coverage.size == 0: raise ValueError(...)' in the render_layer_coverage_maps loop before figure creation."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-108
     severity: high
@@ -1195,7 +1195,7 @@ defects:
     description: "render_gap_map does not validate that composite and gaps have matching shapes. A shape mismatch raises a bare NumPy broadcast ValueError; callers that swallow the exception silently get a missing output file."
     resolution: "Added explicit shape check at function entry: 'if composite.shape != gaps.shape: raise ValueError(...)' before figure creation."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-109
     severity: medium
@@ -1206,7 +1206,7 @@ defects:
     description: "render_coverage_map missing output_path.parent.mkdir() guard before fig.savefig(). Inconsistent with render_composite_coverage_map and render_gap_map which both have this guard."
     resolution: "Added output_path.parent.mkdir(parents=True, exist_ok=True) immediately after Path(output_path) conversion in render_coverage_map."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-110
     severity: medium
@@ -1217,7 +1217,7 @@ defects:
     description: "In render_layer_coverage_maps, paths[sensor_type] = out_path is assigned after the finally block outside the try. If rendering raises (e.g. NaN DEM), that sensor type is silently dropped from the returned dict with no warning to caller."
     resolution: "Moved paths[sensor_type] = out_path inside the try block immediately after fig.savefig() so it only executes on successful render."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
 
   - id: D-111
     severity: medium
@@ -1228,4 +1228,4 @@ defects:
     description: "_render_zones emits 'No render style for zone type ...' but render_coverage_map inline path emits 'No render style defined for zone type ...'. Warning message divergence means downstream matchers checking for 'defined' substring will miss warnings from the new render functions."
     resolution: "Added 'defined' to _render_zones warning string to match render_coverage_map wording exactly."
     status: resolved
-    commit: "pending"
+    commit: "b4bd999"
