@@ -1239,7 +1239,7 @@ defects:
     description: "np.clip(redundancy_map, 0, 3) silently maps negative sentinel values (-1, -9999) to bucket 0 (red/uncovered), producing a plausible-looking but incorrect map with no warning or exception."
     resolution: "Added guard: if np.any(redundancy_map < 0): raise ValueError with min value in message."
     status: resolved
-    commit: "pending"
+    commit: "9d81def"
 
   - id: D-113
     severity: high
@@ -1250,7 +1250,7 @@ defects:
     description: "render_redundancy_map does not validate that redundancy_map.shape == site.dem.shape. Mismatched shapes cause imshow to silently stretch the overlay, misregistering all cell positions geographically."
     resolution: "Added guard: if redundancy_map.shape != site.dem.shape: raise ValueError with both shapes in message."
     status: resolved
-    commit: "pending"
+    commit: "9d81def"
 
   - id: D-114
     severity: medium
@@ -1261,7 +1261,7 @@ defects:
     description: "Float input array is silently truncated to intp via astype(np.intp). A caller passing a float redundancy array gets systematically understated counts with no warning (1.9 -> 1, 2.8 -> 2)."
     resolution: "Added dtype guard: if not np.issubdtype(redundancy_map.dtype, np.integer): raise ValueError with actual dtype."
     status: resolved
-    commit: "pending"
+    commit: "9d81def"
 
   - id: D-115
     severity: medium
@@ -1272,4 +1272,4 @@ defects:
     description: "ax.legend() in render_redundancy_map is called without a try/except guard. A Matplotlib failure here propagates before fig.savefig, leaving the output file unwritten. All other legend calls in this file have exception guards."
     resolution: "Wrapped ax.legend() in try/except Exception; warns with 'Redundancy legend could not be added' on failure."
     status: resolved
-    commit: "pending"
+    commit: "9d81def"
