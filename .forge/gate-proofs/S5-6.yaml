@@ -1,0 +1,48 @@
+task_id: S5-6
+timestamp: 2026-04-01T12:00:00Z
+quality_gates:
+  G1_lint: pass
+  G2_format: pass
+  G3_import: pass
+  G4_type: pass
+  G5_security: pass
+  G6_unit_test: pass
+  G7_coverage: pass
+  G8_secrets: pass
+  coverage_pct: 89.40
+review:
+  l1_standards:
+    testing: pass
+    error_handling: pass
+    logging: "N/A — CLI uses click.echo; no file-based logging"
+    security: "N/A — no user-supplied paths beyond already-validated scenario/output-dir"
+  l2_agents:
+    silent_failure_hunter: {status: fail, findings: 5}
+    spec_compliance: {status: pass, findings: 0}
+    regression_reviewer: {status: fail, findings: 5}
+defect_ids: [D-116, D-117, D-118, D-119, D-120]
+notes: >
+  D-116 (HIGH): Boundary load failure previously fell back to full-DEM mask, silently
+  poisoning all statistics. Fixed: changed to hard error (sys.exit(1)) with clear message.
+
+  D-117 (HIGH): Empty layer_coverages dict after compute_layer_coverage produced a
+  misleading error from compute_composite_coverage. Fixed: explicit emptiness guard
+  immediately after compute_layer_coverage with specific diagnostic.
+
+  D-118 (MEDIUM): Zero-element array in layer_coverages caught as rendering warning,
+  then same defective data used for subsequent renders. Fixed: pre-render validation
+  loop exits hard on any zero-size array before any render call.
+
+  D-119 (MEDIUM): sensor_positions included positions of invalid/unknown sensors,
+  placing spurious markers on all maps. Fixed: filtered to only sensors in sensor_map.
+
+  D-120 (MEDIUM): test_los_sensor_produces_png weakened to len(pngs)>=1. Fixed:
+  replaced with exact per-sensor filename assertion.
+
+  spec_compliance: 0 findings. All criteria satisfied — all sensor types included,
+  per-layer unions computed, composite/gaps/stats produced, all maps rendered,
+  summary printed to console, --output-dir auto-creates directory.
+  regression_reviewer: 1 medium (D-120, fixed), 4 low (stale help text fixed, others
+  deferred — no runtime impact).
+  521 suite tests pass. G8 clean.
+overall: pass

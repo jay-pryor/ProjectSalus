@@ -315,7 +315,7 @@ class TestSimulateCommand:
         assert "scenario" in result.output.lower()
 
     def test_los_sensor_produces_png(self, scenario_los_yaml, tmp_path):
-        """A valid scenario with a LOS sensor must produce a coverage PNG."""
+        """A valid scenario with a LOS sensor must produce per-sensor and multi-sensor PNGs."""
         runner = CliRunner()
         result = runner.invoke(
             main,
@@ -329,8 +329,12 @@ class TestSimulateCommand:
             ],
         )
         assert result.exit_code == 0, result.output
-        pngs = list(tmp_path.glob("*.png"))
-        assert len(pngs) == 1
+        # Per-sensor PNG must exist (D-120: exact check, not >= 1)
+        assert (tmp_path / "Echodyne_EchoGuard_coverage.png").exists()
+        # Multi-sensor maps must also be produced
+        assert (tmp_path / "composite.png").exists()
+        assert (tmp_path / "gaps.png").exists()
+        assert (tmp_path / "redundancy.png").exists()
 
     def test_los_sensor_output_filename(self, scenario_los_yaml, tmp_path):
         """Output PNG filename must be derived from the sensor name."""
@@ -367,7 +371,7 @@ class TestSimulateCommand:
         assert "%" in result.output
 
     def test_nonlos_sensor_skipped(self, scenario_nonlos_yaml, tmp_path):
-        """Non-LOS sensors must be skipped; no PNG produced and exit 0."""
+        """Non-LOS sensors produce no per-sensor PNG but do produce multi-sensor maps."""
         runner = CliRunner()
         result = runner.invoke(
             main,
@@ -381,8 +385,12 @@ class TestSimulateCommand:
             ],
         )
         assert result.exit_code == 0, result.output
-        pngs = list(tmp_path.glob("*.png"))
-        assert len(pngs) == 0
+        # No per-sensor PNG for non-LOS
+        assert not (tmp_path / "DroneShield_RfOne_Mk2_coverage.png").exists()
+        # But multi-sensor maps are still produced
+        assert (tmp_path / "composite.png").exists()
+        assert (tmp_path / "gaps.png").exists()
+        assert (tmp_path / "redundancy.png").exists()
 
     def test_unknown_sensor_exits_nonzero(self, scenario_unknown_sensor_yaml, tmp_path):
         """A sensor name not in the definitions must cause a non-zero exit."""
@@ -416,9 +424,11 @@ class TestSimulateCommand:
         )
         assert result.exit_code != 0
 
-    def test_nonexistent_output_dir_exits_nonzero(self, scenario_los_yaml, tmp_path):
-        """An output directory that does not exist must cause a non-zero exit."""
+    def test_nonexistent_output_dir_is_created(self, scenario_los_yaml, tmp_path):
+        """An output directory that does not exist must be created automatically."""
         runner = CliRunner()
+        out_dir = tmp_path / "new_subdir"
+        assert not out_dir.exists()
         result = runner.invoke(
             main,
             [
@@ -427,10 +437,11 @@ class TestSimulateCommand:
                 "--sensors",
                 str(_BUNDLED_SENSOR_DIR),
                 "--output-dir",
-                str(tmp_path / "does_not_exist"),
+                str(out_dir),
             ],
         )
-        assert result.exit_code != 0
+        assert result.exit_code == 0, result.output
+        assert out_dir.is_dir()
 
     def test_empty_placements_exits_zero(self, scenario_empty_placements_yaml, tmp_path):
         """A scenario with no placements must exit 0 with an informational message."""
@@ -461,5 +472,117 @@ class TestSimulateCommand:
             ],
         )
         assert result.exit_code == 0, result.output
-        pngs = list(tmp_path.glob("*.png"))
-        assert len(pngs) == 1
+        # Per-sensor PNG must exist; multi-sensor maps are also produced
+        assert (tmp_path / "Echodyne_EchoGuard_coverage.png").exists()
+        assert (tmp_path / "composite.png").exists()
+
+
+class TestSimulateCommandS56:
+    """Tests for the S5-6 multi-sensor analysis pipeline extensions."""
+
+    def test_composite_map_produced(self, scenario_los_yaml, tmp_path):
+        """simulate must produce a composite.png in the output directory."""
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "simulate",
+                str(scenario_los_yaml),
+                "--sensors",
+                str(_BUNDLED_SENSOR_DIR),
+                "--output-dir",
+                str(tmp_path),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert (tmp_path / "composite.png").exists()
+
+    def test_gap_map_produced(self, scenario_los_yaml, tmp_path):
+        """simulate must produce a gaps.png in the output directory."""
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "simulate",
+                str(scenario_los_yaml),
+                "--sensors",
+                str(_BUNDLED_SENSOR_DIR),
+                "--output-dir",
+                str(tmp_path),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert (tmp_path / "gaps.png").exists()
+
+    def test_redundancy_map_produced(self, scenario_los_yaml, tmp_path):
+        """simulate must produce a redundancy.png in the output directory."""
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "simulate",
+                str(scenario_los_yaml),
+                "--sensors",
+                str(_BUNDLED_SENSOR_DIR),
+                "--output-dir",
+                str(tmp_path),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert (tmp_path / "redundancy.png").exists()
+
+    def test_layer_maps_subdir_produced(self, scenario_los_yaml, tmp_path):
+        """simulate must produce per-layer PNGs in a layers/ subdirectory."""
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "simulate",
+                str(scenario_los_yaml),
+                "--sensors",
+                str(_BUNDLED_SENSOR_DIR),
+                "--output-dir",
+                str(tmp_path),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        layers_dir = tmp_path / "layers"
+        assert layers_dir.is_dir()
+        assert len(list(layers_dir.glob("*.png"))) >= 1
+
+    def test_summary_stats_printed(self, scenario_los_yaml, tmp_path):
+        """simulate must print coverage percentage in the summary."""
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "simulate",
+                str(scenario_los_yaml),
+                "--sensors",
+                str(_BUNDLED_SENSOR_DIR),
+                "--output-dir",
+                str(tmp_path),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Total coverage" in result.output
+        assert "%" in result.output
+
+    def test_output_dir_created_when_absent(self, scenario_los_yaml, tmp_path):
+        """--output-dir that does not exist must be created automatically."""
+        runner = CliRunner()
+        new_dir = tmp_path / "auto_created"
+        assert not new_dir.exists()
+        result = runner.invoke(
+            main,
+            [
+                "simulate",
+                str(scenario_los_yaml),
+                "--sensors",
+                str(_BUNDLED_SENSOR_DIR),
+                "--output-dir",
+                str(new_dir),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert new_dir.is_dir()

@@ -7,13 +7,29 @@ import sys
 from pathlib import Path
 
 import click
+import numpy as np
 
+from salus.engine.coverage import (
+    boundary_mask,
+    compute_composite_coverage,
+    compute_coverage_stats,
+    compute_gaps,
+    compute_layer_coverage,
+)
 from salus.engine.viewshed import clip_viewshed_to_sensor, compute_viewshed
+from salus.ingest.boundaries import load_boundary
 from salus.ingest.scenario import load_scenario
 from salus.ingest.sensors import load_sensors
 from salus.ingest.terrain import load_dem
-from salus.models.sensor import SensorDefinition
-from salus.report.maps import render_coverage_map
+from salus.models.scenario import SensorPlacement
+from salus.models.sensor import SensorDefinition, SensorType
+from salus.report.maps import (
+    render_composite_coverage_map,
+    render_coverage_map,
+    render_gap_map,
+    render_layer_coverage_maps,
+    render_redundancy_map,
+)
 
 # Bundled sensor definitions shipped with the package.
 _DEFAULT_SENSOR_DIR: Path = Path(__file__).parent / "data" / "sensors"
@@ -189,7 +205,7 @@ def viewshed(
     default=".",
     show_default=True,
     type=click.Path(file_okay=False),
-    help="Directory for per-sensor coverage PNG outputs. Must exist.",
+    help="Directory for coverage PNG outputs. Created automatically if it does not exist.",
 )
 def simulate(
     scenario: str,
@@ -212,8 +228,10 @@ def simulate(
     scenario_path = Path(scenario)
     output_path = Path(output_dir)
 
-    if not output_path.exists():
-        click.echo(f"Error: output directory does not exist: {output_path}", err=True)
+    try:
+        output_path.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        click.echo(f"Error: cannot create output directory {output_path}: {exc}", err=True)
         sys.exit(1)
     if not output_path.is_dir():
         click.echo(f"Error: output path is not a directory: {output_path}", err=True)
@@ -351,12 +369,162 @@ def simulate(
         click.echo(f"  → {output_file}")
         rendered += 1
 
-    if rendered == 0 and failed == 0:
-        click.echo("No LOS sensor placements processed.")
+    # -------------------------------------------------------------------------
+    # Multi-sensor analysis pipeline (S5-6)
+    # Build placements_by_type from all valid placements (LOS + non-LOS).
+    # -------------------------------------------------------------------------
+    placements_by_type: dict[SensorType, list[tuple[SensorDefinition, SensorPlacement]]] = {}
+    for placement in sc.sensor_placements:
+        sensor = sensor_map.get(placement.sensor_name)
+        if sensor is None:
+            continue  # already warned in per-sensor loop above
+        stype = sensor.type
+        if stype not in placements_by_type:
+            placements_by_type[stype] = []
+        placements_by_type[stype].append((sensor, placement))
+
+    if not placements_by_type:
+        if rendered == 0 and failed == 0:
+            click.echo("No sensor placements in scenario — nothing to simulate.")
+        elif failed:
+            click.echo(f"Completed with {failed} error(s).", err=True)
+            sys.exit(1)
+        else:
+            click.echo(f"Done. {rendered} coverage map(s) written to {output_path.resolve()}")
         sys.exit(0)
 
-    if failed:
-        click.echo(f"Completed with {failed} error(s).", err=True)
+    click.echo("\nRunning multi-sensor coverage analysis…")
+    try:
+        layer_coverages = compute_layer_coverage(site, placements_by_type)
+    except Exception as exc:
+        click.echo(f"Error computing layer coverages: {exc}", err=True)
         sys.exit(1)
 
-    click.echo(f"Done. {rendered} coverage map(s) written to {output_path.resolve()}")
+    if not layer_coverages:  # D-117: explicit guard before composite
+        click.echo(
+            "Error: no coverage arrays were produced — check that sensor types are supported.",
+            err=True,
+        )
+        sys.exit(1)
+
+    try:
+        composite = compute_composite_coverage(layer_coverages)
+    except Exception as exc:
+        click.echo(f"Error computing composite coverage: {exc}", err=True)
+        sys.exit(1)
+
+    # Boundary mask — use scenario boundary if present, otherwise full DEM.
+    loaded_boundary = None
+    if sc.boundary_path is not None:
+        click.echo(f"  Loading boundary: {sc.boundary_path}")
+        try:
+            loaded_boundary = load_boundary(sc.boundary_path, site_epsg=site.crs_epsg)
+            bitmask = boundary_mask(site, loaded_boundary)
+        except Exception as exc:  # D-116: boundary failure is a hard error
+            click.echo(f"Error loading boundary: {exc}", err=True)
+            sys.exit(1)
+    else:
+        bitmask = np.ones((site.rows, site.cols), dtype=bool)
+
+    try:
+        gaps = compute_gaps(composite, bitmask)
+    except Exception as exc:
+        click.echo(f"Error computing gaps: {exc}", err=True)
+        sys.exit(1)
+
+    try:
+        stats = compute_coverage_stats(site, layer_coverages, composite, gaps, site.zones)
+    except Exception as exc:
+        click.echo(f"Error computing coverage statistics: {exc}", err=True)
+        sys.exit(1)
+
+    # Print summary statistics.
+    click.echo("\nCoverage Summary")
+    click.echo("─" * 40)
+    click.echo(f"  Total coverage:          {stats.total_coverage_pct:.1f}%")
+    click.echo(f"  Gap area:                {stats.gap_area_m2:,.0f} m²")
+    click.echo(f"  Largest contiguous gap:  {stats.largest_contiguous_gap_m2:,.0f} m²")
+    for stype, pct in stats.per_layer_coverage_pct.items():
+        click.echo(f"  [{stype.value}] layer:      {pct:.1f}%")
+    for zone_name, pct in stats.per_zone_coverage_pct.items():
+        click.echo(f"  Zone '{zone_name}':       {pct:.1f}%")
+
+    # Render multi-sensor maps.
+    # D-118: validate array sizes before rendering to prevent silent multi-map degradation
+    for stype, arr in layer_coverages.items():
+        if arr.size == 0:
+            click.echo(
+                f"Error: coverage array for {stype.value} has zero elements — cannot render maps.",
+                err=True,
+            )
+            sys.exit(1)
+
+    click.echo("\nRendering coverage maps…")
+    sensor_positions = [  # D-119: only positions of sensors that exist in sensor_map
+        (p.position_x, p.position_y)
+        for p in sc.sensor_placements
+        if sensor_map.get(p.sensor_name) is not None
+    ]
+
+    try:
+        layer_paths = render_layer_coverage_maps(
+            site,
+            layer_coverages,
+            output_path / "layers",
+            sensor_positions=sensor_positions,
+            boundary=loaded_boundary,
+            zones=site.zones or None,
+        )
+        for path in layer_paths.values():
+            click.echo(f"  → {path}")
+    except Exception as exc:
+        click.echo(f"  Warning: could not render layer maps: {exc}", err=True)
+
+    composite_out = output_path / "composite.png"
+    try:
+        render_composite_coverage_map(
+            site,
+            layer_coverages,
+            composite_out,
+            sensor_positions=sensor_positions,
+            boundary=loaded_boundary,
+            zones=site.zones or None,
+        )
+        click.echo(f"  → {composite_out}")
+    except Exception as exc:
+        click.echo(f"  Warning: could not render composite map: {exc}", err=True)
+
+    gap_out = output_path / "gaps.png"
+    try:
+        render_gap_map(
+            site,
+            composite,
+            gaps,
+            gap_out,
+            sensor_positions=sensor_positions,
+            boundary=loaded_boundary,
+            zones=site.zones or None,
+        )
+        click.echo(f"  → {gap_out}")
+    except Exception as exc:
+        click.echo(f"  Warning: could not render gap map: {exc}", err=True)
+
+    redundancy_out = output_path / "redundancy.png"
+    try:
+        render_redundancy_map(
+            site,
+            stats.redundancy_map,
+            redundancy_out,
+            sensor_positions=sensor_positions,
+            boundary=loaded_boundary,
+            zones=site.zones or None,
+        )
+        click.echo(f"  → {redundancy_out}")
+    except Exception as exc:
+        click.echo(f"  Warning: could not render redundancy map: {exc}", err=True)
+
+    if failed:
+        click.echo(f"\nCompleted with {failed} sensor error(s).", err=True)
+        sys.exit(1)
+
+    click.echo(f"\nDone. Output written to {output_path.resolve()}")
