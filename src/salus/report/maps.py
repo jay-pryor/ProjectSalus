@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import math
 import warnings
 from pathlib import Path
 
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.colors import ListedColormap
+import numpy.typing as npt
+from matplotlib.colors import ListedColormap, Normalize
 from shapely.geometry import MultiPolygon, Polygon
 
+from salus.engine.threat_corridor import CorridorResult
 from salus.models.sensor import SensorType
 from salus.models.site import SiteModel
 from salus.models.zone import Zone, ZoneType
@@ -769,6 +772,305 @@ def render_redundancy_map(
             ax.legend(handles=legend_handles, loc="lower left", fontsize=9, framealpha=0.8)
         except Exception as exc:
             warnings.warn(f"Redundancy legend could not be added: {exc}", stacklevel=2)
+
+        fig.tight_layout()
+        fig.savefig(output_path, dpi=200, bbox_inches="tight")
+    finally:
+        plt.close(fig)
+
+    return output_path
+
+
+# Colormap for corridor lines: red (poor coverage) → green (good coverage)
+_CORRIDOR_CMAP: str = "RdYlGn"
+# Linewidth for corridor paths drawn on the overlay map
+_CORRIDOR_LINEWIDTH: float = 2.5
+# Marker size for first-detection points on the corridor overlay map
+_DETECTION_MARKER_SIZE: int = 8
+
+
+def render_corridor_overlay_map(
+    site: SiteModel,
+    composite_coverage: npt.NDArray[np.bool_],
+    corridor_results: list[CorridorResult],
+    protected_point: tuple[float, float],
+    output_path: str | Path,
+    title: str = "Threat Corridor Analysis",
+    sensor_positions: list[tuple[float, float]] | None = None,
+    boundary: Polygon | MultiPolygon | None = None,
+    zones: list[Zone] | None = None,
+) -> Path:
+    """Render corridor approach paths overlaid on the composite coverage map.
+
+    Each corridor is drawn as a line from its start point to the protected
+    asset, colour-coded by coverage percentage (red = poorly covered,
+    green = well covered).  Where a first detection distance is available, a
+    circle marker is placed at that point along the corridor.
+
+    Args:
+        site: The site terrain model.
+        composite_coverage: Boolean 2D coverage array matching ``site.dem``.
+        corridor_results: List of analysed corridors (output of
+            :func:`~salus.engine.threat_corridor.find_worst_corridors` or
+            a manual list of
+            :func:`~salus.engine.threat_corridor.analyse_corridor` results).
+        protected_point: ``(x, y)`` CRS coordinates of the protected asset
+            (the near end of every corridor).
+        output_path: Where to save the PNG.
+        title: Map title.
+        sensor_positions: Optional sensor positions to mark on the map.
+        boundary: Optional boundary polygon outline.
+        zones: Optional zone overlays.
+
+    Returns:
+        Path to the saved PNG.
+
+    Raises:
+        ValueError: If ``composite_coverage`` is not 2D, is empty, has a
+            shape mismatch with ``site.dem``, or if ``protected_point``
+            contains non-finite coordinates.
+    """
+    if composite_coverage.ndim != 2:
+        raise ValueError(f"composite_coverage must be 2D, got {composite_coverage.ndim}D")
+    if composite_coverage.size == 0:
+        raise ValueError("composite_coverage must not be empty")
+    if composite_coverage.shape != site.dem.shape:
+        raise ValueError(
+            f"composite_coverage shape {composite_coverage.shape} does not match "
+            f"site.dem shape {site.dem.shape}"
+        )
+    px, py = protected_point
+    if not (math.isfinite(px) and math.isfinite(py)):
+        raise ValueError(f"protected_point coordinates must be finite, got ({px}, {py})")
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    min_x, max_x, min_y, max_y = site.extent
+    extent = (min_x, max_x, min_y, max_y)
+
+    cmap = plt.get_cmap(_CORRIDOR_CMAP)
+
+    fig, ax = plt.subplots(1, 1, figsize=(12, 10))
+    try:
+        hs = _hillshade(site.dem)
+        ax.imshow(hs, cmap="gray", extent=extent, origin="upper", alpha=0.7, zorder=1)
+
+        _add_basemap(ax, site)
+
+        # Composite coverage background (muted grey-green)
+        cov_display = np.ma.masked_where(~composite_coverage, composite_coverage.astype(float))
+        ax.imshow(
+            cov_display,
+            cmap=ListedColormap(["#7fb3a0"]),
+            extent=extent,
+            origin="upper",
+            alpha=0.4,
+            zorder=2,
+        )
+
+        _render_boundary(ax, boundary)
+        _render_zones(ax, zones)
+
+        # Draw each corridor path and first-detection markers
+        for result in corridor_results:
+            bearing_rad = math.radians(result.corridor.bearing_deg)
+            sin_b = math.sin(bearing_rad)
+            cos_b = math.cos(bearing_rad)
+            start_d = result.corridor.start_distance_m
+            far_x = px - start_d * sin_b
+            far_y = py - start_d * cos_b
+            colour = cmap(result.coverage_pct / 100.0)
+
+            ax.plot(
+                [far_x, px],
+                [far_y, py],
+                color=colour,
+                linewidth=_CORRIDOR_LINEWIDTH,
+                alpha=0.8,
+                zorder=5,
+            )
+
+            if result.first_detection_distance_m is not None:
+                det_x = px - result.first_detection_distance_m * sin_b
+                det_y = py - result.first_detection_distance_m * cos_b
+                ax.plot(
+                    det_x,
+                    det_y,
+                    "o",
+                    color=colour,
+                    markersize=_DETECTION_MARKER_SIZE,
+                    markeredgecolor="black",
+                    markeredgewidth=0.5,
+                    zorder=6,
+                )
+
+        # Protected asset marker
+        ax.plot(
+            px,
+            py,
+            "k*",
+            markersize=15,
+            markeredgecolor="white",
+            markeredgewidth=0.5,
+            zorder=8,
+        )
+
+        if sensor_positions:
+            for x, y in sensor_positions:
+                ax.plot(
+                    x,
+                    y,
+                    "r^",
+                    markersize=12,
+                    markeredgecolor="black",
+                    markeredgewidth=1,
+                    zorder=7,
+                )
+
+        ax.set_title(title, fontsize=14, fontweight="bold")
+        ax.set_xlabel("Easting (m)")
+        ax.set_ylabel("Northing (m)")
+        _add_cartographic_elements(ax)
+
+        # Colorbar for corridor coverage percentage
+        if corridor_results:
+            sm = plt.cm.ScalarMappable(cmap=_CORRIDOR_CMAP, norm=Normalize(vmin=0, vmax=100))
+            sm.set_array([])
+            try:
+                cbar = fig.colorbar(sm, ax=ax, fraction=0.03, pad=0.04)
+                cbar.set_label("Corridor coverage (%)", fontsize=10)
+            except Exception as exc:
+                warnings.warn(f"Corridor colorbar could not be added: {exc}", stacklevel=2)
+
+        # D-126: include legend entries for all map symbols
+        all_legend: list = [
+            mpatches.Patch(facecolor="#7fb3a0", alpha=0.5, label="Covered"),
+            plt.Line2D(
+                [0],
+                [0],
+                marker="o",
+                color="w",
+                markerfacecolor="gray",
+                markeredgecolor="black",
+                markersize=_DETECTION_MARKER_SIZE,
+                label="First detection",
+            ),
+            plt.Line2D(
+                [0],
+                [0],
+                marker="*",
+                color="w",
+                markerfacecolor="black",
+                markeredgecolor="white",
+                markersize=12,
+                label="Protected asset",
+            ),
+        ]
+        try:
+            ax.legend(handles=all_legend, loc="lower left", fontsize=8, framealpha=0.8)
+        except Exception as exc:
+            warnings.warn(f"Legend could not be added: {exc}", stacklevel=2)
+
+        fig.tight_layout()
+        fig.savefig(output_path, dpi=200, bbox_inches="tight")
+    finally:
+        plt.close(fig)
+
+    return output_path
+
+
+def render_corridor_polar_diagram(
+    corridor_results: list[CorridorResult],
+    output_path: str | Path,
+    title: str = "Coverage by Approach Bearing",
+) -> Path:
+    """Render a polar (radar) chart of coverage percentage by approach bearing.
+
+    Each bearing segment is drawn as a bar coloured by coverage percentage
+    (red = poor, green = good) using the RdYlGn colormap.  The radial axis
+    shows coverage percentage 0–100%.  Bearings follow compass convention:
+    North (0°) at the top, clockwise.
+
+    Args:
+        corridor_results: Non-empty list of analysed corridors.  All bearings
+            in the list are plotted; they do not need to be evenly spaced.
+        output_path: Where to save the PNG.
+        title: Diagram title.
+
+    Returns:
+        Path to the saved PNG.
+
+    Raises:
+        ValueError: If ``corridor_results`` is empty.
+    """
+    if not corridor_results:
+        raise ValueError("corridor_results must not be empty")
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Sort by bearing so bars are drawn in order
+    sorted_results = sorted(corridor_results, key=lambda r: r.corridor.bearing_deg)
+    num = len(sorted_results)
+
+    # Convert compass bearings to matplotlib polar radians.
+    # After set_theta_zero_location('N') and set_theta_direction(-1):
+    # theta == 0 is North, angles increase clockwise.
+    thetas = [math.radians(r.corridor.bearing_deg) for r in sorted_results]
+    coverages = [r.coverage_pct for r in sorted_results]
+
+    # Bar width: minimum angular gap between adjacent sorted bearings (handles
+    # non-uniform inputs correctly; D-127 fix).
+    if num == 1:
+        bar_width = 2.0 * math.pi
+    else:
+        gaps = [(thetas[(i + 1) % num] - thetas[i]) % (2.0 * math.pi) for i in range(num)]
+        bar_width = min(gaps)
+        if bar_width == 0.0:
+            raise ValueError(
+                "corridor_results contains duplicate bearings — bar_width would be zero"
+            )
+
+    cmap = plt.get_cmap(_CORRIDOR_CMAP)
+
+    fig = plt.figure(figsize=(10, 10))
+    ax = fig.add_subplot(111, polar=True)
+    try:
+        ax.set_theta_zero_location("N")  # type: ignore[attr-defined]
+        ax.set_theta_direction(-1)  # type: ignore[attr-defined]  # clockwise
+
+        for theta, coverage in zip(thetas, coverages):
+            colour = cmap(coverage / 100.0)
+            ax.bar(
+                theta,
+                coverage,
+                width=bar_width,
+                color=colour,
+                alpha=0.75,
+                edgecolor="white",
+                linewidth=0.5,
+                zorder=2,
+            )
+
+        ax.set_ylim(0, 100)
+        ax.set_yticks([25, 50, 75, 100])
+        ax.set_yticklabels(["25%", "50%", "75%", "100%"], fontsize=9)
+        ax.grid(True, alpha=0.3, zorder=1)
+
+        # Compass labels (N/E/S/W)
+        ax.set_xticks([math.radians(a) for a in range(0, 360, 45)])
+        ax.set_xticklabels(["N", "NE", "E", "SE", "S", "SW", "W", "NW"], fontsize=10)
+
+        ax.set_title(title, fontsize=14, fontweight="bold", pad=20)
+
+        # Colorbar
+        sm = plt.cm.ScalarMappable(cmap=_CORRIDOR_CMAP, norm=Normalize(vmin=0, vmax=100))
+        sm.set_array([])
+        try:
+            cbar = fig.colorbar(sm, ax=ax, fraction=0.04, pad=0.08, shrink=0.6)
+            cbar.set_label("Coverage (%)", fontsize=10)
+        except Exception as exc:
+            warnings.warn(f"Polar colorbar could not be added: {exc}", stacklevel=2)
 
         fig.tight_layout()
         fig.savefig(output_path, dpi=200, bbox_inches="tight")

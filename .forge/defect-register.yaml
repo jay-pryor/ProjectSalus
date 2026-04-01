@@ -1383,3 +1383,58 @@ defects:
     resolution: "Deferred — only affects non-standard num_bearings values; default and tested cases are safe per Low severity policy."
     status: deferred
     commit: ""
+
+  - id: D-126
+    severity: medium
+    task: S6-4
+    found_by: silent_failure_hunter
+    file: src/salus/report/maps.py
+    line: 0
+    description: "render_corridor_overlay_map legend only shows 'Covered' patch; first detection circle markers and protected-point star have no legend entries. Map is uninterpretable without prior knowledge."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-127
+    severity: medium
+    task: S6-4
+    found_by: spec_compliance
+    file: src/salus/report/maps.py
+    line: 0
+    description: "render_corridor_polar_diagram computes bar_width = 2*pi/num, assuming evenly-spaced 360-degree sweep. Silently produces overlapping or gapped bars for non-uniform or partial bearing sets, which is a valid documented input."
+    resolution: "Changed to compute bar_width = min(angular gaps between adjacent sorted bearings) so non-uniform inputs render correctly."
+    status: resolved
+    commit: ""
+
+  - id: D-128
+    severity: low
+    task: S6-4
+    found_by: silent_failure_hunter
+    file: src/salus/report/maps.py
+    line: 0
+    description: "plt.get_cmap() deprecated in Matplotlib 3.7+, removed in 3.9+. Used in render_corridor_overlay_map and render_corridor_polar_diagram."
+    resolution: "Deferred — pre-existing pattern not introduced by this task; low severity per policy."
+    status: deferred
+    commit: ""
+
+  - id: D-129
+    severity: high
+    task: S6-4
+    found_by: silent_failure_hunter
+    file: src/salus/report/maps.py
+    line: 1028
+    description: "After D-127 fix, bar_width = min(gaps) where gaps are angular differences between sorted bearings. If two CorridorResult entries share the same bearing_deg, the gap is 0.0 and bar_width becomes 0.0. Matplotlib silently renders a zero-width invisible bar — coverage data for that bearing is lost with no error or warning."
+    resolution: "Added guard: if bar_width == 0.0 raise ValueError('corridor_results contains duplicate bearings — bar_width would be zero'). test_duplicate_bearings_raises added."
+    status: resolved
+    commit: ""
+
+  - id: D-130
+    severity: low
+    task: S6-4
+    found_by: silent_failure_hunter
+    file: src/salus/report/maps.py
+    line: 1025
+    description: "In render_corridor_polar_diagram, plt.get_cmap() is called before fig is assigned. If get_cmap raises, the finally: plt.close(fig) block will itself raise NameError (fig undefined), masking the original error. Same pattern in render_corridor_overlay_map line 851."
+    resolution: "Deferred — _CORRIDOR_CMAP is a validated module constant; the real-world risk is near-zero. Low severity per policy."
+    status: deferred
+    commit: ""

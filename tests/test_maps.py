@@ -13,12 +13,16 @@ matplotlib.use("Agg")  # Non-interactive backend — must be set before importin
 
 from shapely.geometry import MultiPolygon, Polygon
 
+from salus.engine.threat_corridor import CorridorResult
 from salus.ingest.terrain import load_dem
 from salus.models.sensor import SensorType
+from salus.models.threat import ThreatCorridor
 from salus.models.zone import Zone, ZoneType
 from salus.report.maps import (
     _hillshade,
     render_composite_coverage_map,
+    render_corridor_overlay_map,
+    render_corridor_polar_diagram,
     render_coverage_map,
     render_gap_map,
     render_layer_coverage_maps,
@@ -742,3 +746,183 @@ class TestRenderRedundancyMap:
         out = tmp_path / "redundancy.png"
         with pytest.raises(ValueError, match="integer dtype"):
             render_redundancy_map(site, rmap, out)
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers for corridor map tests
+# ---------------------------------------------------------------------------
+
+
+def _make_corridor_result(bearing_deg: float, coverage_pct: float) -> CorridorResult:
+    """Helper to construct a CorridorResult with a given bearing and coverage."""
+    corridor = ThreatCorridor(bearing_deg=bearing_deg, altitude_m=50.0, start_distance_m=500.0)
+    return CorridorResult(
+        corridor=corridor,
+        threat_name="Test Threat",
+        coverage_pct=coverage_pct,
+        first_detection_distance_m=250.0 if coverage_pct > 0 else None,
+        last_gap_before_target_m=0.0 if coverage_pct == 100.0 else 50.0,
+        time_in_coverage_s=10.0,
+        covered_cells=5,
+        total_cells=10,
+    )
+
+
+# ---------------------------------------------------------------------------
+# render_corridor_overlay_map (S6-4)
+# ---------------------------------------------------------------------------
+
+
+class TestRenderCorridorOverlayMap:
+    def _site_and_coverage(self, flat_dem_path):
+        from salus.ingest.terrain import load_dem
+
+        site = load_dem(flat_dem_path)
+        coverage = np.ones(site.dem.shape, dtype=bool)
+        return site, coverage
+
+    def _centre(self, site):
+        cx = site.origin_x + site.cols * site.resolution / 2
+        cy = site.origin_y - site.rows * site.resolution / 2
+        return (cx, cy)
+
+    def test_returns_path(self, flat_dem_path, tmp_path):
+        site, cov = self._site_and_coverage(flat_dem_path)
+        results = [_make_corridor_result(b, 80.0) for b in [0.0, 90.0, 180.0, 270.0]]
+        out = tmp_path / "corridor_overlay.png"
+        result = render_corridor_overlay_map(site, cov, results, self._centre(site), out)
+        assert result == out
+
+    def test_file_exists(self, flat_dem_path, tmp_path):
+        site, cov = self._site_and_coverage(flat_dem_path)
+        results = [_make_corridor_result(b, 50.0) for b in [0.0, 90.0]]
+        out = tmp_path / "overlay.png"
+        render_corridor_overlay_map(site, cov, results, self._centre(site), out)
+        assert out.exists()
+
+    def test_valid_png(self, flat_dem_path, tmp_path):
+        site, cov = self._site_and_coverage(flat_dem_path)
+        results = [_make_corridor_result(0.0, 100.0)]
+        out = tmp_path / "overlay.png"
+        render_corridor_overlay_map(site, cov, results, self._centre(site), out)
+        img = Image.open(out)
+        assert img.format == "PNG"
+
+    def test_empty_corridor_list_renders(self, flat_dem_path, tmp_path):
+        """Empty corridor list is allowed — just renders composite background."""
+        site, cov = self._site_and_coverage(flat_dem_path)
+        out = tmp_path / "overlay_empty.png"
+        render_corridor_overlay_map(site, cov, [], self._centre(site), out)
+        assert out.exists()
+
+    def test_creates_parent_dir(self, flat_dem_path, tmp_path):
+        site, cov = self._site_and_coverage(flat_dem_path)
+        out = tmp_path / "new_dir" / "overlay.png"
+        render_corridor_overlay_map(site, cov, [], self._centre(site), out)
+        assert out.exists()
+
+    def test_str_path_accepted(self, flat_dem_path, tmp_path):
+        site, cov = self._site_and_coverage(flat_dem_path)
+        out = str(tmp_path / "overlay_str.png")
+        result = render_corridor_overlay_map(site, cov, [], self._centre(site), out)
+        assert isinstance(result, Path)
+
+    def test_non_2d_composite_raises(self, flat_dem_path, tmp_path):
+        site, _ = self._site_and_coverage(flat_dem_path)
+        bad = np.ones((10,), dtype=bool)
+        out = tmp_path / "overlay.png"
+        with pytest.raises(ValueError, match="2D"):
+            render_corridor_overlay_map(site, bad, [], self._centre(site), out)
+
+    def test_empty_composite_raises(self, flat_dem_path, tmp_path):
+        site, _ = self._site_and_coverage(flat_dem_path)
+        bad = np.ones((0, 0), dtype=bool)
+        out = tmp_path / "overlay.png"
+        with pytest.raises(ValueError, match="empty"):
+            render_corridor_overlay_map(site, bad, [], self._centre(site), out)
+
+    def test_shape_mismatch_raises(self, flat_dem_path, tmp_path):
+        site, _ = self._site_and_coverage(flat_dem_path)
+        bad = np.ones((5, 5), dtype=bool)
+        out = tmp_path / "overlay.png"
+        with pytest.raises(ValueError, match="shape"):
+            render_corridor_overlay_map(site, bad, [], self._centre(site), out)
+
+    def test_nan_protected_point_raises(self, flat_dem_path, tmp_path):
+        site, cov = self._site_and_coverage(flat_dem_path)
+        out = tmp_path / "overlay.png"
+        with pytest.raises(ValueError, match="finite"):
+            render_corridor_overlay_map(site, cov, [], (float("nan"), 0.0), out)
+
+
+# ---------------------------------------------------------------------------
+# render_corridor_polar_diagram (S6-4)
+# ---------------------------------------------------------------------------
+
+
+class TestRenderCorridorPolarDiagram:
+    def test_returns_path(self, tmp_path):
+        results = [_make_corridor_result(b, float(b) / 3.6) for b in range(0, 360, 10)]
+        out = tmp_path / "polar.png"
+        result = render_corridor_polar_diagram(results, out)
+        assert result == out
+
+    def test_file_exists(self, tmp_path):
+        results = [_make_corridor_result(b, 50.0) for b in [0.0, 90.0, 180.0, 270.0]]
+        out = tmp_path / "polar.png"
+        render_corridor_polar_diagram(results, out)
+        assert out.exists()
+
+    def test_valid_png(self, tmp_path):
+        results = [_make_corridor_result(b, 75.0) for b in [0.0, 90.0, 180.0, 270.0]]
+        out = tmp_path / "polar.png"
+        render_corridor_polar_diagram(results, out)
+        img = Image.open(out)
+        assert img.format == "PNG"
+
+    def test_single_corridor_renders(self, tmp_path):
+        results = [_make_corridor_result(0.0, 100.0)]
+        out = tmp_path / "polar_single.png"
+        render_corridor_polar_diagram(results, out)
+        assert out.exists()
+
+    def test_creates_parent_dir(self, tmp_path):
+        results = [_make_corridor_result(0.0, 50.0)]
+        out = tmp_path / "new_sub" / "polar.png"
+        render_corridor_polar_diagram(results, out)
+        assert out.exists()
+
+    def test_str_path_accepted(self, tmp_path):
+        results = [_make_corridor_result(0.0, 0.0)]
+        out = str(tmp_path / "polar_str.png")
+        result = render_corridor_polar_diagram(results, out)
+        assert isinstance(result, Path)
+
+    def test_empty_results_raises(self, tmp_path):
+        out = tmp_path / "polar.png"
+        with pytest.raises(ValueError, match="empty"):
+            render_corridor_polar_diagram([], out)
+
+    def test_all_zero_coverage(self, tmp_path):
+        """0% coverage for all bearings renders without error."""
+        results = [_make_corridor_result(b, 0.0) for b in [0.0, 90.0, 180.0, 270.0]]
+        out = tmp_path / "polar_zero.png"
+        render_corridor_polar_diagram(results, out)
+        assert out.exists()
+
+    def test_all_100_coverage(self, tmp_path):
+        """100% coverage for all bearings renders without error."""
+        results = [_make_corridor_result(b, 100.0) for b in [0.0, 90.0, 180.0, 270.0]]
+        out = tmp_path / "polar_full.png"
+        render_corridor_polar_diagram(results, out)
+        assert out.exists()
+
+    def test_duplicate_bearings_raises(self, tmp_path):
+        """Two results with the same bearing_deg produce bar_width=0 → ValueError."""
+        results = [
+            _make_corridor_result(90.0, 50.0),
+            _make_corridor_result(90.0, 75.0),
+        ]
+        out = tmp_path / "polar_dup.png"
+        with pytest.raises(ValueError, match="duplicate bearings"):
+            render_corridor_polar_diagram(results, out)
