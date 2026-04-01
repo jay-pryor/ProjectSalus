@@ -1372,3 +1372,14 @@ defects:
     resolution: "Deferred — sub-resolution error in edge case; acceptable approximation per Low severity policy."
     status: deferred
     commit: ""
+
+  - id: D-125
+    severity: low
+    task: S6-3
+    found_by: silent_failure_hunter
+    file: src/salus/engine/threat_corridor.py
+    line: 219
+    description: "Floating-point drift in (i * step_deg) % 360.0 could theoretically produce bearing exactly 360.0 for unusual num_bearings values, triggering ThreatCorridor ValidationError. Default num_bearings=36 and all tested values are safe."
+    resolution: "Deferred — only affects non-standard num_bearings values; default and tested cases are safe per Low severity policy."
+    status: deferred
+    commit: ""

@@ -1,11 +1,15 @@
-"""Tests for threat corridor coverage analysis (S6-2)."""
+"""Tests for threat corridor coverage analysis (S6-2, S6-3)."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from salus.engine.threat_corridor import CorridorResult, analyse_corridor
+from salus.engine.threat_corridor import (
+    CorridorResult,
+    analyse_corridor,
+    find_worst_corridors,
+)
 from salus.models.site import SiteModel
 from salus.models.threat import ThreatCorridor, ThreatProfile
 
@@ -310,3 +314,81 @@ class TestGuards:
             analyse_corridor(
                 site_10m, all_covered, corridor_north, threat_fast, (_CENTRE_X, float("inf"))
             )
+
+
+# ---------------------------------------------------------------------------
+# find_worst_corridors (S6-3)
+# ---------------------------------------------------------------------------
+
+
+class TestFindWorstCorridors:
+    def test_returns_list_of_corridor_results(self, site_10m, all_covered, threat_fast):
+        results = find_worst_corridors(site_10m, all_covered, threat_fast, (_CENTRE_X, _CENTRE_Y))
+        assert isinstance(results, list)
+        assert all(isinstance(r, CorridorResult) for r in results)
+
+    def test_default_num_bearings_is_36(self, site_10m, all_covered, threat_fast):
+        results = find_worst_corridors(site_10m, all_covered, threat_fast, (_CENTRE_X, _CENTRE_Y))
+        assert len(results) == 36
+
+    def test_custom_num_bearings(self, site_10m, all_covered, threat_fast):
+        results = find_worst_corridors(
+            site_10m, all_covered, threat_fast, (_CENTRE_X, _CENTRE_Y), num_bearings=8
+        )
+        assert len(results) == 8
+
+    def test_sorted_ascending_by_coverage_pct(self, site_10m, all_covered, threat_fast):
+        results = find_worst_corridors(site_10m, all_covered, threat_fast, (_CENTRE_X, _CENTRE_Y))
+        pcts = [r.coverage_pct for r in results]
+        assert pcts == sorted(pcts)
+
+    def test_worst_case_is_first(self, site_10m, none_covered, threat_fast):
+        # With no coverage, all corridors have 0% — worst is still first.
+        results = find_worst_corridors(site_10m, none_covered, threat_fast, (_CENTRE_X, _CENTRE_Y))
+        assert results[0].coverage_pct <= results[-1].coverage_pct
+
+    def test_all_covered_all_100_pct(self, site_10m, all_covered, threat_fast):
+        results = find_worst_corridors(site_10m, all_covered, threat_fast, (_CENTRE_X, _CENTRE_Y))
+        for r in results:
+            assert r.coverage_pct == pytest.approx(100.0)
+
+    def test_bearings_cover_full_360(self, site_10m, all_covered, threat_fast):
+        results = find_worst_corridors(
+            site_10m, all_covered, threat_fast, (_CENTRE_X, _CENTRE_Y), num_bearings=4
+        )
+        bearings = {r.corridor.bearing_deg for r in results}
+        assert len(bearings) == 4
+
+    def test_threat_name_in_all_results(self, site_10m, all_covered, threat_fast):
+        results = find_worst_corridors(site_10m, all_covered, threat_fast, (_CENTRE_X, _CENTRE_Y))
+        for r in results:
+            assert r.threat_name == threat_fast.name
+
+    def test_partial_coverage_produces_mixed_results(self, site_10m, threat_fast):
+        # Cover only the east half: corridors from the east should show higher
+        # coverage than corridors from the west.
+        partial = np.zeros((site_10m.rows, site_10m.cols), dtype=bool)
+        partial[:, 50:] = True
+        results = find_worst_corridors(
+            site_10m, partial, threat_fast, (_CENTRE_X, _CENTRE_Y), num_bearings=36
+        )
+        pcts = [r.coverage_pct for r in results]
+        assert min(pcts) < max(pcts)
+
+    def test_zero_num_bearings_raises(self, site_10m, all_covered, threat_fast):
+        with pytest.raises(ValueError, match="num_bearings"):
+            find_worst_corridors(
+                site_10m, all_covered, threat_fast, (_CENTRE_X, _CENTRE_Y), num_bearings=0
+            )
+
+    def test_negative_num_bearings_raises(self, site_10m, all_covered, threat_fast):
+        with pytest.raises(ValueError, match="num_bearings"):
+            find_worst_corridors(
+                site_10m, all_covered, threat_fast, (_CENTRE_X, _CENTRE_Y), num_bearings=-1
+            )
+
+    def test_num_bearings_one_returns_single_result(self, site_10m, all_covered, threat_fast):
+        results = find_worst_corridors(
+            site_10m, all_covered, threat_fast, (_CENTRE_X, _CENTRE_Y), num_bearings=1
+        )
+        assert len(results) == 1

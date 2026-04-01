@@ -18,6 +18,9 @@ from salus.models.threat import ThreatCorridor, ThreatProfile
 # Minimum number of samples along a corridor (includes the protected point itself).
 _MIN_SAMPLES: int = 1
 
+# Default number of compass bearings to sweep in find_worst_corridors.
+_DEFAULT_NUM_BEARINGS: int = 36  # every 10 degrees
+
 
 @dataclass(frozen=True)
 class CorridorResult:
@@ -106,14 +109,12 @@ def analyse_corridor(
     num_samples = max(_MIN_SAMPLES, int(corridor.start_distance_m / site.resolution) + 1)
     distances = np.linspace(0.0, corridor.start_distance_m, num_samples)
 
-    # World coordinates for each sample along the corridor.
-    # As distance d increases from 0, the position moves away from the asset
-    # in the direction OPPOSITE to the approach bearing.
+    # World coordinates: d=0 is at protected_point; d increases away from asset
     sample_xs = px - distances * sin_b
     sample_ys = py - distances * cos_b
 
     # Convert world coordinates to grid cell indices.
-    # origin_x/y is the top-left corner; row increases downward.
+    # origin_y is top-left (max northing); row increases downward.
     cols = ((sample_xs - site.origin_x) / site.resolution).astype(int)
     rows = ((site.origin_y - sample_ys) / site.resolution).astype(int)
 
@@ -167,3 +168,63 @@ def analyse_corridor(
         covered_cells=covered_cells,
         total_cells=total_cells,
     )
+
+
+def find_worst_corridors(
+    site: SiteModel,
+    composite_coverage: npt.NDArray[np.bool_],
+    threat: ThreatProfile,
+    protected_point: tuple[float, float],
+    num_bearings: int = _DEFAULT_NUM_BEARINGS,
+) -> list[CorridorResult]:
+    """Test all approach bearings and return corridors ranked worst-to-best.
+
+    Generates ``num_bearings`` evenly-spaced compass bearings covering the full
+    360-degree threat space, runs ``analyse_corridor`` for each, and returns the
+    results sorted by ``coverage_pct`` ascending (lowest coverage first, i.e.
+    worst-case approach first).
+
+    The corridor for each bearing uses ``threat.typical_altitude_m`` as altitude
+    and a start distance of half the site's shortest diagonal as a reasonable
+    default, clamped to a minimum of ``site.resolution``.
+
+    Args:
+        site: Site model providing grid geometry and resolution.
+        composite_coverage: Boolean 2D array matching ``site.dem`` shape.
+        threat: Threat profile — provides altitude and speed for corridor setup.
+        protected_point: (x, y) CRS coordinates of the asset being protected.
+        num_bearings: Number of evenly-spaced bearings to test (default 36 =
+            every 10 degrees).  Must be >= 1.
+
+    Returns:
+        List of ``CorridorResult`` sorted by ``coverage_pct`` ascending.
+        The first element is the worst-case approach corridor.  The list has
+        exactly ``num_bearings`` entries.
+
+    Raises:
+        ValueError: If ``num_bearings`` < 1, or if ``composite_coverage`` fails
+            the guards in ``analyse_corridor``.
+    """
+    if num_bearings < 1:
+        raise ValueError(f"num_bearings must be >= 1, got {num_bearings}")
+
+    # Default start distance: half the site's shorter axis, minimum 1 cell.
+    min_axis_m = min(site.rows, site.cols) * site.resolution
+    start_distance_m = max(site.resolution, min_axis_m / 2.0)
+
+    step_deg = 360.0 / num_bearings
+    results: list[CorridorResult] = []
+
+    for i in range(num_bearings):
+        bearing = (i * step_deg) % 360.0
+        corridor = ThreatCorridor(
+            bearing_deg=bearing,
+            altitude_m=threat.typical_altitude_m,
+            start_distance_m=start_distance_m,
+        )
+        result = analyse_corridor(site, composite_coverage, corridor, threat, protected_point)
+        results.append(result)
+
+    # Sort ascending by coverage_pct — worst (least covered) first.
+    results.sort(key=lambda r: r.coverage_pct)
+    return results
