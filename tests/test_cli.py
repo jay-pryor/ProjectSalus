@@ -586,3 +586,213 @@ class TestSimulateCommandS56:
         )
         assert result.exit_code == 0, result.output
         assert new_dir.is_dir()
+
+
+# ---------------------------------------------------------------------------
+# S6-5: Threat corridor analysis integration tests
+# ---------------------------------------------------------------------------
+
+_BUNDLED_THREAT_DIR: Path = Path(__file__).parent.parent / "src" / "salus" / "data" / "threats"
+# Name of one bundled threat profile (matches dji_mavic_low_slow.yaml)
+_DJI_MAVIC_NAME: str = "DJI Mavic 3 — Low Slow"
+# Centre of the flat DEM fixture (500000–500100, 6100000–6100100)
+_DEM_CENTRE: tuple[float, float] = (500050.0, 6100050.0)
+
+
+@pytest.fixture
+def scenario_threat_yaml(flat_dem_path, tmp_path):
+    """Scenario with one RF sensor + one bundled threat + protected_point."""
+    data = {
+        "site_dem_path": str(flat_dem_path),
+        "sensor_placements": [
+            {
+                "sensor_name": "DroneShield RfOne Mk2",
+                "position_x": 500050.0,
+                "position_y": 6100050.0,
+                "bearing_deg": 0.0,
+            }
+        ],
+        "threat_profiles": [_DJI_MAVIC_NAME],
+        "protected_point": list(_DEM_CENTRE),
+    }
+    path = tmp_path / "scenario_threat.yaml"
+    path.write_text(yaml.dump(data), encoding="utf-8")
+    return path
+
+
+@pytest.fixture
+def scenario_threat_no_point_yaml(flat_dem_path, tmp_path):
+    """Scenario with threat_profiles but no protected_point."""
+    data = {
+        "site_dem_path": str(flat_dem_path),
+        "sensor_placements": [
+            {
+                "sensor_name": "DroneShield RfOne Mk2",
+                "position_x": 500050.0,
+                "position_y": 6100050.0,
+                "bearing_deg": 0.0,
+            }
+        ],
+        "threat_profiles": [_DJI_MAVIC_NAME],
+    }
+    path = tmp_path / "scenario_threat_nopoint.yaml"
+    path.write_text(yaml.dump(data), encoding="utf-8")
+    return path
+
+
+@pytest.fixture
+def scenario_unknown_threat_yaml(flat_dem_path, tmp_path):
+    """Scenario referencing a threat that does not exist in the database."""
+    data = {
+        "site_dem_path": str(flat_dem_path),
+        "sensor_placements": [
+            {
+                "sensor_name": "DroneShield RfOne Mk2",
+                "position_x": 500050.0,
+                "position_y": 6100050.0,
+                "bearing_deg": 0.0,
+            }
+        ],
+        "threat_profiles": ["Nonexistent Threat XYZ"],
+        "protected_point": list(_DEM_CENTRE),
+    }
+    path = tmp_path / "scenario_unknown_threat.yaml"
+    path.write_text(yaml.dump(data), encoding="utf-8")
+    return path
+
+
+class TestSimulateCommandS65:
+    """Integration tests for S6-5 threat corridor analysis in salus simulate."""
+
+    def test_corridor_overlay_png_created(self, scenario_threat_yaml, tmp_path):
+        """simulate with threat_profiles must write a corridor overlay PNG."""
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "simulate",
+                str(scenario_threat_yaml),
+                "--sensors",
+                str(_BUNDLED_SENSOR_DIR),
+                "--threats",
+                str(_BUNDLED_THREAT_DIR),
+                "--output-dir",
+                str(tmp_path),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        overlays = list(tmp_path.glob("corridor_*_overlay.png"))
+        assert len(overlays) >= 1, "Expected at least one corridor overlay PNG"
+
+    def test_corridor_polar_png_created(self, scenario_threat_yaml, tmp_path):
+        """simulate with threat_profiles must write a corridor polar PNG."""
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "simulate",
+                str(scenario_threat_yaml),
+                "--sensors",
+                str(_BUNDLED_SENSOR_DIR),
+                "--threats",
+                str(_BUNDLED_THREAT_DIR),
+                "--output-dir",
+                str(tmp_path),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        polars = list(tmp_path.glob("corridor_*_polar.png"))
+        assert len(polars) >= 1, "Expected at least one corridor polar PNG"
+
+    def test_corridor_output_printed_to_console(self, scenario_threat_yaml, tmp_path):
+        """Corridor analysis results must appear in stdout."""
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "simulate",
+                str(scenario_threat_yaml),
+                "--sensors",
+                str(_BUNDLED_SENSOR_DIR),
+                "--threats",
+                str(_BUNDLED_THREAT_DIR),
+                "--output-dir",
+                str(tmp_path),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Threat" in result.output or "corridor" in result.output.lower()
+
+    def test_no_protected_point_warns_and_skips(self, scenario_threat_no_point_yaml, tmp_path):
+        """When threat_profiles set but protected_point absent, warn and skip."""
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "simulate",
+                str(scenario_threat_no_point_yaml),
+                "--sensors",
+                str(_BUNDLED_SENSOR_DIR),
+                "--output-dir",
+                str(tmp_path),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "protected_point" in result.output or "skipping" in result.output.lower()
+        overlays = list(tmp_path.glob("corridor_*.png"))
+        assert len(overlays) == 0, "No corridor PNGs expected when protected_point absent"
+
+    def test_unknown_threat_warns(self, scenario_unknown_threat_yaml, tmp_path):
+        """Referencing an unknown threat name must print a warning."""
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "simulate",
+                str(scenario_unknown_threat_yaml),
+                "--sensors",
+                str(_BUNDLED_SENSOR_DIR),
+                "--threats",
+                str(_BUNDLED_THREAT_DIR),
+                "--output-dir",
+                str(tmp_path),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Warning" in result.output or "not found" in result.output
+
+    def test_no_threats_in_scenario_skips_analysis(self, scenario_los_yaml, tmp_path):
+        """When threat_profiles is empty, no corridor output is produced."""
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "simulate",
+                str(scenario_los_yaml),
+                "--sensors",
+                str(_BUNDLED_SENSOR_DIR),
+                "--output-dir",
+                str(tmp_path),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        overlays = list(tmp_path.glob("corridor_*.png"))
+        assert len(overlays) == 0, "No corridor PNGs expected when threat_profiles empty"
+
+    def test_threats_flag_accepts_custom_dir(self, scenario_threat_yaml, tmp_path):
+        """--threats flag must accept a valid directory path."""
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "simulate",
+                str(scenario_threat_yaml),
+                "--sensors",
+                str(_BUNDLED_SENSOR_DIR),
+                "--threats",
+                str(_BUNDLED_THREAT_DIR),
+                "--output-dir",
+                str(tmp_path),
+            ],
+        )
+        assert result.exit_code == 0, result.output

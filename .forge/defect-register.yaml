@@ -1438,3 +1438,58 @@ defects:
     resolution: "Deferred — _CORRIDOR_CMAP is a validated module constant; the real-world risk is near-zero. Low severity per policy."
     status: deferred
     commit: ""
+
+  - id: D-131
+    severity: high
+    task: S6-5
+    found_by: silent_failure_hunter
+    file: src/salus/models/scenario.py
+    line: 133
+    description: "ScenarioConfig.protected_point accepts NaN/Inf coordinates — no isfinite validator. Passes Pydantic validation, enters corridor analysis, causes ValueError in analyse_corridor, caught by broad except in CLI, swallowed as per-threat warning with no indication that the coordinate itself is the fault."
+    resolution: "Added _protected_point_finite field_validator checking math.isfinite on both components. Tests: test_protected_point_nan_raises, test_protected_point_inf_raises."
+    status: resolved
+    commit: ""
+
+  - id: D-132
+    severity: high
+    task: S6-5
+    found_by: silent_failure_hunter
+    file: src/salus/cli.py
+    line: 556
+    description: "When load_threats() raises, all_threats=[] and each threat name in sc.threat_profiles triggers an individual 'not found' warning, masking the root load failure. Command exits 0 with no clear indication that corridor analysis was skipped due to a load error."
+    resolution: "Added load_failed flag; when set, per-name 'not found' warnings are suppressed so the root cause message is the only diagnostic shown."
+    status: resolved
+    commit: ""
+
+  - id: D-133
+    severity: medium
+    task: S6-5
+    found_by: silent_failure_hunter
+    file: src/salus/cli.py
+    line: 574
+    description: "When all threat names are unmatched (typos, wrong directory), matched_threats is empty and threat loop is a no-op. No diagnostic is emitted — command exits 0 with nothing after 'Running threat corridor analysis'."
+    resolution: "Added warning message when matched_threats is empty after name filtering."
+    status: resolved
+    commit: ""
+
+  - id: D-134
+    severity: medium
+    task: S6-5
+    found_by: silent_failure_hunter
+    file: src/salus/cli.py
+    line: 578
+    description: "find_worst_corridors wrapped in except Exception — corridor analysis failures downgraded to per-threat warnings, command exits 0. Broken corridor analysis invisible in automated pipelines."
+    resolution: "Added corridor_failed flag; command exits non-zero if any corridor analysis failed."
+    status: resolved
+    commit: ""
+
+  - id: D-135
+    severity: medium
+    task: S6-5
+    found_by: silent_failure_hunter
+    file: src/salus/engine/threat_corridor.py
+    line: 159
+    description: "NaN site.resolution propagates into CorridorResult fields, crashing CLI format string. Pre-existing issue in engine not introduced by S6-5."
+    resolution: "Deferred — pre-existing issue outside S6-5 scope; requires DEM validation in load_dem or SiteModel."
+    status: deferred
+    commit: ""

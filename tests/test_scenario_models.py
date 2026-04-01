@@ -263,3 +263,36 @@ class TestScenarioConfig:
                 site_dem_path=tmp_path / "dem.tif",
                 threat_profiles=["  "],
             )
+
+    def test_protected_point_default_none(self, tmp_path):
+        """protected_point defaults to None."""
+        sc = ScenarioConfig(site_dem_path=tmp_path / "dem.tif")
+        assert sc.protected_point is None
+
+    def test_protected_point_valid(self, tmp_path):
+        """protected_point accepts a finite (x, y) tuple."""
+        sc = ScenarioConfig(
+            site_dem_path=tmp_path / "dem.tif",
+            protected_point=(500050.0, 6100050.0),
+        )
+        assert sc.protected_point == (500050.0, 6100050.0)
+
+    def test_protected_point_nan_raises(self, tmp_path):
+        """NaN coordinates in protected_point raise ValidationError."""
+        import math
+
+        with pytest.raises(ValidationError, match="finite"):
+            ScenarioConfig(
+                site_dem_path=tmp_path / "dem.tif",
+                protected_point=(math.nan, 6100050.0),
+            )
+
+    def test_protected_point_inf_raises(self, tmp_path):
+        """Inf coordinates in protected_point raise ValidationError."""
+        import math
+
+        with pytest.raises(ValidationError, match="finite"):
+            ScenarioConfig(
+                site_dem_path=tmp_path / "dem.tif",
+                protected_point=(500050.0, math.inf),
+            )

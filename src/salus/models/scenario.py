@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 from pydantic import BaseModel, Field, field_validator
@@ -130,6 +131,10 @@ class ScenarioConfig(BaseModel):
     threat_profiles: list[str] = Field(default_factory=list)
     """Threat type names to evaluate (e.g. 'DJI Phantom 4'). Empty = no threat analysis."""
 
+    protected_point: tuple[float, float] | None = None
+    """CRS coordinates (x, y) of the protected asset for corridor analysis.
+    Required when threat_profiles is non-empty; ignored otherwise."""
+
     @field_validator("site_dem_path", mode="before")
     @classmethod
     def _site_dem_path_non_empty(cls, v: object) -> object:
@@ -147,4 +152,13 @@ class ScenarioConfig(BaseModel):
         for i, entry in enumerate(v):
             if not entry.strip():
                 raise ValueError(f"threat_profiles[{i}] must not be empty or whitespace")
+        return v
+
+    @field_validator("protected_point")
+    @classmethod
+    def _protected_point_finite(cls, v: tuple[float, float] | None) -> tuple[float, float] | None:
+        if v is not None:
+            x, y = v
+            if not (math.isfinite(x) and math.isfinite(y)):
+                raise ValueError(f"protected_point coordinates must be finite, got ({x}, {y})")
         return v

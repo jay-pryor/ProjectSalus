@@ -1,0 +1,43 @@
+task_id: S6-5
+timestamp: 2026-04-01T17:30:00Z
+quality_gates:
+  G1_lint: pass
+  G2_format: pass
+  G3_import: pass
+  G4_type: pass  # 16 pre-existing import-untyped errors; no new errors
+  G5_security: pass
+  G6_unit_test: pass  # 637 passed, 0 failed
+  G7_coverage: pass
+  G8_secrets: pass
+  coverage_pct: 89.84
+review:
+  l1_standards:
+    testing: pass
+    error_handling: pass
+    logging: "N/A — CLI uses click.echo, not logging module"
+    security: "N/A — no path injection; threat_dir validated by click.Path(exists=True)"
+  l2_agents:
+    silent_failure_hunter: {status: fail, findings: 7}
+    spec_compliance: {status: pass, findings: 0}
+    regression_reviewer: {status: pass, findings: 1}
+defect_ids: [D-131, D-132, D-133, D-134, D-135]
+notes: >
+  D-131 (HIGH, RESOLVED): protected_point missing isfinite validator in ScenarioConfig.
+  Added _protected_point_finite field_validator; 4 model tests added.
+
+  D-132 (HIGH, RESOLVED): load_threats failure masked by per-name 'not found' warnings.
+  Added load_failed flag to suppress per-name warnings when root load failed.
+
+  D-133 (MEDIUM, RESOLVED): empty matched_threats produced no diagnostic.
+  Added explicit warning when all threat names unmatched.
+
+  D-134 (MEDIUM, RESOLVED): broad except around find_worst_corridors with exit 0.
+  Added corridor_failed flag; CLI exits non-zero if any corridor analysis fails.
+
+  D-135 (MEDIUM, DEFERRED): NaN site.resolution propagation in threat_corridor engine.
+  Pre-existing issue outside S6-5 scope; requires DEM validation in load_dem/SiteModel.
+
+  regression_reviewer low finding: test_scenario_models.py had no protected_point tests.
+  Resolved: added test_protected_point_default_none, test_protected_point_valid,
+  test_protected_point_nan_raises, test_protected_point_inf_raises.
+overall: pass

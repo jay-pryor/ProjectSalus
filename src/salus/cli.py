@@ -16,15 +16,18 @@ from salus.engine.coverage import (
     compute_gaps,
     compute_layer_coverage,
 )
+from salus.engine.threat_corridor import find_worst_corridors
 from salus.engine.viewshed import clip_viewshed_to_sensor, compute_viewshed
 from salus.ingest.boundaries import load_boundary
 from salus.ingest.scenario import load_scenario
-from salus.ingest.sensors import load_sensors
+from salus.ingest.sensors import load_sensors, load_threats
 from salus.ingest.terrain import load_dem
 from salus.models.scenario import SensorPlacement
 from salus.models.sensor import SensorDefinition, SensorType
 from salus.report.maps import (
     render_composite_coverage_map,
+    render_corridor_overlay_map,
+    render_corridor_polar_diagram,
     render_coverage_map,
     render_gap_map,
     render_layer_coverage_maps,
@@ -33,6 +36,9 @@ from salus.report.maps import (
 
 # Bundled sensor definitions shipped with the package.
 _DEFAULT_SENSOR_DIR: Path = Path(__file__).parent / "data" / "sensors"
+
+# Bundled threat profiles shipped with the package.
+_DEFAULT_THREAT_DIR: Path = Path(__file__).parent / "data" / "threats"
 
 
 _FALLBACK_SENSOR_FILENAME: str = "sensor"
@@ -201,6 +207,15 @@ def viewshed(
     ),
 )
 @click.option(
+    "--threats",
+    "threat_dir",
+    default=None,
+    type=click.Path(exists=True, file_okay=False),
+    help=(
+        "Directory containing threat profile YAML files. Defaults to the bundled threat database."
+    ),
+)
+@click.option(
     "--output-dir",
     default=".",
     show_default=True,
@@ -210,6 +225,7 @@ def viewshed(
 def simulate(
     scenario: str,
     sensor_dir: str | None,
+    threat_dir: str | None,
     output_dir: str,
 ) -> None:
     """Compute sensor-clipped coverage maps from a scenario YAML file.
@@ -220,6 +236,9 @@ def simulate(
 
     Non-LOS sensors (RF, acoustic) are skipped — they do not require terrain
     analysis.
+
+    If the scenario defines threat_profiles and a protected_point, corridor
+    analysis is run after the composite coverage is built.
 
     Example:
 
@@ -523,8 +542,115 @@ def simulate(
     except Exception as exc:
         click.echo(f"  Warning: could not render redundancy map: {exc}", err=True)
 
-    if failed:
-        click.echo(f"\nCompleted with {failed} sensor error(s).", err=True)
+    # -------------------------------------------------------------------------
+    # Threat corridor analysis (S6-5)
+    # Run only when threat_profiles are listed in the scenario AND a
+    # protected_point is defined.
+    # -------------------------------------------------------------------------
+    corridor_failed = False
+    if sc.threat_profiles and sc.protected_point is not None:
+        effective_threat_dir: Path = (
+            Path(threat_dir) if threat_dir is not None else _DEFAULT_THREAT_DIR
+        )
+        click.echo("\nRunning threat corridor analysis…")
+        click.echo(f"  Threat directory: {effective_threat_dir}")
+        load_failed = False
+        try:
+            all_threats = load_threats(effective_threat_dir)
+        except (FileNotFoundError, PermissionError, ValueError, OSError) as exc:
+            click.echo(
+                f"  Warning: could not load threat definitions from {effective_threat_dir}: {exc}",
+                err=True,
+            )
+            all_threats = []
+            load_failed = True
+
+        threat_map = {t.name: t for t in all_threats}
+        matched_threats = []
+        for name in sc.threat_profiles:
+            threat = threat_map.get(name)
+            if threat is None:
+                if not load_failed:
+                    click.echo(
+                        f"  Warning: threat '{name}' not found in "
+                        f"{effective_threat_dir} — skipping.",
+                        err=True,
+                    )
+            else:
+                matched_threats.append(threat)
+
+        if not matched_threats and not load_failed:
+            click.echo(
+                "  Warning: no matching threat profiles found — skipping corridor analysis.",
+                err=True,
+            )
+
+        for threat in matched_threats:
+            click.echo(f"\n  Threat: {threat.name}")
+            try:
+                results = find_worst_corridors(site, composite, threat, sc.protected_point)
+            except Exception as exc:
+                click.echo(
+                    f"  Warning: corridor analysis failed for '{threat.name}': {exc}",
+                    err=True,
+                )
+                corridor_failed = True
+                continue
+
+            header = f"  {'Bearing':>8}  {'Coverage':>10}  {'First detect':>14}"
+            click.echo(header)
+            click.echo(f"  {'─' * 8}  {'─' * 10}  {'─' * 14}")
+            for r in results[:5]:
+                fd = (
+                    f"{r.first_detection_distance_m:.0f} m"
+                    if r.first_detection_distance_m is not None
+                    else "none"
+                )
+                click.echo(f"  {r.corridor.bearing_deg:>7.1f}°  {r.coverage_pct:>9.1f}%  {fd:>14}")
+            if len(results) > 5:
+                click.echo(f"  … {len(results) - 5} more corridors (worst shown first)")
+
+            safe_threat = _safe_filename(threat.name)
+            overlay_out = output_path / f"corridor_{safe_threat}_overlay.png"
+            polar_out = output_path / f"corridor_{safe_threat}_polar.png"
+
+            try:
+                render_corridor_overlay_map(
+                    site,
+                    composite,
+                    results,
+                    sc.protected_point,
+                    overlay_out,
+                    title=f"Corridor Analysis — {threat.name}",
+                )
+                click.echo(f"  → {overlay_out}")
+            except Exception as exc:
+                click.echo(f"  Warning: could not render corridor overlay: {exc}", err=True)
+
+            try:
+                render_corridor_polar_diagram(
+                    results,
+                    polar_out,
+                    title=f"Coverage by Bearing — {threat.name}",
+                )
+                click.echo(f"  → {polar_out}")
+            except Exception as exc:
+                click.echo(f"  Warning: could not render polar diagram: {exc}", err=True)
+
+    elif sc.threat_profiles and sc.protected_point is None:
+        click.echo(
+            "\nNote: threat_profiles specified in scenario but no protected_point defined "
+            "— skipping corridor analysis.",
+            err=True,
+        )
+
+    if failed or corridor_failed:
+        msg_parts = []
+        if failed:
+            msg_parts.append(f"{failed} sensor error(s)")
+        if corridor_failed:
+            msg_parts.append("corridor analysis error(s)")
+        click.echo(f"\nCompleted with {', '.join(msg_parts)}.", err=True)
         sys.exit(1)
 
     click.echo(f"\nDone. Output written to {output_path.resolve()}")
