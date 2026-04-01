@@ -1152,3 +1152,80 @@ defects:
     resolution: "Added uniqueness check before assignment: if zone.name in per_zone_coverage_pct raise ValueError. Added test_duplicate_zone_name_raises."
     status: resolved
     commit: "pending"
+
+  - id: D-105
+    severity: medium
+    task: S5-4
+    found_by: silent_failure_hunter
+    file: src/salus/report/maps.py
+    line: 395
+    description: "render_composite_coverage_map does not ensure output_path.parent exists before savefig. Missing parent directory raises FileNotFoundError inside try block with no useful context."
+    resolution: "Added output_path.parent.mkdir(parents=True, exist_ok=True) immediately after Path(output_path) conversion."
+    status: resolved
+    commit: "pending"
+
+  - id: D-106
+    severity: medium
+    task: S5-4
+    found_by: silent_failure_hunter
+    file: src/salus/report/maps.py
+    line: 485
+    description: "render_gap_map does not ensure output_path.parent exists before savefig. Same failure mode as D-105."
+    resolution: "Added output_path.parent.mkdir(parents=True, exist_ok=True) immediately after Path(output_path) conversion."
+    status: resolved
+    commit: "pending"
+
+  - id: D-107
+    severity: high
+    task: S5-4
+    found_by: silent_failure_hunter
+    file: src/salus/report/maps.py
+    line: 534
+    description: "Division by zero when gaps.size==0 in render_gap_map: gaps.astype(bool).sum() / gaps.size produces nan (NumPy RuntimeWarning, no exception) and title renders as 'nan% gap'. Same issue at line 342 in render_layer_coverage_maps for coverage.size==0."
+    resolution: "Added 'if gaps.size == 0: raise ValueError(...)' guard in render_gap_map and 'if coverage.size == 0: raise ValueError(...)' in the render_layer_coverage_maps loop before figure creation."
+    status: resolved
+    commit: "pending"
+
+  - id: D-108
+    severity: high
+    task: S5-4
+    found_by: silent_failure_hunter
+    file: src/salus/report/maps.py
+    line: 497
+    description: "render_gap_map does not validate that composite and gaps have matching shapes. A shape mismatch raises a bare NumPy broadcast ValueError; callers that swallow the exception silently get a missing output file."
+    resolution: "Added explicit shape check at function entry: 'if composite.shape != gaps.shape: raise ValueError(...)' before figure creation."
+    status: resolved
+    commit: "pending"
+
+  - id: D-109
+    severity: medium
+    task: S5-4
+    found_by: silent_failure_hunter
+    file: src/salus/report/maps.py
+    line: 82
+    description: "render_coverage_map missing output_path.parent.mkdir() guard before fig.savefig(). Inconsistent with render_composite_coverage_map and render_gap_map which both have this guard."
+    resolution: "Added output_path.parent.mkdir(parents=True, exist_ok=True) immediately after Path(output_path) conversion in render_coverage_map."
+    status: resolved
+    commit: "pending"
+
+  - id: D-110
+    severity: medium
+    task: S5-4
+    found_by: silent_failure_hunter
+    file: src/salus/report/maps.py
+    line: 362
+    description: "In render_layer_coverage_maps, paths[sensor_type] = out_path is assigned after the finally block outside the try. If rendering raises (e.g. NaN DEM), that sensor type is silently dropped from the returned dict with no warning to caller."
+    resolution: "Moved paths[sensor_type] = out_path inside the try block immediately after fig.savefig() so it only executes on successful render."
+    status: resolved
+    commit: "pending"
+
+  - id: D-111
+    severity: medium
+    task: S5-4
+    found_by: regression_reviewer
+    file: src/salus/report/maps.py
+    line: 582
+    description: "_render_zones emits 'No render style for zone type ...' but render_coverage_map inline path emits 'No render style defined for zone type ...'. Warning message divergence means downstream matchers checking for 'defined' substring will miss warnings from the new render functions."
+    resolution: "Added 'defined' to _render_zones warning string to match render_coverage_map wording exactly."
+    status: resolved
+    commit: "pending"

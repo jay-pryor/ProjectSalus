@@ -14,8 +14,15 @@ matplotlib.use("Agg")  # Non-interactive backend — must be set before importin
 from shapely.geometry import MultiPolygon, Polygon
 
 from salus.ingest.terrain import load_dem
+from salus.models.sensor import SensorType
 from salus.models.zone import Zone, ZoneType
-from salus.report.maps import _hillshade, render_coverage_map
+from salus.report.maps import (
+    _hillshade,
+    render_composite_coverage_map,
+    render_coverage_map,
+    render_gap_map,
+    render_layer_coverage_maps,
+)
 
 
 class TestHillshade:
@@ -302,3 +309,304 @@ class TestRenderCoverageMapZones:
             result = render_coverage_map(site, coverage, out, zones=[zone])
 
         assert result.exists()
+
+
+# ---------------------------------------------------------------------------
+# Helpers shared by S5-4 tests
+# ---------------------------------------------------------------------------
+
+
+def _two_layer_coverages(site):
+    radar = np.zeros(site.dem.shape, dtype=bool)
+    radar[:50, :] = True
+    acoustic = np.zeros(site.dem.shape, dtype=bool)
+    acoustic[:, 50:] = True
+    return {SensorType.Radar: radar, SensorType.Acoustic: acoustic}
+
+
+# ---------------------------------------------------------------------------
+# render_layer_coverage_maps
+# ---------------------------------------------------------------------------
+
+
+class TestRenderLayerCoverageMaps:
+    def test_returns_dict_keyed_by_sensor_type(self, flat_dem_path, tmp_path):
+        site = load_dem(flat_dem_path)
+        layers = _two_layer_coverages(site)
+        result = render_layer_coverage_maps(site, layers, tmp_path)
+        assert set(result.keys()) == set(layers.keys())
+
+    def test_each_value_is_path(self, flat_dem_path, tmp_path):
+        site = load_dem(flat_dem_path)
+        layers = _two_layer_coverages(site)
+        result = render_layer_coverage_maps(site, layers, tmp_path)
+        for path in result.values():
+            assert isinstance(path, Path)
+
+    def test_each_file_exists(self, flat_dem_path, tmp_path):
+        site = load_dem(flat_dem_path)
+        layers = _two_layer_coverages(site)
+        result = render_layer_coverage_maps(site, layers, tmp_path)
+        for path in result.values():
+            assert path.exists()
+
+    def test_each_file_is_valid_png(self, flat_dem_path, tmp_path):
+        site = load_dem(flat_dem_path)
+        layers = _two_layer_coverages(site)
+        result = render_layer_coverage_maps(site, layers, tmp_path)
+        for path in result.values():
+            img = Image.open(path)
+            assert img.format == "PNG"
+
+    def test_output_dir_created_if_missing(self, flat_dem_path, tmp_path):
+        site = load_dem(flat_dem_path)
+        layers = _two_layer_coverages(site)
+        new_dir = tmp_path / "new_subdir"
+        assert not new_dir.exists()
+        render_layer_coverage_maps(site, layers, new_dir)
+        assert new_dir.exists()
+
+    def test_empty_layers_returns_empty_dict(self, flat_dem_path, tmp_path):
+        site = load_dem(flat_dem_path)
+        result = render_layer_coverage_maps(site, {}, tmp_path)
+        assert result == {}
+
+    def test_all_four_sensor_types_accepted(self, flat_dem_path, tmp_path):
+        site = load_dem(flat_dem_path)
+        cov = np.ones(site.dem.shape, dtype=bool)
+        layers = {
+            SensorType.Radar: cov,
+            SensorType.EO_IR: cov,
+            SensorType.RF: cov,
+            SensorType.Acoustic: cov,
+        }
+        result = render_layer_coverage_maps(site, layers, tmp_path)
+        assert len(result) == 4
+        for path in result.values():
+            assert path.exists()
+
+    def test_sensor_positions_accepted(self, flat_dem_path, tmp_path):
+        site = load_dem(flat_dem_path)
+        layers = _two_layer_coverages(site)
+        cx = site.origin_x + 50.0
+        cy = site.origin_y - 50.0
+        result = render_layer_coverage_maps(site, layers, tmp_path, sensor_positions=[(cx, cy)])
+        for path in result.values():
+            assert path.exists()
+
+
+# ---------------------------------------------------------------------------
+# render_composite_coverage_map
+# ---------------------------------------------------------------------------
+
+
+class TestRenderCompositeCoverageMap:
+    def test_returns_path(self, flat_dem_path, tmp_path):
+        site = load_dem(flat_dem_path)
+        layers = _two_layer_coverages(site)
+        out = tmp_path / "composite.png"
+        result = render_composite_coverage_map(site, layers, out)
+        assert result == out
+
+    def test_file_exists(self, flat_dem_path, tmp_path):
+        site = load_dem(flat_dem_path)
+        layers = _two_layer_coverages(site)
+        out = tmp_path / "composite.png"
+        render_composite_coverage_map(site, layers, out)
+        assert out.exists()
+
+    def test_output_is_valid_png(self, flat_dem_path, tmp_path):
+        site = load_dem(flat_dem_path)
+        layers = _two_layer_coverages(site)
+        out = tmp_path / "composite.png"
+        render_composite_coverage_map(site, layers, out)
+        img = Image.open(out)
+        assert img.format == "PNG"
+        assert img.size[0] > 0
+
+    def test_empty_layers_renders(self, flat_dem_path, tmp_path):
+        """Empty layer dict produces a hillshade-only map without error."""
+        site = load_dem(flat_dem_path)
+        out = tmp_path / "empty_composite.png"
+        render_composite_coverage_map(site, {}, out)
+        assert out.exists()
+
+    def test_accepts_str_path(self, flat_dem_path, tmp_path):
+        site = load_dem(flat_dem_path)
+        layers = _two_layer_coverages(site)
+        out = str(tmp_path / "composite_str.png")
+        result = render_composite_coverage_map(site, layers, out)
+        assert isinstance(result, Path)
+        assert result.exists()
+
+    def test_with_sensor_positions_and_boundary(self, flat_dem_path, tmp_path):
+        site = load_dem(flat_dem_path)
+        layers = _two_layer_coverages(site)
+        out = tmp_path / "composite_annotated.png"
+        min_x, max_x, min_y, max_y = site.extent
+        boundary = Polygon([(min_x, min_y), (max_x, min_y), (max_x, max_y), (min_x, max_y)])
+        cx, cy = site.origin_x + 50.0, site.origin_y - 50.0
+        render_composite_coverage_map(
+            site, layers, out, sensor_positions=[(cx, cy)], boundary=boundary
+        )
+        assert out.exists()
+
+    def test_no_crs_skips_basemap_with_warning(self, flat_dem_path, tmp_path):
+        """site.crs_epsg=None emits a warning but still produces a PNG."""
+        import warnings as _warnings
+
+        site = load_dem(flat_dem_path)
+        object.__setattr__(site, "crs_epsg", None)
+        layers = _two_layer_coverages(site)
+        out = tmp_path / "no_crs.png"
+        with _warnings.catch_warnings(record=True):
+            _warnings.simplefilter("always")
+            render_composite_coverage_map(site, layers, out)
+        assert out.exists()
+
+
+# ---------------------------------------------------------------------------
+# render_gap_map
+# ---------------------------------------------------------------------------
+
+
+class TestRenderGapMap:
+    def test_returns_path(self, flat_dem_path, tmp_path):
+        site = load_dem(flat_dem_path)
+        composite = np.ones(site.dem.shape, dtype=bool)
+        gaps = np.zeros(site.dem.shape, dtype=bool)
+        out = tmp_path / "gaps.png"
+        result = render_gap_map(site, composite, gaps, out)
+        assert result == out
+
+    def test_file_exists(self, flat_dem_path, tmp_path):
+        site = load_dem(flat_dem_path)
+        composite = np.ones(site.dem.shape, dtype=bool)
+        gaps = np.zeros(site.dem.shape, dtype=bool)
+        out = tmp_path / "gaps.png"
+        render_gap_map(site, composite, gaps, out)
+        assert out.exists()
+
+    def test_output_is_valid_png(self, flat_dem_path, tmp_path):
+        site = load_dem(flat_dem_path)
+        composite = np.ones(site.dem.shape, dtype=bool)
+        gaps = np.zeros(site.dem.shape, dtype=bool)
+        out = tmp_path / "gaps.png"
+        render_gap_map(site, composite, gaps, out)
+        img = Image.open(out)
+        assert img.format == "PNG"
+        assert img.size[0] > 0
+
+    def test_all_gaps_renders(self, flat_dem_path, tmp_path):
+        """All cells as gaps (no coverage) must still render without error."""
+        site = load_dem(flat_dem_path)
+        composite = np.zeros(site.dem.shape, dtype=bool)
+        gaps = np.ones(site.dem.shape, dtype=bool)
+        out = tmp_path / "all_gaps.png"
+        render_gap_map(site, composite, gaps, out)
+        assert out.exists()
+
+    def test_no_gaps_renders(self, flat_dem_path, tmp_path):
+        """No gaps (full coverage) must still render without error."""
+        site = load_dem(flat_dem_path)
+        composite = np.ones(site.dem.shape, dtype=bool)
+        gaps = np.zeros(site.dem.shape, dtype=bool)
+        out = tmp_path / "no_gaps.png"
+        render_gap_map(site, composite, gaps, out)
+        assert out.exists()
+
+    def test_partial_gaps_renders(self, flat_dem_path, tmp_path):
+        site = load_dem(flat_dem_path)
+        composite = np.ones(site.dem.shape, dtype=bool)
+        composite[40:60, 40:60] = False
+        gaps = ~composite
+        out = tmp_path / "partial_gaps.png"
+        render_gap_map(site, composite, gaps, out)
+        assert out.exists()
+
+    def test_accepts_str_path(self, flat_dem_path, tmp_path):
+        site = load_dem(flat_dem_path)
+        composite = np.ones(site.dem.shape, dtype=bool)
+        gaps = np.zeros(site.dem.shape, dtype=bool)
+        out = str(tmp_path / "gaps_str.png")
+        result = render_gap_map(site, composite, gaps, out)
+        assert isinstance(result, Path)
+
+    def test_with_boundary_and_zones(self, flat_dem_path, tmp_path):
+        site = load_dem(flat_dem_path)
+        composite = np.ones(site.dem.shape, dtype=bool)
+        composite[30:50, 30:50] = False
+        gaps = ~composite
+        min_x, max_x, min_y, max_y = site.extent
+        boundary = Polygon([(min_x, min_y), (max_x, min_y), (max_x, max_y), (min_x, max_y)])
+        zone = Zone(
+            name="HQ",
+            zone_type=ZoneType.critical_asset,
+            geometry=Polygon(
+                [(min_x, min_y), (min_x + 30, min_y), (min_x + 30, min_y + 30), (min_x, min_y + 30)]
+            ),
+        )
+        out = tmp_path / "gap_annotated.png"
+        render_gap_map(site, composite, gaps, out, boundary=boundary, zones=[zone])
+        assert out.exists()
+
+    def test_creates_parent_dir(self, flat_dem_path, tmp_path):
+        """D-106: parent directory is created if it does not exist."""
+        site = load_dem(flat_dem_path)
+        composite = np.ones(site.dem.shape, dtype=bool)
+        gaps = np.zeros(site.dem.shape, dtype=bool)
+        out = tmp_path / "new_subdir" / "gaps.png"
+        assert not out.parent.exists()
+        render_gap_map(site, composite, gaps, out)
+        assert out.exists()
+
+
+class TestRenderCompositeCoverageMapMkdir:
+    def test_creates_parent_dir(self, flat_dem_path, tmp_path):
+        """D-105: parent directory is created if it does not exist."""
+        site = load_dem(flat_dem_path)
+        layers = _two_layer_coverages(site)
+        out = tmp_path / "new_subdir" / "composite.png"
+        assert not out.parent.exists()
+        render_composite_coverage_map(site, layers, out)
+        assert out.exists()
+
+
+class TestRenderCoverageMapMkdir:
+    def test_creates_parent_dir(self, flat_dem_path, tmp_path):
+        """D-109: render_coverage_map creates parent directory if it does not exist."""
+        site = load_dem(flat_dem_path)
+        coverage = np.ones(site.dem.shape, dtype=bool)
+        out = tmp_path / "new_subdir" / "cov.png"
+        assert not out.parent.exists()
+        render_coverage_map(site, coverage, out)
+        assert out.exists()
+
+
+class TestRenderGapMapGuards:
+    def test_shape_mismatch_raises(self, flat_dem_path, tmp_path):
+        """D-108: mismatched composite/gaps shapes raise ValueError."""
+        site = load_dem(flat_dem_path)
+        composite = np.ones(site.dem.shape, dtype=bool)
+        gaps = np.zeros((site.dem.shape[0] + 1, site.dem.shape[1]), dtype=bool)
+        out = tmp_path / "gaps.png"
+        with pytest.raises(ValueError, match="composite shape"):
+            render_gap_map(site, composite, gaps, out)
+
+    def test_zero_size_gaps_raises(self, flat_dem_path, tmp_path):
+        """D-107: zero-size gaps array raises ValueError."""
+        site = load_dem(flat_dem_path)
+        composite = np.ones((0, 0), dtype=bool)
+        gaps = np.zeros((0, 0), dtype=bool)
+        out = tmp_path / "gaps.png"
+        with pytest.raises(ValueError, match="zero elements"):
+            render_gap_map(site, composite, gaps, out)
+
+
+class TestRenderLayerCoverageMapsGuards:
+    def test_zero_size_coverage_raises(self, flat_dem_path, tmp_path):
+        """D-107: zero-size coverage array raises ValueError."""
+        site = load_dem(flat_dem_path)
+        layers = {SensorType.Radar: np.ones((0, 0), dtype=bool)}
+        with pytest.raises(ValueError, match="zero elements"):
+            render_layer_coverage_maps(site, layers, tmp_path)
