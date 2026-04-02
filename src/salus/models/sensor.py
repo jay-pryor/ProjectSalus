@@ -52,7 +52,14 @@ class SensorDefinition(BaseModel):
     """Horizontal field of regard in degrees (1–360)."""
 
     elevation_coverage_deg: float
-    """Vertical field of regard in degrees (1–180)."""
+    """Vertical field of regard in degrees (1–180). Arc width centred on
+    ``elevation_boresight_deg``."""
+
+    elevation_boresight_deg: float = 0.0
+    """Centre of the sensor's elevation arc in degrees.
+    0 = horizontal, positive = upward, negative = downward.
+    The sensor detects targets whose elevation angle from the sensor falls
+    within ``[boresight - coverage/2, boresight + coverage/2]``."""
 
     frequency_bands: list[str] = Field(default_factory=list)
     """RF/radar frequency bands monitored (e.g. ['2.4 GHz', '5.8 GHz'])."""
@@ -99,6 +106,13 @@ class SensorDefinition(BaseModel):
     def _elevation_valid(cls, v: float) -> float:
         if not (0.0 < v <= 180.0):
             raise ValueError(f"elevation_coverage_deg must be in (0, 180], got {v}")
+        return v
+
+    @field_validator("elevation_boresight_deg")
+    @classmethod
+    def _elevation_boresight_valid(cls, v: float) -> float:
+        if not (-90.0 <= v <= 90.0):
+            raise ValueError(f"elevation_boresight_deg must be in [-90, 90], got {v}")
         return v
 
     @field_validator("mounting_height_m")

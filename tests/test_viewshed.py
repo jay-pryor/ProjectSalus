@@ -8,7 +8,7 @@ import rasterio
 from rasterio.crs import CRS
 from rasterio.transform import from_bounds
 
-from salus.engine.viewshed import compute_viewshed
+from salus.engine.viewshed import compute_viewshed, line_of_sight_3d
 from salus.ingest.terrain import load_dem
 
 
@@ -169,3 +169,84 @@ class TestDSMViewshed:
         # 2m above DEM = 52m absolute; DSM = 100m → sensor is inside the building
         with pytest.raises(ValueError, match="below"):
             compute_viewshed(site, obs_x, obs_y, observer_height=2.0)
+
+
+class TestLineOfSight3D:
+    """Tests for line_of_sight_3d — 3D point-to-point LOS check."""
+
+    def test_flat_terrain_unobstructed(self, flat_dem_path):
+        """Two points above flat terrain with no obstruction returns True."""
+        site = load_dem(flat_dem_path)
+        # Both 10 m above the 50 m DEM → 60 m absolute
+        x1 = site.origin_x + 10 * site.resolution
+        y1 = site.origin_y - 10 * site.resolution
+        x2 = site.origin_x + 90 * site.resolution
+        y2 = site.origin_y - 90 * site.resolution
+        assert line_of_sight_3d(site, x1, y1, 60.0, x2, y2, 60.0) is True
+
+    def test_ridge_blocks_los(self, ridge_dem_path):
+        """Two points at ground level on opposite sides of the ridge are blocked."""
+        site = load_dem(ridge_dem_path)
+        # origin_y = 6100200; row 10 → y ≈ 6100190, row 190 → y ≈ 6100010
+        x = site.origin_x + 10 * site.resolution
+        y_north = site.origin_y - 10 * site.resolution  # north of ridge
+        y_south = site.origin_y - 190 * site.resolution  # south of ridge
+        # Both 50 m above their 50 m DEM cells → 100 m absolute.
+        # Ridge peak ~150 m; ray midpoint elevation ~100 m → blocked.
+        assert line_of_sight_3d(site, x, y_north, 100.0, x, y_south, 100.0) is False
+
+    def test_elevated_target_clears_ridge(self, ridge_dem_path):
+        """Target elevated enough that the ray clears the ridge returns True."""
+        site = load_dem(ridge_dem_path)
+        x = site.origin_x + 10 * site.resolution
+        y_north = site.origin_y - 10 * site.resolution
+        y_south = site.origin_y - 190 * site.resolution
+        # Observer at 100 m absolute; target at 300 m absolute.
+        # Ray at ridge midpoint ≈ 200 m > 150 m ridge peak → clear.
+        assert line_of_sight_3d(site, x, y_north, 100.0, x, y_south, 300.0) is True
+
+    def test_same_horizontal_position_returns_true(self, flat_dem_path):
+        """Identical x,y but different z (e.g. sensor directly below) returns True."""
+        site = load_dem(flat_dem_path)
+        x = site.origin_x + 50 * site.resolution
+        y = site.origin_y - 50 * site.resolution
+        assert line_of_sight_3d(site, x, y, 55.0, x, y, 80.0) is True
+
+    def test_identical_points_returns_true(self, flat_dem_path):
+        """Same start and end in 3D trivially has no occlusion."""
+        site = load_dem(flat_dem_path)
+        x = site.origin_x + 50 * site.resolution
+        y = site.origin_y - 50 * site.resolution
+        assert line_of_sight_3d(site, x, y, 60.0, x, y, 60.0) is True
+
+    def test_both_points_outside_dem_returns_true(self, flat_dem_path):
+        """Points entirely outside DEM extent have no terrain to sample — True."""
+        site = load_dem(flat_dem_path)
+        # Well outside the 100×100 site
+        assert line_of_sight_3d(site, 0.0, 0.0, 100.0, 1.0, 0.0, 100.0) is True
+
+    def test_non_finite_x1_raises(self, flat_dem_path):
+        """Non-finite coordinate raises ValueError."""
+        site = load_dem(flat_dem_path)
+        import math
+
+        with pytest.raises(ValueError, match="finite"):
+            line_of_sight_3d(site, math.nan, 0.0, 60.0, 1.0, 0.0, 60.0)
+
+    def test_non_finite_z2_raises(self, flat_dem_path):
+        """Non-finite z2_abs raises ValueError."""
+        site = load_dem(flat_dem_path)
+        import math
+
+        with pytest.raises(ValueError, match="finite"):
+            line_of_sight_3d(site, 0.0, 0.0, 60.0, 1.0, 0.0, math.inf)
+
+    def test_terrain_at_ray_elevation_does_not_block(self, flat_dem_path):
+        """Terrain exactly at ray elevation does not block (must strictly exceed)."""
+        site = load_dem(flat_dem_path)
+        # DEM is 50 m; both endpoints at exactly 50 m absolute → ray flush with terrain.
+        x1 = site.origin_x + 10 * site.resolution
+        y1 = site.origin_y - 10 * site.resolution
+        x2 = site.origin_x + 90 * site.resolution
+        y2 = site.origin_y - 90 * site.resolution
+        assert line_of_sight_3d(site, x1, y1, 50.0, x2, y2, 50.0) is True

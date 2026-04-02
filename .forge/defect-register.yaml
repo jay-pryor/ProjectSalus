@@ -1493,3 +1493,47 @@ defects:
     resolution: "Deferred — pre-existing issue outside S6-5 scope; requires DEM validation in load_dem or SiteModel."
     status: deferred
     commit: ""
+
+  - id: D-136
+    severity: high
+    task: S6.1
+    found_by: silent_failure_hunter
+    file: src/salus/engine/viewshed.py
+    line: 197
+    description: "line_of_sight_3d has no guard for site.resolution <= 0; divides by resolution to compute num_steps. A zero or negative resolution causes ZeroDivisionError or nonsensical step count."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-137
+    severity: high
+    task: S6.1
+    found_by: silent_failure_hunter
+    file: src/salus/engine/trajectory.py
+    line: 78
+    description: "sensor_can_detect_point reads site.dem[s_row, s_col] for the sensor cell but does not check for NaN. If DEM is nodata at the sensor position, sz_abs becomes NaN and all subsequent arithmetic (slant range, elevation angle) silently propagates NaN, returning wrong results."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-138
+    severity: medium
+    task: S6.1
+    found_by: silent_failure_hunter
+    file: src/salus/engine/trajectory.py
+    line: 118
+    description: "Co-located target (h_dist == 0, same height as sensor) is silently assigned elevation_angle_deg = 90 degrees by convention (atan2 branch). This undocumented convention can cause unexpected False returns for sensors with elevation arcs that do not include 90 degrees. Behaviour should be documented in the docstring."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-139
+    severity: low
+    task: S6.1
+    found_by: silent_failure_hunter
+    file: src/salus/engine/viewshed.py
+    line: 197
+    description: "num_steps in line_of_sight_3d is unbounded — extremely long rays (e.g. h_dist=1e9 m, resolution=1 m) produce 10^9 loop iterations. No practical risk given DEM extent constraints but worth noting. Mitigated once D-136 resolution guard is in place."
+    resolution: "Accepted as low risk given DEM extent constraints; resolution guard added for D-136 covers the zero-resolution edge case."
+    status: deferred
+    commit: ""

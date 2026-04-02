@@ -15,6 +15,7 @@ max_range_m: 300.0           # confidence: low — acoustic range 150–500 m ty
 min_range_m: 0.0             # confidence: high — passive sensor, no blind zone
 azimuth_coverage_deg: 360.0  # confidence: medium — omnidirectional microphone array typical for this class
 elevation_coverage_deg: 90.0 # confidence: low — upper hemisphere coverage assumed; not published
+elevation_boresight_deg: 45.0 # confidence: low — centre of estimated 0° to +90° (upper hemisphere) arc
 frequency_bands: []          # confidence: high — passive acoustic, no RF transmission
 requires_los: false          # confidence: high — sound propagates around terrain obstacles
 mounting_height_m: 2.0       # confidence: low — low mounting typical for acoustic; not published

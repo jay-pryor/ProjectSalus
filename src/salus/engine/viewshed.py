@@ -6,6 +6,7 @@ ray-marching implementation for environments without GDAL.
 
 from __future__ import annotations
 
+import math
 import warnings
 
 import numpy as np
@@ -144,6 +145,78 @@ def clip_viewshed_to_sensor(
         azimuth_mask = np.abs(diff) <= half_arc
 
     return viewshed_bool & range_mask & azimuth_mask
+
+
+def line_of_sight_3d(
+    site: SiteModel,
+    x1: float,
+    y1: float,
+    z1_abs: float,
+    x2: float,
+    y2: float,
+    z2_abs: float,
+) -> bool:
+    """Check line-of-sight between two absolute 3D positions against site terrain.
+
+    Ray-marches from (x1, y1, z1_abs) to (x2, y2, z2_abs) at intervals of
+    ``site.resolution``, sampling the surface (DSM when available, else DEM) at
+    each horizontal position and checking whether terrain rises above the ray.
+
+    Out-of-bounds sample positions are skipped — terrain outside the site
+    extent does not occlude the ray.  A NaN surface value is treated as a
+    solid obstruction (returns False).
+
+    Args:
+        site: Site terrain model providing the surface array and grid geometry.
+        x1: CRS easting of the first point (metres).
+        y1: CRS northing of the first point (metres).
+        z1_abs: Absolute elevation of the first point (metres ASL).
+        x2: CRS easting of the second point (metres).
+        y2: CRS northing of the second point (metres).
+        z2_abs: Absolute elevation of the second point (metres ASL).
+
+    Returns:
+        True if terrain does not occlude the ray between the two points.
+        False if terrain rises above the ray at any sampled position.
+
+    Raises:
+        ValueError: If any coordinate is non-finite.
+    """
+    if not all(math.isfinite(v) for v in (x1, y1, z1_abs, x2, y2, z2_abs)):
+        raise ValueError(
+            f"All coordinates must be finite, got ({x1}, {y1}, {z1_abs}) → ({x2}, {y2}, {z2_abs})"
+        )
+    if site.resolution <= 0.0:
+        raise ValueError(f"site.resolution must be > 0, got {site.resolution}")
+
+    h_dist = math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+    if h_dist == 0.0:
+        # Same horizontal position — no terrain path to march along.
+        return True
+
+    surface = site.surface_array()
+    # Sample at every resolution step; add 2 to include both endpoints.
+    num_steps = max(2, int(h_dist / site.resolution) + 2)
+
+    for i in range(num_steps):
+        t = i / (num_steps - 1)
+        sx = x1 + t * (x2 - x1)
+        sy = y1 + t * (y2 - y1)
+        ray_elev = z1_abs + t * (z2_abs - z1_abs)
+
+        col = int((sx - site.origin_x) / site.resolution)
+        row = int((site.origin_y - sy) / site.resolution)
+
+        if not (0 <= row < site.rows and 0 <= col < site.cols):
+            continue  # Outside DEM extent — skip.
+
+        terrain_elev = float(surface[row, col])
+        if math.isnan(terrain_elev):
+            return False  # Nodata treated as solid obstruction.
+        if terrain_elev > ray_elev:
+            return False  # Terrain rises above the ray.
+
+    return True
 
 
 def _xy_to_rc(site: SiteModel, x: float, y: float) -> tuple[int, int]:
