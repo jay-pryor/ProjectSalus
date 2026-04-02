@@ -36,12 +36,17 @@ A CLI pipeline that ingests site terrain data and sensor/effector configurations
 - [ ] Composite coverage map (any sensor detects)
 - [ ] Gap identification (site area minus coverage)
 
-#### Threat Corridor Analysis
+#### Threat Trajectory Analysis
 - [ ] Threat profile definitions (drone type, speed, altitude, RCS, RF signature)
-- [ ] Linear approach corridor analysis from defined bearings
-- [ ] Coverage percentage per corridor
-- [ ] Worst-case approach identification
-- [ ] Time-in-coverage calculation (time from first detection to target arrival)
+- [ ] `line_of_sight_3d` — point-to-point LOS check in 3D space (sensor to target at arbitrary altitude)
+- [ ] `elevation_boresight_deg` field on sensor definitions — centres the elevation arc for 3D detection gating
+- [ ] `sensor_can_detect_point` — full 3D detection predicate (LOS + range + azimuth + elevation arc)
+- [ ] `DroneTrajectory` model — ordered 3D waypoints at configurable speed; piecewise linear segments approximate curved paths
+- [ ] `analyse_trajectory` — step along trajectory at configurable `segment_length_m`, binary search refinement at detection transitions for sub-metre / sub-second timing precision
+- [ ] Planning sweep: `find_worst_trajectories` across bearing × start altitude × dive angle parameter space
+- [ ] Engagement calc mode: specific-trajectory analysis returning exact `DetectionEvent` (time, position, sensor) per detection crossing
+- [ ] `--segment-length` CLI flag — runtime fidelity control (e.g., 10 m for fast planning pass, 0.5 m for engagement calc)
+- [ ] Trajectory visualisation: approach path map with detection event markers, polar diagram of detection exposure by bearing
 
 #### Kill Chain Timeline Modelling
 - [ ] Model engagement sequence: detect → track → identify → decide → engage → assess (D-T-I-D-E-A)

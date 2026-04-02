@@ -204,6 +204,90 @@ _Goal: model drone approach corridors and assess coverage along each path._
 
 ---
 
+### Slice 6.1 — 3D LOS Primitive and Sensor Detection Point Query
+
+_Goal: establish the geometric foundation for 3D detection. Replace the altitude-blind 2D composite lookup with a physically correct point-to-point line-of-sight check and a sensor detection predicate that operates in full 3D space. This is the primitive that all subsequent trajectory analysis builds on._
+
+_Context: the current architecture computes a single 2D composite coverage map (targetHeight=0) and samples it for all threat altitudes, producing identical results regardless of whether a threat flies at 20 m or 150 m AGL. This slice fixes that at the geometric layer._
+
+**S6.1-1: Implement `line_of_sight_3d` in `engine/viewshed.py`**
+- _What:_ Add `line_of_sight_3d(site, x1, y1, z1_abs, x2, y2, z2_abs) -> bool` to `viewshed.py`. Ray-march from point 1 to point 2 in 3D, sampling the DEM at each horizontal step and checking whether terrain rises above the line connecting the two absolute-elevation endpoints. Returns True if no terrain occlusion is found. Write tests: unobstructed pair on flat terrain (True), pair with ridge between them (False), pair where target is elevated above the ridge (True).
+- _Why:_ This is the foundational geometric primitive. Every sensor detection check in 3D reduces to "can the sensor see this point in 3D space?" The existing GDAL viewshed API takes a fixed targetHeight across the whole raster — it cannot answer a point query to a specific elevated position. This function does exactly that.
+
+**S6.1-2: Add `elevation_boresight_deg` to `SensorDefinition` and update sensor YAMLs**
+- _What:_ Add `elevation_boresight_deg: float = 0.0` to `SensorDefinition` in `models/sensor.py`. This defines the centre of the sensor's elevation arc (0 = horizontal, positive = upward, negative = downward). The existing `elevation_coverage_deg` field defines the arc width; `elevation_boresight_deg` defines where that arc is centred. Add the field to all existing sensor YAML files under `src/salus/data/sensors/` (most will be 0.0). Update field validators.
+- _Why:_ `elevation_coverage_deg` was always stored but never used in any computation because there was no way to know where in the vertical plane the arc was centred. A ground radar covering -5° to +30° is fundamentally different from one covering +60° to +85°. Without this field, the sensor model cannot correctly gate detections by elevation angle.
+
+**S6.1-3: Create `engine/trajectory.py` with `sensor_can_detect_point`**
+- _What:_ Create `src/salus/engine/trajectory.py`. Implement `sensor_can_detect_point(site, sensor, placement, tx, ty, tz_agl) -> bool`. The function: (1) computes absolute target elevation as `dem[target_cell] + tz_agl`; (2) calls `line_of_sight_3d` from sensor absolute position to target absolute position (skipping LOS for `requires_los=False` sensors); (3) checks 3D slant range against `sensor.min_range_m` / `sensor.max_range_m`; (4) checks horizontal bearing against azimuth arc; (5) checks elevation angle against `elevation_boresight_deg ± elevation_coverage_deg / 2`. Returns True only if all checks pass. Write tests for each check failing independently.
+- _Why:_ This is the first function that makes threat altitude actually affect detection outcomes. A drone at 150 m AGL visible over terrain that would block a 20 m drone, or outside a radar's elevation arc at close range, will now be modelled correctly.
+
+---
+
+### Slice 6.2 — DroneTrajectory Model
+
+_Goal: define the data model for a 3D piecewise-linear drone trajectory. A trajectory is an ordered list of 3D waypoints; each consecutive pair defines one linear segment. Curved or complex paths are approximated by combining many shorter segments. Configurable segment length controls simulation fidelity._
+
+**S6.2-1: Add `TrajectoryWaypoint` and `DroneTrajectory` to `models/threat.py`**
+- _What:_ Add `TrajectoryWaypoint(x, y, z_agl)` — a single 3D point in CRS coordinates with AGL altitude. Add `DroneTrajectory(waypoints, speed_ms)` — an ordered list of `TrajectoryWaypoint` with minimum 2 waypoints validated, speed > 0 validated, all coordinates finite validated. Keep `ThreatCorridor` as-is — it remains valid as a convenience model for the existing horizontal corridor sweep. Add YAML serialisation round-trip tests.
+- _Why:_ The trajectory model is deliberately minimal — just geometry and speed. It is decoupled from `ThreatProfile` because the same trajectory can be flown by different threats, and the same threat can fly different trajectories. Pydantic validation catches degenerate trajectories (single waypoint, NaN coordinates, zero speed) at load time.
+
+**S6.2-2: Add `trajectory_path` to `ScenarioConfig` in `models/scenario.py`**
+- _What:_ Add `trajectory_path: Path | None = None` to `ScenarioConfig`. This optional field points to a YAML file defining a `DroneTrajectory` for a specific named threat approach. Add path validation (same pattern as `site_dem_path`). Update `load_scenario` in `ingest/scenario.py` to resolve and load the trajectory if present.
+- _Why:_ A scenario file should be able to specify a concrete trajectory for engagement calc runs (e.g., "simulate this specific known approach path"), separately from the bearing-sweep planning mode. Making it optional keeps the simple corridor-sweep workflow unchanged.
+
+---
+
+### Slice 6.3 — Trajectory Analysis Engine
+
+_Goal: implement the core trajectory analysis — step along each segment of a 3D piecewise path at configurable resolution, determine per-sensor detection events, and use binary search to find the precise detection crossing to sub-metre accuracy._
+
+**S6.3-1: Define `DetectionEvent` and `TrajectoryResult` in `engine/trajectory.py`**
+- _What:_ Add frozen dataclasses: `DetectionEvent(sensor_name, time_s, position_x, position_y, position_z_agl, distance_to_asset_m, segment_index)` and `TrajectoryResult(detection_events, first_detection, time_to_asset_s, time_in_detection_s, time_undetected_s, asset_reached_undetected)`. `first_detection` is the earliest `DetectionEvent` across all sensors, or None if the asset is reached without detection. Write unit tests for both dataclasses.
+- _Why:_ `DetectionEvent` captures everything needed for engagement calc downstream — not just that detection occurred, but exactly when, where, which sensor, and how far the drone still had to travel. This is the data that feeds the kill chain timeline in Slice 7.
+
+**S6.3-2: Implement `analyse_trajectory` with binary search refinement**
+- _What:_ Add `analyse_trajectory(site, sensor_placements, trajectory, segment_length_m=1.0) -> TrajectoryResult` to `engine/trajectory.py`. For each segment of the trajectory: generate sample points at `segment_length_m` intervals; at each sample, check all sensors using `sensor_can_detect_point`; when a detection state transition is found (undetected → detected), binary search within that interval to find the crossing point to within `segment_length_m / 100` tolerance. Aggregate all `DetectionEvent` objects, compute timing metrics from `speed_ms`. Write tests: fully undetected trajectory, fully detected, detection mid-path, detection after terrain masking.
+- _Why:_ The binary search is what delivers sub-metre (and therefore sub-second) timing precision. Stepping at `segment_length_m` finds the interval; binary search pins the exact crossing. Setting `segment_length_m=10.0` gives fast planning-fidelity runs; `segment_length_m=0.5` gives engagement-calc precision — the same function, controlled by one parameter.
+
+**S6.3-3: Refactor `find_worst_corridors` to delegate to `analyse_trajectory`**
+- _What:_ Update `find_worst_corridors` in `engine/threat_corridor.py` to construct a two-waypoint `DroneTrajectory` for each bearing (start point at `start_distance_m` in the bearing direction, endpoint at `protected_point`, both at `threat.typical_altitude_m` AGL) and call `analyse_trajectory`. Map `TrajectoryResult` fields back to `CorridorResult` fields for backward compatibility. The 2D composite coverage path is fully retired for corridor analysis. Write regression tests comparing old and new outputs on simple flat-terrain cases.
+- _Why:_ This makes the horizontal corridor sweep a thin wrapper over the general trajectory engine rather than a separate implementation. Backward compatibility is maintained — all S6 CLI outputs and tests continue to work. The refactor also fixes the core defect: corridor coverage now correctly varies by threat altitude.
+
+---
+
+### Slice 6.4 — Worst-Trajectory Sweep
+
+_Goal: extend the planning-mode sweep from a 1D bearing search to a 3D parameter space sweep — bearing × start altitude × dive angle — so the worst-case approach can be identified across all realistic threat geometries, not just horizontal corridors._
+
+**S6.4-1: Implement `find_worst_trajectories` in `engine/trajectory.py`**
+- _What:_ Add `find_worst_trajectories(site, sensor_placements, threat, protected_point, num_bearings=36, altitudes_m=None, dive_angles_deg=None, segment_length_m=5.0) -> list[TrajectoryResult]`. Default `altitudes_m` to `[threat.typical_altitude_m]` and `dive_angles_deg` to `[0]` (horizontal) if not provided. For each (bearing, altitude, dive_angle) combination, construct a two-waypoint trajectory: start point is `(start_distance_m, bearing, altitude)` from the protected point; end point is the protected point at 0 m AGL. Sort results by `time_in_detection_s` ascending (least covered, i.e. worst-case, first). Write tests: single bearing returns one result; full sweep returns `num_bearings × len(altitudes) × len(dive_angles)` results; worst result has lowest time_in_detection_s.
+- _Why:_ A drone operator planning an attack will select the bearing AND the altitude AND the dive profile that minimises detection time. The 1D bearing sweep of S6-3 only finds the worst bearing at a single altitude and zero dive angle — it misses the true worst case. This sweep exposes the full parameter space. Default values preserve backward-compatible behaviour for simple cases.
+
+**S6.4-2: Add trajectory sweep parameters to `ScenarioConfig`**
+- _What:_ Add optional fields to `ScenarioConfig`: `sweep_altitudes_m: list[float] | None = None`, `sweep_dive_angles_deg: list[float] | None = None`, `sweep_segment_length_m: float = 5.0`. These control the planning sweep when `find_worst_trajectories` is invoked via the CLI. Validate that all altitudes are non-negative finite values, all dive angles are in [-90, 0] (descending), segment length is positive.
+- _Why:_ Exposing these as scenario-level parameters lets users configure a high-fidelity engagement sweep (`segment_length_m=0.5`, multiple altitudes and dive angles) vs a fast planning sweep (`segment_length_m=10.0`, single altitude, horizontal only) without changing code.
+
+---
+
+### Slice 6.5 — Trajectory Visualisation and CLI
+
+_Goal: render trajectory analysis results as maps, and wire the full 3D trajectory engine into the CLI so both planning sweeps and specific-trajectory engagement calcs are accessible from `salus simulate`._
+
+**S6.5-1: Add `render_trajectory_map` to `report/maps.py`**
+- _What:_ Add `render_trajectory_map(site, composite_coverage, trajectory_results, protected_point, output_path, title, sensor_positions)`. Render the top-down coverage map as a background. Draw each trajectory path as a 3D-projected line (colour-coded by time_in_detection_s — red = low detection exposure, green = high). Mark `DetectionEvent` positions as circle markers labelled with sensor name and time. Mark the protected point as a star. For the polar diagram, extend `render_corridor_polar_diagram` to accept `TrajectoryResult` lists and colour bars by a secondary dimension (altitude or dive angle) if a multi-parameter sweep was run.
+- _Why:_ The existing corridor overlay map and polar diagram were designed for 1D bearing sweeps. The new map needs to show 3D trajectory paths and detection event positions, which requires a different rendering approach. The protected point and sensor positions remain anchors on all maps.
+
+**S6.5-2: Update `cli.py` for 3D trajectory analysis**
+- _What:_ In the `simulate` command: (1) if `sc.trajectory_path` is set, load the `DroneTrajectory`, call `analyse_trajectory` for each matched threat, print `TrajectoryResult` (first detection time/position/sensor, time to asset, time in detection, asset reached undetected), and render `render_trajectory_map`; (2) if no trajectory is set, run `find_worst_trajectories` using `sc.sweep_altitudes_m`, `sc.sweep_dive_angles_deg`, and `sc.sweep_segment_length_m` (defaulting to single-altitude horizontal sweep for backward compatibility). Add `--segment-length` CLI flag to override `sweep_segment_length_m` at runtime.
+- _Why:_ The `--segment-length` flag is the primary fidelity knob — users can run `salus simulate --segment-length 10` for a fast planning pass and `salus simulate --segment-length 0.5` for a precision engagement calc without editing the scenario file. Both modes use the same underlying engine.
+
+**S6.5-3: Update scenario YAML documentation and add trajectory YAML example**
+- _What:_ Add a sample `trajectory_example.yaml` to `demo/06_slice6/` showing a diving FPV approach (3 waypoints: high altitude far out → medium altitude mid-range → asset at low altitude). Update `docs/SimulationArchitecture.md` data flow section to show the trajectory analysis path alongside the existing coverage map path.
+- _Why:_ A worked example YAML is the fastest way for a user to understand the trajectory format. It also serves as a regression test input for the trajectory engine.
+
+---
+
 ### Slice 7 — Kill Chain Timeline (D-T-I-D-E-A)
 
 _Goal: model the engagement timeline from first detection through to drone neutralisation and determine whether the kill chain can complete before the drone reaches the asset._
@@ -480,30 +564,36 @@ _Goal: ensure the project is reproducible, tested, and ready for reliable develo
 | 3 | Site Boundaries, Zones, DSM | 5 | 18 |
 | 4 | RF Propagation + Acoustic Layers | 5 | 23 |
 | 5 | Multi-Sensor Coverage, Gaps, Stats | 6 | 29 |
-| 6 | Threat Corridors | 5 | 34 |
-| 7 | Kill Chain Timeline (D-T-I-D-E-A) | 4 | 38 |
-| 8 | Multi-Target Saturation | 6 | 44 |
-| 9 | Greedy Placement Optimisation | 4 | 48 |
-| 10 | Configuration Comparison (A vs B) | 3 | 51 |
-| 11 | Effector Coverage Layer | 2 | 53 |
-| 12 | LiDAR Ingestion | 4 | 57 |
-| 13 | PDF Report Generation | 7 | 64 |
-| 14 | Interactive Standalone Viewer | 6 | 70 |
-| 15 | Populate Full Sensor/Effector/Threat DB | 4 | 74 |
-| 16 | CLI Polish + End-to-End Workflow | 5 | 79 |
-| 17 | Docker, Testing, CI Readiness | 5 | 84 |
+| 6 | Threat Corridors (2D baseline) | 5 | 34 |
+| 6.1 | 3D LOS Primitive + Sensor Detection Point Query | 3 | 37 |
+| 6.2 | DroneTrajectory Model | 2 | 39 |
+| 6.3 | Trajectory Analysis Engine | 3 | 42 |
+| 6.4 | Worst-Trajectory Sweep | 2 | 44 |
+| 6.5 | Trajectory Visualisation + CLI | 3 | 47 |
+| 7 | Kill Chain Timeline (D-T-I-D-E-A) | 4 | 51 |
+| 8 | Multi-Target Saturation | 6 | 57 |
+| 9 | Greedy Placement Optimisation | 4 | 61 |
+| 10 | Configuration Comparison (A vs B) | 3 | 64 |
+| 11 | Effector Coverage Layer | 2 | 66 |
+| 12 | LiDAR Ingestion | 4 | 70 |
+| 13 | PDF Report Generation | 7 | 77 |
+| 14 | Interactive Standalone Viewer | 6 | 83 |
+| 15 | Populate Full Sensor/Effector/Threat DB | 4 | 87 |
+| 16 | CLI Polish + End-to-End Workflow | 5 | 92 |
+| 17 | Docker, Testing, CI Readiness | 5 | 97 |
 
-**Total: 84 tasks across 18 slices (including Slice 0).**
+**Total: 97 tasks across 23 slices (including Slice 0).**
 
 ---
 
 ## Dependency Notes
 
 - **Slices 1-5 are strictly sequential** — each builds on the previous.
-- **Slices 6-8 (threat corridors, kill chain, saturation)** depend on Slice 5 (coverage) but are independent of each other and could theoretically be parallelised if two people were working.
+- **Slices 6 → 6.1 → 6.2 → 6.3 → 6.4 → 6.5 are sequential** — each sub-slice depends on the previous. Slice 6 (2D corridors) is a prerequisite for 6.1 because 6.3 refactors `find_worst_corridors` to delegate to the new trajectory engine.
+- **Slice 7 (kill chain) depends on Slice 6.3** — it consumes `TrajectoryResult.first_detection` and `DetectionEvent` instead of `CorridorResult.first_detection_distance_m`. Slices 8-11 depend on Slice 5 and can be done in any order relative to each other, but 7 must precede them in the kill chain pipeline.
 - **Slices 9-11 (placement, comparison, effectors)** depend on Slice 5 and can be done in any order.
 - **Slice 12 (LiDAR)** is independent of Slices 6-11 — it only depends on Slice 1 (SiteModel). It is placed late because GeoTIFF import is sufficient for development and LiDAR adds PDAL complexity. Move it earlier if real LiDAR data arrives.
-- **Slice 13 (PDF report)** depends on all analytical slices (5-11) being complete, since the report includes all of them.
+- **Slice 13 (PDF report)** depends on all analytical slices (5-11 and 6.x) being complete, since the report includes all of them.
 - **Slice 14 (viewer)** depends on Slice 13 (shares ReportData structure and map rendering).
 - **Slice 15 (database population)** can be done at any time after Slice 2 (YAML loader exists). It is placed late because development can proceed with 5-8 representative sensors. Move individual batches earlier if realistic configurations are needed for testing.
 - **Slices 16-17 (polish, testing)** are shown last but testing should happen continuously — the tasks here represent the final pass to ensure comprehensive coverage.

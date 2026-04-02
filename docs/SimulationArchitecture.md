@@ -73,16 +73,18 @@ SiteModel:
   └── airspace_constraints[]  # restricted volumes, corridors
 ```
 
-**Key capability needed:** Line-of-sight (LOS) queries.
-- Given point A (sensor position, height above ground) and point B (target position, altitude), can A see B?
-- This is the fundamental operation the simulation engine calls thousands of times per sensor placement evaluation.
-- LOS check = ray traversal across the DSM grid checking for terrain/structure occlusion.
+**Key capabilities needed:**
+
+**Coverage viewshed (planning mode):** Pre-computed raster — for each grid cell, can any sensor see a ground-level target there? Used for coverage maps, gap analysis, and redundancy maps. Computed once per sensor placement using GDAL `ViewshedGenerate`.
+
+**Point LOS query (trajectory mode):** `line_of_sight_3d(site, x1, y1, z1_abs, x2, y2, z2_abs) -> bool` — can point A see point B in 3D space? Ray-marches from A to B sampling the DEM at each horizontal step, checking whether terrain rises above the line. This is the primitive for trajectory analysis where target altitude matters.
+
+The distinction is critical: the planning viewshed assumes a ground-level target and produces a 2D footprint efficiently. The point LOS query handles arbitrary 3D positions (e.g., a drone at 150 m AGL mid-dive) and is called per-sample along a trajectory.
 
 **Performance consideration:**
-- A single sensor placement evaluation might require LOS checks across a 360-degree arc at multiple elevation angles.
-- For a 1m resolution grid on a 2km x 2km site = 4 million cells. LOS ray traversal needs to be efficient.
-- Bresenham's line algorithm or DDA on the raster grid is the standard approach.
-- Pre-computed viewshed (visibility map from a given point) is likely more efficient than individual ray checks.
+- Planning viewsheds: GDAL's C-based viewshed algorithm handles a full raster in milliseconds. Pre-computed once per sensor per scenario.
+- Point LOS queries: O(distance / DEM resolution) per call. For trajectory analysis at 1 m segment length over a 1.5 km corridor, this is ~1500 LOS checks per sensor per trajectory. Acceptable even with many sensors.
+- Trajectory sweep (worst-case search over bearing × altitude × dive angle): the dominant cost. Parallelisable across parameter combinations.
 
 **Open questions:**
 - [ ] Do we model vegetation as solid occlusion or partial attenuation?
@@ -98,21 +100,24 @@ SiteModel:
 **Sensor model (detection systems):**
 ```
 Sensor:
-  ├── name              # e.g. "DroneShield RfOne"
-  ├── type              # RF, Radar, EO/IR, Acoustic
-  ├── max_range_m       # maximum detection range
-  ├── min_range_m       # minimum detection range (blind zone)
-  ├── azimuth_coverage  # degrees (e.g. 360 for omni, 90 for sector)
-  ├── elevation_coverage # degrees above/below horizon
-  ├── frequency_bands[] # operating frequencies (for RF/radar)
-  ├── detection_probability_curve  # Pd vs range vs RCS
-  ├── environment_factors          # rain, wind, clutter degradation
-  ├── requires_los      # true for EO/IR/radar, false for some RF
-  ├── mounting_height_m  # typical installation height
+  ├── name                    # e.g. "DroneShield RfOne"
+  ├── type                    # RF, Radar, EO/IR, Acoustic
+  ├── max_range_m             # maximum detection range
+  ├── min_range_m             # minimum detection range (blind zone)
+  ├── azimuth_coverage_deg    # degrees (e.g. 360 for omni, 90 for sector)
+  ├── elevation_coverage_deg  # vertical arc width in degrees (e.g. 30 = ±15° from boresight)
+  ├── elevation_boresight_deg # centre of elevation arc (0 = horizontal, +ve = up, -ve = down)
+  ├── frequency_bands[]       # operating frequencies (for RF/radar)
+  ├── detection_probability_curve  # Pd vs range vs RCS (post-MVP)
+  ├── environment_factors          # rain, wind, clutter degradation (post-MVP)
+  ├── requires_los            # true for EO/IR/radar, false for some RF
+  ├── mounting_height_m       # typical installation height
   ├── power_requirements_w
   ├── weight_kg
-  └── cost_aud          # if known
+  └── cost_aud                # if known
 ```
+
+Note: `elevation_coverage_deg` and `elevation_boresight_deg` together define the sensor's vertical detection arc. For trajectory analysis, a target is checked against `boresight ± coverage/2`. For planning viewsheds, these fields are used to clip the raster viewshed. A sensor with `elevation_boresight_deg=10, elevation_coverage_deg=40` covers -10° to +30° elevation.
 
 **Effector model (countermeasure systems):**
 ```
@@ -170,24 +175,63 @@ Gaps = site area minus total coverage.
 
 **Recommendation for MVP:** Raster viewshed using GDAL's `gdal_viewshed` or equivalent, wrapped in Python. This is a solved problem in GIS — no need to reimplement.
 
-#### 2.4.2 — Threat Corridor Modelling
+#### 2.4.2 — Threat Trajectory Modelling
 
-Given a threat profile (drone type, approach vector, speed, altitude):
-1. Define approach corridors (compass bearings, altitude bands)
-2. For each corridor, check what percentage is covered by at least one sensor
-3. Calculate time-in-coverage — how long does the drone spend inside detection range before reaching the target?
-4. Identify the worst-case approach — the corridor with the least coverage
+A drone threat is modelled as a 3D piecewise-linear trajectory — an ordered list of waypoints through which it flies at constant speed. Each consecutive pair of waypoints defines one linear segment. Complex or curved approaches are approximated by combining many shorter segments. Configurable `segment_length_m` controls simulation fidelity (shorter = more precise, slower).
 
-**Threat profile structure:**
+**Two operating modes:**
+
+**Planning mode (worst-case sweep):** Sweeps a parameter space of bearing × start altitude × dive angle to find the approach geometry that minimises detection exposure. Uses `find_worst_trajectories`. Results drive coverage maps, polar diagrams, and gap analysis.
+
+**Engagement calc mode (specific trajectory):** Analyses a single named trajectory defined in a YAML file. Returns exact detection events — which sensor, at what time, at what position — with sub-metre precision via binary search refinement at each detection transition. Used for kill chain timeline input.
+
+**Detection along a trajectory:**
+
+At each sample point `(x, y, z_agl)` along the path, each sensor is checked with `sensor_can_detect_point`:
+1. LOS check: `line_of_sight_3d` from sensor position to target's absolute 3D position
+2. Range check: 3D slant distance within `[min_range_m, max_range_m]`
+3. Azimuth check: horizontal bearing within sensor's azimuth arc
+4. Elevation check: vertical angle within `elevation_boresight_deg ± elevation_coverage_deg / 2`
+
+When a state transition (undetected → detected) is found between two adjacent samples, binary search narrows the crossing to `segment_length_m / 100` tolerance — giving sub-centimetre and therefore sub-millisecond timing precision, bounded only by the user's chosen fidelity.
+
+**Data models:**
+```
+TrajectoryWaypoint:
+  ├── x              # CRS easting (metres)
+  ├── y              # CRS northing (metres)
+  └── z_agl          # altitude above ground level (metres)
+
+DroneTrajectory:
+  ├── waypoints[]    # ordered list of TrajectoryWaypoint, minimum 2
+  └── speed_ms       # constant flight speed (metres per second)
+
+DetectionEvent:
+  ├── sensor_name
+  ├── time_s                    # seconds from trajectory start
+  ├── position (x, y, z_agl)   # position at moment of detection
+  ├── distance_to_asset_m       # how far the drone still had to travel
+  └── segment_index             # which waypoint segment the event occurred on
+
+TrajectoryResult:
+  ├── detection_events[]        # all detection events, chronological
+  ├── first_detection           # earliest DetectionEvent, or None
+  ├── time_to_asset_s           # total flight time from start to asset
+  ├── time_in_detection_s       # total time spent inside at least one sensor's coverage
+  ├── time_undetected_s         # total time outside all sensor coverage
+  └── asset_reached_undetected  # True if drone arrives without any detection
+```
+
+**Threat profile (unchanged — describes the platform, not the path):**
 ```
 ThreatProfile:
-  ├── name              # e.g. "DJI Mavic 3 — low approach"
-  ├── rcs_m2            # radar cross section
-  ├── rf_signature      # known/unknown protocol
-  ├── max_speed_ms      # metres per second
-  ├── typical_altitude_m
-  ├── approach_vectors[] # bearings or "all"
-  └── evasion_capability # none / basic / advanced
+  ├── name                  # e.g. "DJI Mavic 3 — Low Slow"
+  ├── rcs_m2                # radar cross section
+  ├── rf_signature          # known/unknown protocol and frequency
+  ├── max_speed_ms          # metres per second
+  ├── typical_altitude_m    # used as default altitude in planning sweeps
+  ├── approach_vectors[]    # informational — planning sweeps test all bearings
+  └── evasion_capability    # none / basic / advanced
 ```
 
 #### 2.4.3 — Configuration Comparison
@@ -527,14 +571,23 @@ dev = [
    └── Define site zones (perimeter, inner, critical assets)
                     │
 4. SIMULATE
-   ├── Compute viewshed for each radar/EO/IR sensor (GDAL viewshed)
+   ├── Compute viewshed for each radar/EO/IR sensor (GDAL viewshed, targetHeight=0)
    ├── Compute RF coverage for each RF sensor (FSPL + knife-edge)
    ├── Compute acoustic coverage for each acoustic sensor (range circle)
    ├── Apply sensor range/arc limits to each layer
    ├── Union coverage per layer → composite coverage map
    ├── Calculate gap areas
-   ├── Run threat corridors through coverage map
-   ├── Run kill chain timeline for each corridor (D-T-I-D-E-A)
+   │
+   ├── [Planning mode] Sweep bearing × altitude × dive angle
+   │     └── For each combination: construct 2-waypoint DroneTrajectory, run analyse_trajectory
+   │         → find_worst_trajectories → ranked TrajectoryResult list → polar diagram + overlay map
+   │
+   ├── [Engagement calc mode] Load named DroneTrajectory YAML
+   │     └── analyse_trajectory with fine segment_length_m
+   │         → DetectionEvent list (exact time, position, sensor per detection crossing)
+   │         → TrajectoryResult → kill chain input
+   │
+   ├── Run kill chain timeline for each trajectory (D-T-I-D-E-A) using DetectionEvent timing
    ├── Run saturation analysis (N targets, effector allocation)
    ├── (If auto-place) run greedy placement optimisation
    └── (If comparison) repeat for Config B, compute delta
@@ -569,8 +622,8 @@ dev = [
 - Range + arc clipping per sensor
 - Multi-sensor coverage union per layer + composite
 - Gap identification
-- Threat corridor analysis (linear approach paths)
-- Kill chain timeline modelling (D-T-I-D-E-A with time budgets and margin calculation)
+- Threat trajectory analysis — both planning sweep (bearing × altitude × dive angle) and specific-trajectory engagement calcs with sub-metre detection precision via binary search
+- Kill chain timeline modelling (D-T-I-D-E-A with time budgets and margin calculation), fed by `DetectionEvent` timing from trajectory analysis
 - Multi-target engagement & saturation analysis (up to 20 simultaneous targets)
 - Greedy heuristic placement optimisation
 - Configuration comparison (A vs B) including engagement capacity
@@ -612,7 +665,7 @@ dev = [
 
 2. **Sensor layering:** Should each sensor type (RF, radar, EO/IR, acoustic) be modelled as a separate coverage layer with different rules, or should we abstract all sensors to a common "detection volume" model?
 
-3. **2D vs 2.5D vs 3D:** The viewshed approach is effectively 2.5D (2D grid with height values). Do we need true 3D modelling (e.g. for overhanging structures, tunnels, multi-level buildings)?
+3. **2D vs 2.5D vs 3D:** Resolved. Planning coverage maps remain 2.5D (2D raster with elevation). Trajectory analysis is full 3D — `line_of_sight_3d` and `sensor_can_detect_point` operate in 3D space, making threat altitude and dive angle first-class inputs. True volumetric 3D (overhanging structures, multi-level buildings) is deferred to Phase 5.
 
 4. **Engagement modelling:** For effectors, do we just model "can engage" (LOS + range), or do we need to model engagement timelines (detect → track → identify → decide → engage → assess)?
 
