@@ -48,6 +48,11 @@ A CLI pipeline that ingests site terrain data and sensor/effector configurations
 - [ ] `--segment-length` CLI flag — runtime fidelity control (e.g., 10 m for fast planning pass, 0.5 m for engagement calc)
 - [ ] Trajectory visualisation: approach path map with detection event markers, polar diagram of detection exposure by bearing
 
+#### Adversarial Path Planning
+- [ ] `build_detection_cost_grid` — batch-apply `sensor_can_detect_point` across the full site volume at configurable altitude bands; produces a 3D numpy array of per-cell detection exposure counts
+- [ ] `find_adversarial_trajectory` — Dijkstra's graph search over the 3D cost grid; finds the minimum-detection-exposure route from threat origin to protected asset, automatically exploiting terrain masking and sensor coverage gaps; returns a standard `DroneTrajectory` for downstream analysis
+- [ ] `--adversarial` CLI flag on `salus simulate` — triggers adversarial path discovery per threat profile, feeds discovered trajectory into `analyse_trajectory`, renders path overlaid on coverage heatmap with detection event markers
+
 #### Kill Chain Timeline Modelling
 - [ ] Model engagement sequence: detect → track → identify → decide → engage → assess (D-T-I-D-E-A)
 - [ ] Time budget per phase (sensor track latency, C2 decision time, effector reaction time)

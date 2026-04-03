@@ -315,6 +315,56 @@ This is not globally optimal but provides a useful starting recommendation that 
 
 ---
 
+#### 2.4.4 — Adversarial Path Planning
+
+**Goal:** Autonomously discover the minimum-detection-exposure route from a threat origin to the protected asset, without the analyst prescribing it. This surfaces approach routes that exploit terrain masking and sensor coverage gaps that a human reviewer may not have noticed.
+
+**Architecture — two phases:**
+
+**Phase 1: Build detection cost grid**
+
+`build_detection_cost_grid(site, sensors, placements, altitude_bands_m) -> DetectionCostGrid`
+
+For every DEM cell `(row, col)` at each configured altitude band, call `sensor_can_detect_point` for every sensor-placement pair and record the detection count. The result is a 3D numpy array of shape `[n_altitude_bands, rows, cols]` where each value is the number of sensors that would detect a drone at that position and altitude. Zero = undetected; N = detected by all N sensors.
+
+This is a batched application of the existing `sensor_can_detect_point` primitive — no new geometry is required. The grid is computed once per sensor layout change and cached for all subsequent path queries.
+
+```
+DetectionCostGrid:
+  ├── grid[n_altitude_bands, rows, cols]   # per-cell sensor detection count
+  ├── altitude_bands_m[]                   # AGL altitude for each band
+  ├── origin_x, origin_y                   # site CRS origin (matches SiteModel)
+  └── resolution                           # metres per cell
+```
+
+**Phase 2: Graph search**
+
+`find_adversarial_trajectory(site, cost_grid, origin_x, origin_y, origin_z_agl, asset_x, asset_y, speed_ms) -> DroneTrajectory`
+
+Treat the cost grid as a weighted directed graph. Each node is a `(row, col, altitude_band_idx)` triple. Edges connect to:
+- 8 horizontal neighbours at the same altitude band (cost = detection count at destination)
+- Same cell at adjacent altitude bands (cost = detection count + altitude transition penalty)
+
+Run Dijkstra's from the node nearest the threat origin to the node nearest the asset. The optimal path is the one that minimises cumulative detection exposure — it will naturally route through valleys, behind ridges, and through sensor gaps.
+
+The resulting node sequence is converted to a `DroneTrajectory` by mapping each node to its `(x, y, z_agl)` centroid as a `TrajectoryWaypoint`. This trajectory is a standard model that feeds directly into `analyse_trajectory` (Section 2.4.2) for the full detection timeline.
+
+**Relationship to other modes:**
+
+| Mode | What it answers | How threat path is determined |
+|------|----------------|------------------------------|
+| Planning sweep (S6.4) | Worst bearing × altitude × dive angle | Parametric grid search — straight-line approaches only |
+| Engagement calc (S6.3) | What happens on a specific known path | User-prescribed YAML trajectory |
+| **Adversarial planner (S6.6)** | **What route would a smart adversary take?** | **Dijkstra's on 3D detection cost grid** |
+
+The adversarial planner is the only mode that finds complex terrain-masking routes without human intuition. The discovered trajectory can be saved as a YAML file, reviewed by the analyst, and re-run as an engagement calc for kill chain timeline analysis.
+
+**Computational cost:**
+
+For a 3 km × 3 km site at 5 m resolution with 5 altitude bands and 4 sensors: ~1.8 M nodes, ~14.4 M `sensor_can_detect_point` calls to build the grid. Dijkstra's on the resulting graph is fast (O((V + E) log V) ≈ seconds). Total wall time dominated by grid construction — parallelisable across altitude bands and cells if needed.
+
+---
+
 ### 2.5 — Report Generation
 
 **Purpose:** Produce a professional PDF deliverable that can be included in a defence proposal.
@@ -587,6 +637,11 @@ dev = [
    │         → DetectionEvent list (exact time, position, sensor per detection crossing)
    │         → TrajectoryResult → kill chain input
    │
+   ├── [Adversarial mode] Discover minimum-detection-exposure route
+   │     ├── build_detection_cost_grid (batch sensor_can_detect_point across site volume)
+   │     ├── find_adversarial_trajectory (Dijkstra's on 3D cost grid)
+   │     └── analyse_trajectory on discovered path → DetectionEvent list + map overlay
+   │
    ├── Run kill chain timeline for each trajectory (D-T-I-D-E-A) using DetectionEvent timing
    ├── Run saturation analysis (N targets, effector allocation)
    ├── (If auto-place) run greedy placement optimisation
@@ -622,7 +677,7 @@ dev = [
 - Range + arc clipping per sensor
 - Multi-sensor coverage union per layer + composite
 - Gap identification
-- Threat trajectory analysis — both planning sweep (bearing × altitude × dive angle) and specific-trajectory engagement calcs with sub-metre detection precision via binary search
+- Threat trajectory analysis — planning sweep (bearing × altitude × dive angle), specific-trajectory engagement calcs with sub-metre detection precision via binary search, and adversarial path planning (Dijkstra's on 3D detection cost grid to autonomously discover terrain-masking evasion routes)
 - Kill chain timeline modelling (D-T-I-D-E-A with time budgets and margin calculation), fed by `DetectionEvent` timing from trajectory analysis
 - Multi-target engagement & saturation analysis (up to 20 simultaneous targets)
 - Greedy heuristic placement optimisation

@@ -288,6 +288,26 @@ _Goal: render trajectory analysis results as maps, and wire the full 3D trajecto
 
 ---
 
+### Slice 6.6 — Adversarial Path Planning
+
+_Goal: autonomously discover the worst-case drone approach route — the path that minimises detection exposure by exploiting terrain masking and sensor coverage gaps — without the analyst needing to prescribe or guess it. This answers the question: "Is there a route into this site that we haven't noticed?"_
+
+_Context: the planning sweep in S6.4 searches over bearing × altitude × dive angle but all candidates are straight-line approaches. A sophisticated adversary would exploit valley masking, fly behind terrain features, and thread through sensor gaps along a complex waypointed route. Adversarial path planning finds that route automatically using a 3D detection cost grid and graph search._
+
+**S6.6-1: Build 3D detection cost grid in `engine/path_planner.py`**
+- _What:_ Create `engine/path_planner.py`. Implement `build_detection_cost_grid(site, sensors, placements, altitude_bands_m) -> DetectionCostGrid`. For each DEM cell (row, col) at each altitude band, call `sensor_can_detect_point` for every sensor-placement pair and record the detection count. `DetectionCostGrid` is a dataclass holding the 3D numpy array (shape: `[n_altitude_bands, rows, cols]`), the altitude band list, site origin, and resolution. Write tests: flat DEM with one sensor — cells inside range and arc have detection count ≥ 1, cells outside have count 0. Write test that a ridge blocks detection on the far side (count 0 behind ridge even within range).
+- _Why:_ `sensor_can_detect_point` is the correct primitive for this — the cost grid is simply a batched application of it across the full site volume. Building it once per sensor layout change amortises the cost across all path queries. The grid makes the search phase fast: path search reads precomputed values rather than calling `sensor_can_detect_point` at every node expansion.
+
+**S6.6-2: Implement `find_adversarial_trajectory` using Dijkstra's graph search**
+- _What:_ Add `find_adversarial_trajectory(site, cost_grid, origin_x, origin_y, origin_z_agl, asset_x, asset_y, speed_ms, altitude_transition_cost) -> DroneTrajectory` to `engine/path_planner.py`. Treat the 3D grid as a weighted directed graph: each node is a `(row, col, altitude_band_idx)` triple; edges connect to the 8 horizontal neighbours at the same altitude band and to the same cell at adjacent altitude bands (altitude transitions). Edge weight = detection count at the destination node × cell area + altitude_transition_cost × altitude_step. Run Dijkstra's from the grid node nearest `(origin_x, origin_y, origin_z_agl)` to the node nearest the asset. Convert the resulting node path to a `DroneTrajectory` by mapping each node back to its (x, y, z_agl) centroid as a `TrajectoryWaypoint`. Write tests: on flat DEM with a single sensor, path routes around the sensor's detection radius. On terrain with a valley, path follows the valley even if it is longer in distance.
+- _Why:_ Dijkstra's is exact (finds the true minimum-cost path) and runs in O((V + E) log V) time — tractable for a 3 km × 3 km site at 5 m resolution across 5 altitude bands (~1.8 M nodes). The returned `DroneTrajectory` is a standard model that feeds directly into `analyse_trajectory` (S6.3) for the full detection timeline, and can be written to YAML for repeat analysis or sharing.
+
+**S6.6-3: Wire adversarial path planning into CLI and reports**
+- _What:_ Add `--adversarial` flag to `salus simulate`. When set, requires `--protected-point` and at least one threat profile. For each threat profile: determine threat origin (use worst-corridor bearing from S6.4 at `typical_altitude_m` as start point, or accept `--origin` coordinates); call `build_detection_cost_grid` for the configured altitude bands; call `find_adversarial_trajectory`; run `analyse_trajectory` on the result; render the discovered path on a new `render_adversarial_map` output (path overlaid on coverage heatmap with detection events marked). Add `render_adversarial_map` to `report/maps.py`. Write integration test that runs the full adversarial pipeline on a synthetic ridge DEM and asserts the path goes around the ridge rather than over it.
+- _Why:_ The adversarial path planner is a premium capability — it is what distinguishes Salus from a coverage mapper. Making it accessible via a single CLI flag (`salus simulate --adversarial`) ensures customers can run it without programming. The integration test protects the core claim: that the discovered path actually exploits terrain.
+
+---
+
 ### Slice 7 — Kill Chain Timeline (D-T-I-D-E-A)
 
 _Goal: model the engagement timeline from first detection through to drone neutralisation and determine whether the kill chain can complete before the drone reaches the asset._
@@ -570,26 +590,27 @@ _Goal: ensure the project is reproducible, tested, and ready for reliable develo
 | 6.3 | Trajectory Analysis Engine | 3 | 42 |
 | 6.4 | Worst-Trajectory Sweep | 2 | 44 |
 | 6.5 | Trajectory Visualisation + CLI | 3 | 47 |
-| 7 | Kill Chain Timeline (D-T-I-D-E-A) | 4 | 51 |
-| 8 | Multi-Target Saturation | 6 | 57 |
-| 9 | Greedy Placement Optimisation | 4 | 61 |
-| 10 | Configuration Comparison (A vs B) | 3 | 64 |
-| 11 | Effector Coverage Layer | 2 | 66 |
-| 12 | LiDAR Ingestion | 4 | 70 |
-| 13 | PDF Report Generation | 7 | 77 |
-| 14 | Interactive Standalone Viewer | 6 | 83 |
-| 15 | Populate Full Sensor/Effector/Threat DB | 4 | 87 |
-| 16 | CLI Polish + End-to-End Workflow | 5 | 92 |
-| 17 | Docker, Testing, CI Readiness | 5 | 97 |
+| 6.6 | Adversarial Path Planning | 3 | 50 |
+| 7 | Kill Chain Timeline (D-T-I-D-E-A) | 4 | 54 |
+| 8 | Multi-Target Saturation | 6 | 60 |
+| 9 | Greedy Placement Optimisation | 4 | 64 |
+| 10 | Configuration Comparison (A vs B) | 3 | 67 |
+| 11 | Effector Coverage Layer | 2 | 69 |
+| 12 | LiDAR Ingestion | 4 | 73 |
+| 13 | PDF Report Generation | 7 | 80 |
+| 14 | Interactive Standalone Viewer | 6 | 86 |
+| 15 | Populate Full Sensor/Effector/Threat DB | 4 | 90 |
+| 16 | CLI Polish + End-to-End Workflow | 5 | 95 |
+| 17 | Docker, Testing, CI Readiness | 5 | 100 |
 
-**Total: 97 tasks across 23 slices (including Slice 0).**
+**Total: 100 tasks across 24 slices (including Slice 0).**
 
 ---
 
 ## Dependency Notes
 
 - **Slices 1-5 are strictly sequential** — each builds on the previous.
-- **Slices 6 → 6.1 → 6.2 → 6.3 → 6.4 → 6.5 are sequential** — each sub-slice depends on the previous. Slice 6 (2D corridors) is a prerequisite for 6.1 because 6.3 refactors `find_worst_corridors` to delegate to the new trajectory engine.
+- **Slices 6 → 6.1 → 6.2 → 6.3 → 6.4 → 6.5 → 6.6 are sequential** — each sub-slice depends on the previous. Slice 6 (2D corridors) is a prerequisite for 6.1 because 6.3 refactors `find_worst_corridors` to delegate to the new trajectory engine. Slice 6.6 depends on 6.1 (`sensor_can_detect_point`) and 6.3 (`analyse_trajectory`) but not on 6.4 or 6.5 — those are parallel outputs of 6.3.
 - **Slice 7 (kill chain) depends on Slice 6.3** — it consumes `TrajectoryResult.first_detection` and `DetectionEvent` instead of `CorridorResult.first_detection_distance_m`. Slices 8-11 depend on Slice 5 and can be done in any order relative to each other, but 7 must precede them in the kill chain pipeline.
 - **Slices 9-11 (placement, comparison, effectors)** depend on Slice 5 and can be done in any order.
 - **Slice 12 (LiDAR)** is independent of Slices 6-11 — it only depends on Slice 1 (SiteModel). It is placed late because GeoTIFF import is sufficient for development and LiDAR adds PDAL complexity. Move it earlier if real LiDAR data arrives.
