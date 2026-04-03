@@ -428,3 +428,134 @@ class TestScenarioConfig:
                 site_dem_path=tmp_path / "dem.tif",
                 sweep_segment_length_m=-1.0,
             )
+
+
+# ---------------------------------------------------------------------------
+# KillChainConfig model tests (S7-1)
+# ---------------------------------------------------------------------------
+
+
+class TestKillChainConfig:
+    """Tests for KillChainConfig Pydantic model."""
+
+    def _valid_config(self) -> dict:
+        return {
+            "track_time_s": 5.0,
+            "identify_time_s": 10.0,
+            "decide_time_s": 8.0,
+            "assess_time_s": 3.0,
+        }
+
+    def test_valid_construction(self):
+        """Valid KillChainConfig constructs without error."""
+        from salus.models.scenario import KillChainConfig
+
+        cfg = KillChainConfig(**self._valid_config())
+        assert cfg.track_time_s == 5.0
+        assert cfg.identify_time_s == 10.0
+        assert cfg.decide_time_s == 8.0
+        assert cfg.assess_time_s == 3.0
+
+    def test_all_phases_positive(self):
+        """All phase durations must be positive finite floats."""
+        from salus.models.scenario import KillChainConfig
+
+        cfg = KillChainConfig(
+            track_time_s=1.0, identify_time_s=2.0, decide_time_s=3.0, assess_time_s=4.0
+        )
+        assert cfg.track_time_s == 1.0
+
+    def test_zero_phase_raises(self):
+        """Zero phase duration raises ValidationError."""
+        from salus.models.scenario import KillChainConfig
+
+        with pytest.raises(ValidationError):
+            KillChainConfig(
+                track_time_s=0.0,
+                identify_time_s=10.0,
+                decide_time_s=8.0,
+                assess_time_s=3.0,
+            )
+
+    def test_negative_phase_raises(self):
+        """Negative phase duration raises ValidationError."""
+        from salus.models.scenario import KillChainConfig
+
+        with pytest.raises(ValidationError):
+            KillChainConfig(
+                track_time_s=5.0,
+                identify_time_s=-1.0,
+                decide_time_s=8.0,
+                assess_time_s=3.0,
+            )
+
+    def test_inf_phase_raises(self):
+        """Infinite phase duration raises ValidationError."""
+        import math
+
+        from salus.models.scenario import KillChainConfig
+
+        with pytest.raises(ValidationError):
+            KillChainConfig(
+                track_time_s=math.inf,
+                identify_time_s=10.0,
+                decide_time_s=8.0,
+                assess_time_s=3.0,
+            )
+
+
+# ---------------------------------------------------------------------------
+# KillChainResult dataclass tests (S7-1)
+# ---------------------------------------------------------------------------
+
+
+class TestKillChainResult:
+    """Tests for KillChainResult frozen dataclass."""
+
+    def test_construction(self):
+        """KillChainResult constructs and exposes all fields."""
+        from salus.models.scenario import KillChainResult
+
+        r = KillChainResult(
+            available_time_s=30.0,
+            required_time_s=20.0,
+            margin_s=10.0,
+            first_detection_range_m=600.0,
+            engagement_feasible=True,
+            second_engagement_possible=False,
+        )
+        assert r.available_time_s == 30.0
+        assert r.required_time_s == 20.0
+        assert r.margin_s == 10.0
+        assert r.first_detection_range_m == 600.0
+        assert r.engagement_feasible is True
+        assert r.second_engagement_possible is False
+
+    def test_is_frozen(self):
+        """KillChainResult is immutable."""
+        from salus.models.scenario import KillChainResult
+
+        r = KillChainResult(
+            available_time_s=30.0,
+            required_time_s=20.0,
+            margin_s=10.0,
+            first_detection_range_m=600.0,
+            engagement_feasible=True,
+            second_engagement_possible=False,
+        )
+        with pytest.raises((AttributeError, TypeError)):
+            r.margin_s = 5.0  # type: ignore[misc]
+
+    def test_none_first_detection(self):
+        """first_detection_range_m may be None."""
+        from salus.models.scenario import KillChainResult
+
+        r = KillChainResult(
+            available_time_s=0.0,
+            required_time_s=20.0,
+            margin_s=-20.0,
+            first_detection_range_m=None,
+            engagement_feasible=False,
+            second_engagement_possible=False,
+        )
+        assert r.first_detection_range_m is None

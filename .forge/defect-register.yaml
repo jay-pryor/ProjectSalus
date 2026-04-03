@@ -1867,3 +1867,80 @@ defects:
     resolution: "Added TestRidgeTerrainIntegration with two tests: adversarial path reaches goal on ridge DEM; first waypoint is in the north (low-detection) half of the DEM when sensor is on south side."
     status: resolved
     commit: "68bb78f"
+
+  - id: D-170
+    severity: high
+    task: S7
+    found_by: silent_failure_hunter
+    file: src/salus/engine/kill_chain.py
+    line: 65
+    description: "compute_kill_chain has two independent guards for threat_speed_ms: isinstance+>0 then math.isfinite. float('inf') passes the first guard silently (inf > 0 is True) and only fails the second. If the second guard is removed in a future refactor, inf flows through to 'inf/inf = nan' for available_time_s, causing engagement_feasible to silently return False. The two guards should be merged into one."
+    resolution: "Merged the two independent guards into a single `if not (math.isfinite(threat_speed_ms) and threat_speed_ms > 0.0)` check, eliminating the redundant isinstance guard and closing the inf-passthrough gap."
+    status: resolved
+    commit: "pending"
+
+  - id: D-171
+    severity: high
+    task: S7
+    found_by: silent_failure_hunter
+    file: src/salus/engine/kill_chain.py
+    line: 82
+    description: "_required_time is called twice in the no-detection early-return branch: once for required_time_s and once embedded in margin_s. If the function ever gains side effects or config mutability, the two stored values could diverge, making margin_s != available_time_s - required_time_s in the returned KillChainResult."
+    resolution: "Moved `required_time_s = _required_time(kill_chain_config, effector)` above both branches so the same computed value is used in both `required_time_s` and `margin_s` fields, guaranteeing margin_s == available_time_s - required_time_s."
+    status: resolved
+    commit: "pending"
+
+  - id: D-172
+    severity: high
+    task: S7
+    found_by: silent_failure_hunter
+    file: src/salus/report/charts.py
+    line: 102
+    description: "NaN available_time_s bypasses the > 0.0 filter in max() because NaN comparisons return False. NaN then propagates into margin arithmetic and the chart annotation renders as 'nan' with no error raised. isfinite guard missing in render_kill_chain_chart."
+    resolution: "Added `math.isfinite(r.available_time_s)` filter in max() and changed the per-bar guard to `if not math.isfinite(kc.available_time_s) or kc.available_time_s <= 0.0`. Added `if not math.isfinite(margin): _log.warning(...); continue` before margin rendering."
+    status: resolved
+    commit: "pending"
+
+  - id: D-173
+    severity: medium
+    task: S7
+    found_by: silent_failure_hunter
+    file: src/salus/engine/kill_chain.py
+    line: 118
+    description: "compute_all_kill_chains accepts an empty corridor_results list with no guard. Returns empty list silently with log message '0 corridors evaluated'. Callers that index the result get an undiagnosable IndexError rather than a clear ValueError."
+    resolution: "Added `if not corridor_results: raise ValueError(...)` guard at the start of compute_all_kill_chains, mirroring the existing effectors guard."
+    status: resolved
+    commit: "pending"
+
+  - id: D-174
+    severity: medium
+    task: S7
+    found_by: silent_failure_hunter
+    file: src/salus/report/charts.py
+    line: 17
+    description: "charts.py imports the private function _required_time from salus.engine.kill_chain across module boundaries. If _required_time is renamed or inlined during refactoring, the failure is a runtime ImportError deferred until charts.py is first loaded, not a static error."
+    resolution: "Promoted `_required_time` to a public function `required_time(config, effector) -> float` with full docstring. A private alias `_required_time = required_time` preserved for internal callers. Updated charts.py import to use `required_time`."
+    status: resolved
+    commit: "pending"
+
+  - id: D-175
+    severity: medium
+    task: S7
+    found_by: silent_failure_hunter
+    file: src/salus/report/charts.py
+    line: 228
+    description: "plt.tight_layout() and fig.savefig() are called before plt.close(fig) with no try/finally. If tight_layout() raises (rare but possible with degenerate axis configs), plt.close(fig) is never reached, leaking Matplotlib figure handles."
+    resolution: "Wrapped `plt.tight_layout()` and `fig.savefig()` in `try/finally: plt.close(fig)` to ensure figure handle is released even if tight_layout raises."
+    status: resolved
+    commit: "pending"
+
+  - id: D-176
+    severity: medium
+    task: S7
+    found_by: spec_compliance
+    file: src/salus/report/charts.py
+    line: 94
+    description: "Spec S7-4 names D-T-I-D-E-A phases as coloured segments. The chart renders only T-I-D-E-A (5 segments); the 'Detect' (D) phase has no coloured bar. S7-1 defines no detect_time_s field in KillChainConfig, creating an intra-spec inconsistency. Resolution: document that Detect is the timeline origin (t=0) and not a duration segment."
+    resolution: "Added module docstring to charts.py explaining D-T-I-D-E-A phase mapping: Detect (D) is the timeline origin (t=0) with no configurable duration in KillChainConfig and is therefore not rendered as a coloured segment. The T-I-D-E-A phases are rendered as coloured bars."
+    status: resolved
+    commit: "pending"

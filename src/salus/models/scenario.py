@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import BaseModel, Field, field_validator
@@ -231,3 +232,72 @@ class ScenarioConfig(BaseModel):
         if not math.isfinite(v) or v <= 0.0:
             raise ValueError(f"sweep_segment_length_m must be a finite value > 0, got {v}")
         return v
+
+
+# ---------------------------------------------------------------------------
+# Kill-chain timeline models (S7)
+# ---------------------------------------------------------------------------
+
+# Minimum phase duration allowed (> 0 required for meaningful timeline).
+_MIN_PHASE_DURATION_S: float = 0.0
+
+
+class KillChainConfig(BaseModel):
+    """Operator- and C2-constant phase durations for the D-T-I-D-E-A kill chain.
+
+    These values represent the time each phase takes *after* initial detection:
+    - Track (T): operators cue tracking on the target
+    - Identify (I): operators classify the target as hostile
+    - Decide (D): operators authorise engagement
+    - Assess (A): operators assess defeat outcome
+
+    The Engage (E) phase duration comes from the effector's ``reaction_time_s``
+    and is applied in ``compute_kill_chain`` rather than stored here.
+    """
+
+    track_time_s: float
+    """Time to establish a stable track after detection (seconds, > 0)."""
+
+    identify_time_s: float
+    """Time to positively identify the target as hostile (seconds, > 0)."""
+
+    decide_time_s: float
+    """Time for engagement authorisation decision (seconds, > 0)."""
+
+    assess_time_s: float
+    """Time to assess defeat outcome before re-engagement (seconds, > 0)."""
+
+    @field_validator("track_time_s", "identify_time_s", "decide_time_s", "assess_time_s")
+    @classmethod
+    def _phase_positive(cls, v: float) -> float:
+        if not math.isfinite(v) or v <= _MIN_PHASE_DURATION_S:
+            raise ValueError(f"phase duration must be a finite value > 0, got {v}")
+        return v
+
+
+@dataclass(frozen=True)
+class KillChainResult:
+    """Outcome of a kill-chain timeline analysis for a single approach corridor.
+
+    Attributes:
+        available_time_s: Time from first detection to drone reaching the asset
+            (first_detection_range_m / drone_speed).  0.0 if the drone was never
+            detected (no kill chain can execute).
+        required_time_s: Sum of all kill-chain phase durations: T + I + D + E + A.
+        margin_s: Slack time remaining after required phases complete
+            (available_time_s − required_time_s).  Positive = feasible;
+            negative = drone reaches asset before the kill chain completes.
+        first_detection_range_m: Distance from the protected asset at which the
+            drone is first detected (metres).  None if never detected.
+        engagement_feasible: True when margin_s >= 0 and detection occurred.
+        second_engagement_possible: True when enough margin remains after the
+            first engagement attempt to reload and conduct a second engagement
+            (margin_s > reload_time_s + reaction_time_s + assess_time_s).
+    """
+
+    available_time_s: float
+    required_time_s: float
+    margin_s: float
+    first_detection_range_m: float | None
+    engagement_feasible: bool
+    second_engagement_possible: bool
