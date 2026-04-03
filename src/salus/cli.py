@@ -17,6 +17,7 @@ from salus.engine.coverage import (
     compute_layer_coverage,
 )
 from salus.engine.threat_corridor import find_worst_corridors
+from salus.engine.trajectory import analyse_trajectory, find_worst_trajectories
 from salus.engine.viewshed import clip_viewshed_to_sensor, compute_viewshed
 from salus.ingest.boundaries import load_boundary
 from salus.ingest.scenario import load_scenario
@@ -32,6 +33,7 @@ from salus.report.maps import (
     render_gap_map,
     render_layer_coverage_maps,
     render_redundancy_map,
+    render_trajectory_map,
 )
 
 # Bundled sensor definitions shipped with the package.
@@ -222,11 +224,22 @@ def viewshed(
     type=click.Path(file_okay=False),
     help="Directory for coverage PNG outputs. Created automatically if it does not exist.",
 )
+@click.option(
+    "--segment-length",
+    "segment_length",
+    default=None,
+    type=float,
+    help=(
+        "Sampling interval in metres for trajectory analysis. "
+        "Overrides sweep_segment_length_m from the scenario file."
+    ),
+)
 def simulate(
     scenario: str,
     sensor_dir: str | None,
     threat_dir: str | None,
     output_dir: str,
+    segment_length: float | None,
 ) -> None:
     """Compute sensor-clipped coverage maps from a scenario YAML file.
 
@@ -585,60 +598,160 @@ def simulate(
                 err=True,
             )
 
+        all_pairs = [pair for pairs in placements_by_type.values() for pair in pairs]
+        # D-158: use a distinct name to avoid shadowing the coverage-map sensor_positions above.
+        threat_sensor_positions = [(p.position_x, p.position_y) for _, p in all_pairs]
+
         for threat in matched_threats:
             click.echo(f"\n  Threat: {threat.name}")
-            try:
-                all_pairs = [pair for pairs in placements_by_type.values() for pair in pairs]
-                # TODO S6.5: forward sc.sweep_altitudes_m, sc.sweep_dive_angles_deg,
-                # and sc.sweep_segment_length_m to find_worst_trajectories here.
-                results = find_worst_corridors(site, all_pairs, threat, sc.protected_point)
-            except Exception as exc:
-                click.echo(
-                    f"  Warning: corridor analysis failed for '{threat.name}': {exc}",
-                    err=True,
-                )
-                corridor_failed = True
-                continue
-
-            header = f"  {'Bearing':>8}  {'Coverage':>10}  {'First detect':>14}"
-            click.echo(header)
-            click.echo(f"  {'─' * 8}  {'─' * 10}  {'─' * 14}")
-            for r in results[:5]:
-                fd = (
-                    f"{r.first_detection_distance_m:.0f} m"
-                    if r.first_detection_distance_m is not None
-                    else "none"
-                )
-                click.echo(f"  {r.corridor.bearing_deg:>7.1f}°  {r.coverage_pct:>9.1f}%  {fd:>14}")
-            if len(results) > 5:
-                click.echo(f"  … {len(results) - 5} more corridors (worst shown first)")
-
             safe_threat = _safe_filename(threat.name)
-            overlay_out = output_path / f"corridor_{safe_threat}_overlay.png"
-            polar_out = output_path / f"corridor_{safe_threat}_polar.png"
 
-            try:
-                render_corridor_overlay_map(
-                    site,
-                    composite,
-                    results,
-                    sc.protected_point,
-                    overlay_out,
-                    title=f"Corridor Analysis — {threat.name}",
+            if sc.trajectory is not None:
+                # ── Engagement calc mode ──────────────────────────────────────
+                # A specific trajectory is provided: analyse it and render a
+                # trajectory map.  Corridor overlay/polar are not produced.
+                effective_seg_len = (
+                    segment_length if segment_length is not None else sc.sweep_segment_length_m
                 )
-                click.echo(f"  → {overlay_out}")
-            except Exception as exc:
-                click.echo(f"  Warning: could not render corridor overlay: {exc}", err=True)
+                try:
+                    traj_result = analyse_trajectory(
+                        site,
+                        all_pairs,
+                        sc.trajectory,
+                        segment_length_m=effective_seg_len,
+                    )
+                except Exception as exc:
+                    click.echo(
+                        f"  Warning: trajectory analysis failed for '{threat.name}': {exc}",
+                        err=True,
+                    )
+                    corridor_failed = True
+                    continue
 
-            try:
-                render_corridor_polar_diagram(
-                    results,
-                    polar_out,
-                    title=f"Coverage by Bearing — {threat.name}",
+                # Print trajectory result summary
+                click.echo(f"  Time to asset:        {traj_result.time_to_asset_s:.1f} s")
+                click.echo(f"  Time in detection:    {traj_result.time_in_detection_s:.1f} s")
+                click.echo(f"  Time undetected:      {traj_result.time_undetected_s:.1f} s")
+                click.echo(f"  Asset reached undetected: {traj_result.asset_reached_undetected}")
+                if traj_result.first_detection is not None:
+                    first_ev = traj_result.first_detection
+                    click.echo(
+                        f"  First detection:      {first_ev.sensor_name} "
+                        f"at {first_ev.time_s:.1f} s "
+                        f"({first_ev.position_x:.0f}, {first_ev.position_y:.0f})"
+                    )
+                else:
+                    click.echo("  First detection:      none")
+
+                traj_map_out = output_path / f"trajectory_{safe_threat}_map.png"
+                try:
+                    render_trajectory_map(
+                        site,
+                        composite,
+                        [(sc.trajectory, traj_result)],
+                        sc.protected_point,
+                        traj_map_out,
+                        title=f"Trajectory Analysis — {threat.name}",
+                        sensor_positions=threat_sensor_positions,
+                    )
+                    click.echo(f"  → {traj_map_out}")
+                except Exception as exc:
+                    click.echo(f"  Warning: could not render trajectory map: {exc}", err=True)
+
+            else:
+                # ── Planning sweep mode ───────────────────────────────────────
+                # No specific trajectory: run corridor sweep (for backward-
+                # compatible overlay/polar outputs) and additionally run the
+                # worst-trajectory sweep using scenario sweep parameters.
+                try:
+                    results = find_worst_corridors(site, all_pairs, threat, sc.protected_point)
+                except Exception as exc:
+                    click.echo(
+                        f"  Warning: corridor analysis failed for '{threat.name}': {exc}",
+                        err=True,
+                    )
+                    corridor_failed = True
+                    continue
+
+                header = f"  {'Bearing':>8}  {'Coverage':>10}  {'First detect':>14}"
+                click.echo(header)
+                click.echo(f"  {'─' * 8}  {'─' * 10}  {'─' * 14}")
+                for r in results[:5]:
+                    fd = (
+                        f"{r.first_detection_distance_m:.0f} m"
+                        if r.first_detection_distance_m is not None
+                        else "none"
+                    )
+                    click.echo(
+                        f"  {r.corridor.bearing_deg:>7.1f}°  {r.coverage_pct:>9.1f}%  {fd:>14}"
+                    )
+                if len(results) > 5:
+                    click.echo(f"  … {len(results) - 5} more corridors (worst shown first)")
+
+                overlay_out = output_path / f"corridor_{safe_threat}_overlay.png"
+                polar_out = output_path / f"corridor_{safe_threat}_polar.png"
+
+                try:
+                    render_corridor_overlay_map(
+                        site,
+                        composite,
+                        results,
+                        sc.protected_point,
+                        overlay_out,
+                        title=f"Corridor Analysis — {threat.name}",
+                    )
+                    click.echo(f"  → {overlay_out}")
+                except Exception as exc:
+                    click.echo(f"  Warning: could not render corridor overlay: {exc}", err=True)
+
+                try:
+                    render_corridor_polar_diagram(
+                        results,
+                        polar_out,
+                        title=f"Coverage by Bearing — {threat.name}",
+                    )
+                    click.echo(f"  → {polar_out}")
+                except Exception as exc:
+                    click.echo(f"  Warning: could not render polar diagram: {exc}", err=True)
+
+                # Worst-trajectory sweep using scenario sweep parameters.
+                effective_seg_len = (
+                    segment_length if segment_length is not None else sc.sweep_segment_length_m
                 )
-                click.echo(f"  → {polar_out}")
-            except Exception as exc:
-                click.echo(f"  Warning: could not render polar diagram: {exc}", err=True)
+                try:
+                    worst_traj_results = find_worst_trajectories(
+                        site,
+                        all_pairs,
+                        threat,
+                        sc.protected_point,
+                        altitudes_m=sc.sweep_altitudes_m,
+                        dive_angles_deg=sc.sweep_dive_angles_deg,
+                        segment_length_m=effective_seg_len,
+                    )
+                    if worst_traj_results:
+                        click.echo(
+                            f"\n  Worst-trajectory sweep "
+                            f"({len(worst_traj_results)} result(s), least covered first):"
+                        )
+                        sweep_header = (
+                            f"  {'Time in detect':>15}  {'Time to asset':>14}  {'Undetected':>12}"
+                        )
+                        click.echo(sweep_header)
+                        click.echo(f"  {'─' * 15}  {'─' * 14}  {'─' * 12}")
+                        for wt in worst_traj_results[:5]:
+                            click.echo(
+                                f"  {wt.time_in_detection_s:>14.1f}s  "
+                                f"{wt.time_to_asset_s:>13.1f}s  "
+                                f"{wt.time_undetected_s:>11.1f}s"
+                            )
+                        if len(worst_traj_results) > 5:
+                            click.echo(f"  … {len(worst_traj_results) - 5} more trajectories")
+                except Exception as exc:
+                    click.echo(
+                        f"  Warning: worst-trajectory sweep failed for '{threat.name}': {exc}",
+                        err=True,
+                    )
+                    corridor_failed = True  # D-156: propagate sweep failure to exit code
 
     elif sc.threat_profiles and sc.protected_point is None:
         click.echo(

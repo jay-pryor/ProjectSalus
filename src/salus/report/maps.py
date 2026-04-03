@@ -14,8 +14,10 @@ from matplotlib.colors import ListedColormap, Normalize
 from shapely.geometry import MultiPolygon, Polygon
 
 from salus.engine.threat_corridor import CorridorResult
+from salus.engine.trajectory import TrajectoryResult
 from salus.models.sensor import SensorType
 from salus.models.site import SiteModel
+from salus.models.threat import DroneTrajectory
 from salus.models.zone import Zone, ZoneType
 
 # Distinct colour per sensor type for per-layer and composite maps
@@ -983,6 +985,7 @@ def render_corridor_polar_diagram(
     corridor_results: list[CorridorResult],
     output_path: str | Path,
     title: str = "Coverage by Approach Bearing",
+    trajectory_results_and_bearings: list[tuple[float, TrajectoryResult]] | None = None,
 ) -> Path:
     """Render a polar (radar) chart of coverage percentage by approach bearing.
 
@@ -991,45 +994,59 @@ def render_corridor_polar_diagram(
     shows coverage percentage 0–100%.  Bearings follow compass convention:
     North (0°) at the top, clockwise.
 
+    When ``trajectory_results_and_bearings`` is provided, trajectory results
+    are overlaid as additional bars coloured by ``time_in_detection_s`` as a
+    fraction of ``time_to_asset_s`` (0 = no detection = red, 1 = full
+    detection = green).  ``corridor_results`` may then be an empty list.
+
     Args:
-        corridor_results: Non-empty list of analysed corridors.  All bearings
-            in the list are plotted; they do not need to be evenly spaced.
+        corridor_results: List of analysed corridors.  Must be non-empty unless
+            ``trajectory_results_and_bearings`` is provided.
         output_path: Where to save the PNG.
         title: Diagram title.
+        trajectory_results_and_bearings: Optional list of ``(bearing_deg,
+            TrajectoryResult)`` pairs to overlay as trajectory bars.
 
     Returns:
         Path to the saved PNG.
 
     Raises:
-        ValueError: If ``corridor_results`` is empty.
+        ValueError: If both ``corridor_results`` and
+            ``trajectory_results_and_bearings`` are empty/None.
     """
-    if not corridor_results:
-        raise ValueError("corridor_results must not be empty")
+    if not corridor_results and not trajectory_results_and_bearings:
+        raise ValueError(
+            "corridor_results must not be empty unless trajectory_results_and_bearings is provided"
+        )
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Sort by bearing so bars are drawn in order
     sorted_results = sorted(corridor_results, key=lambda r: r.corridor.bearing_deg)
-    num = len(sorted_results)
 
-    # Convert compass bearings to matplotlib polar radians.
-    # After set_theta_zero_location('N') and set_theta_direction(-1):
-    # theta == 0 is North, angles increase clockwise.
-    thetas = [math.radians(r.corridor.bearing_deg) for r in sorted_results]
-    coverages = [r.coverage_pct for r in sorted_results]
+    # Collect all bearings (corridor + trajectory) to compute a consistent bar width.
+    # Duplicates are detected first to preserve the existing error contract.
+    all_thetas_rad: list[float] = [math.radians(r.corridor.bearing_deg) for r in sorted_results]
+    if trajectory_results_and_bearings:
+        all_thetas_rad += [math.radians(b) for b, _ in trajectory_results_and_bearings]
+    if len(all_thetas_rad) != len(set(all_thetas_rad)):
+        raise ValueError("duplicate bearings in input — bar_width would be zero")
+    all_thetas_sorted = sorted(all_thetas_rad)
+    total = len(all_thetas_sorted)
 
-    # Bar width: minimum angular gap between adjacent sorted bearings (handles
-    # non-uniform inputs correctly; D-127 fix).
-    if num == 1:
+    if total == 1:
         bar_width = 2.0 * math.pi
     else:
-        gaps = [(thetas[(i + 1) % num] - thetas[i]) % (2.0 * math.pi) for i in range(num)]
+        gaps = [
+            (all_thetas_sorted[(i + 1) % total] - all_thetas_sorted[i]) % (2.0 * math.pi)
+            for i in range(total)
+        ]
         bar_width = min(gaps)
-        if bar_width == 0.0:
-            raise ValueError(
-                "corridor_results contains duplicate bearings — bar_width would be zero"
-            )
+
+    # Convert compass bearings to matplotlib polar radians for corridor data.
+    thetas = [math.radians(r.corridor.bearing_deg) for r in sorted_results]
+    coverages = [r.coverage_pct for r in sorted_results]
 
     cmap = plt.get_cmap(_CORRIDOR_CMAP)
 
@@ -1052,6 +1069,30 @@ def render_corridor_polar_diagram(
                 zorder=2,
             )
 
+        # Trajectory overlay bars: coloured by detection fraction (0=red, 1=green).
+        if trajectory_results_and_bearings:
+            for bearing_deg, traj_result in trajectory_results_and_bearings:
+                theta_t = math.radians(bearing_deg)
+                if traj_result.time_to_asset_s > 0.0:
+                    detection_pct = min(
+                        traj_result.time_in_detection_s / traj_result.time_to_asset_s * 100.0,
+                        100.0,
+                    )
+                else:
+                    detection_pct = 0.0
+                colour_t = cmap(detection_pct / 100.0)
+                ax.bar(
+                    theta_t,
+                    detection_pct,
+                    width=bar_width,
+                    color=colour_t,
+                    alpha=0.55,
+                    edgecolor="black",
+                    linewidth=0.8,
+                    linestyle="--",
+                    zorder=3,
+                )
+
         ax.set_ylim(0, 100)
         ax.set_yticks([25, 50, 75, 100])
         ax.set_yticklabels(["25%", "50%", "75%", "100%"], fontsize=9)
@@ -1071,6 +1112,226 @@ def render_corridor_polar_diagram(
             cbar.set_label("Coverage (%)", fontsize=10)
         except Exception as exc:
             warnings.warn(f"Polar colorbar could not be added: {exc}", stacklevel=2)
+
+        fig.tight_layout()
+        fig.savefig(output_path, dpi=200, bbox_inches="tight")
+    finally:
+        plt.close(fig)
+
+    return output_path
+
+
+# Colormap for trajectory detection exposure (red = low detection = dangerous).
+_TRAJECTORY_CMAP: str = "RdYlGn"
+
+# Line width for trajectory path segments.
+_TRAJECTORY_LINEWIDTH: float = 2.0
+
+
+def render_trajectory_map(
+    site: SiteModel,
+    composite_coverage: npt.NDArray[np.bool_],
+    trajectory_results: list[tuple[DroneTrajectory, TrajectoryResult]],
+    protected_point: tuple[float, float],
+    output_path: str | Path,
+    title: str = "Trajectory Analysis",
+    sensor_positions: list[tuple[float, float]] | None = None,
+) -> Path:
+    """Render a top-down trajectory analysis map.
+
+    Draws the composite sensor coverage as a background, then overlays each
+    trajectory path as a colour-coded line (red = low detection exposure =
+    dangerous, green = high detection exposure = well-covered).  Detection
+    crossing events are marked as labelled circle markers.
+
+    Args:
+        site: Site terrain model used to establish spatial extent.
+        composite_coverage: Boolean array (rows × cols) of composite coverage.
+        trajectory_results: List of ``(DroneTrajectory, TrajectoryResult)``
+            pairs.  Must not be empty.
+        protected_point: ``(x, y)`` easting/northing of the protected asset in
+            CRS units.  Drawn as a black star.
+        output_path: Where to save the PNG.
+        title: Map title.
+        sensor_positions: Optional list of ``(x, y)`` sensor positions drawn as
+            red triangles.
+
+    Returns:
+        Path to the saved PNG.
+
+    Raises:
+        ValueError: If ``trajectory_results`` is empty.
+    """
+    if not trajectory_results:
+        raise ValueError("trajectory_results must not be empty")
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    px, py = protected_point
+    min_x, max_x, min_y, max_y = site.extent
+
+    cmap = plt.get_cmap(_TRAJECTORY_CMAP)
+
+    # Normalise time_in_detection_s across all trajectories for consistent colouring.
+    # D-155: guard against vmin==vmax (e.g. all trajectories fully undetected at 0 s)
+    # so the colorbar Normalize has a meaningful span.
+    all_detection_times = [tr.time_in_detection_s for _, tr in trajectory_results]
+    det_min = min(all_detection_times)
+    det_max = max(all_detection_times)
+    if det_max <= det_min:
+        det_max = det_min + 1.0
+    det_range = det_max - det_min
+
+    fig, ax = plt.subplots(figsize=(12, 10))
+    try:
+        # Hillshade background for terrain context (consistent with other render functions).
+        hs = _hillshade(site.dem)
+        ax.imshow(
+            hs,
+            cmap="gray",
+            origin="upper",
+            extent=(min_x, max_x, min_y, max_y),
+            vmin=0,
+            vmax=1,
+            zorder=1,
+        )
+        _add_basemap(ax, site)
+
+        # Coverage overlay (semi-transparent teal)
+        coverage_rgba = np.zeros((*composite_coverage.shape, 4))
+        coverage_rgba[composite_coverage] = [0.498, 0.702, 0.627, 0.45]
+        ax.imshow(
+            coverage_rgba,
+            origin="upper",
+            extent=(min_x, max_x, min_y, max_y),
+            zorder=3,
+        )
+
+        # Draw trajectory paths and detection event markers.
+        for traj, result in trajectory_results:
+            norm_val = (result.time_in_detection_s - det_min) / det_range
+            line_colour = cmap(norm_val)
+
+            xs = [wp.x for wp in traj.waypoints]
+            ys = [wp.y for wp in traj.waypoints]
+            ax.plot(
+                xs,
+                ys,
+                color=line_colour,
+                linewidth=_TRAJECTORY_LINEWIDTH,
+                solid_capstyle="round",
+                zorder=5,
+            )
+            # Start of trajectory (approach origin)
+            ax.plot(xs[0], ys[0], "o", color=line_colour, markersize=6, zorder=6)
+
+            # Detection event markers
+            for event in result.detection_events:
+                # D-157: skip non-finite positions to avoid silent invisible annotations
+                if not (math.isfinite(event.position_x) and math.isfinite(event.position_y)):
+                    warnings.warn(
+                        f"DetectionEvent for sensor '{event.sensor_name}' has non-finite "
+                        f"position ({event.position_x}, {event.position_y}) — skipping marker",
+                        stacklevel=2,
+                    )
+                    continue
+                ax.plot(
+                    event.position_x,
+                    event.position_y,
+                    "o",
+                    color="white",
+                    markersize=_DETECTION_MARKER_SIZE,
+                    markeredgecolor="black",
+                    markeredgewidth=0.8,
+                    zorder=7,
+                )
+                label = f"{event.sensor_name}\n{event.time_s:.1f}s"
+                ax.annotate(
+                    label,
+                    xy=(event.position_x, event.position_y),
+                    xytext=(4, 4),
+                    textcoords="offset points",
+                    fontsize=6,
+                    zorder=8,
+                    clip_on=True,
+                )
+
+        # Protected asset marker
+        ax.plot(
+            px,
+            py,
+            "k*",
+            markersize=15,
+            markeredgecolor="white",
+            markeredgewidth=0.5,
+            zorder=9,
+        )
+
+        if sensor_positions:
+            for x, y in sensor_positions:
+                ax.plot(
+                    x,
+                    y,
+                    "r^",
+                    markersize=12,
+                    markeredgecolor="black",
+                    markeredgewidth=1,
+                    zorder=8,
+                )
+
+        ax.set_title(title, fontsize=14, fontweight="bold")
+        ax.set_xlabel("Easting (m)")
+        ax.set_ylabel("Northing (m)")
+        _add_cartographic_elements(ax)
+
+        # Colorbar for trajectory detection exposure
+        sm = plt.cm.ScalarMappable(
+            cmap=_TRAJECTORY_CMAP,
+            norm=Normalize(vmin=det_min, vmax=det_max),
+        )
+        sm.set_array([])
+        try:
+            cbar = fig.colorbar(sm, ax=ax, fraction=0.03, pad=0.04)
+            cbar.set_label("Time in detection (s)", fontsize=10)
+        except Exception as exc:
+            warnings.warn(f"Trajectory colorbar could not be added: {exc}", stacklevel=2)
+
+        # Legend
+        legend_entries: list = [
+            mpatches.Patch(facecolor="#7fb3a0", alpha=0.5, label="Covered"),
+            plt.Line2D(
+                [0],
+                [0],
+                color="gray",
+                linewidth=_TRAJECTORY_LINEWIDTH,
+                label="Trajectory path",
+            ),
+            plt.Line2D(
+                [0],
+                [0],
+                marker="o",
+                color="w",
+                markerfacecolor="white",
+                markeredgecolor="black",
+                markersize=_DETECTION_MARKER_SIZE,
+                label="Detection event",
+            ),
+            plt.Line2D(
+                [0],
+                [0],
+                marker="*",
+                color="w",
+                markerfacecolor="black",
+                markeredgecolor="white",
+                markersize=12,
+                label="Protected asset",
+            ),
+        ]
+        try:
+            ax.legend(handles=legend_entries, loc="lower left", fontsize=8, framealpha=0.8)
+        except Exception as exc:
+            warnings.warn(f"Legend could not be added: {exc}", stacklevel=2)
 
         fig.tight_layout()
         fig.savefig(output_path, dpi=200, bbox_inches="tight")

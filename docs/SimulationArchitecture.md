@@ -630,12 +630,14 @@ dev = [
    │
    ├── [Planning mode] Sweep bearing × altitude × dive angle
    │     └── For each combination: construct 2-waypoint DroneTrajectory, run analyse_trajectory
-   │         → find_worst_trajectories → ranked TrajectoryResult list → polar diagram + overlay map
+   │         → find_worst_trajectories → ranked TrajectoryResult list
+   │         → corridor overlay map + polar diagram (render_corridor_overlay_map / render_corridor_polar_diagram)
    │
-   ├── [Engagement calc mode] Load named DroneTrajectory YAML
-   │     └── analyse_trajectory with fine segment_length_m
+   ├── [Engagement calc mode] Load named DroneTrajectory YAML (trajectory_path in scenario)
+   │     └── analyse_trajectory with fine segment_length_m (--segment-length flag or sweep_segment_length_m)
    │         → DetectionEvent list (exact time, position, sensor per detection crossing)
-   │         → TrajectoryResult → kill chain input
+   │         → TrajectoryResult → render_trajectory_map (colour-coded path + detection markers)
+   │         → kill chain input
    │
    ├── [Adversarial mode] Discover minimum-detection-exposure route
    │     ├── build_detection_cost_grid (batch sensor_can_detect_point across site volume)

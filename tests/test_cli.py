@@ -796,3 +796,155 @@ class TestSimulateCommandS65:
             ],
         )
         assert result.exit_code == 0, result.output
+
+
+# ---------------------------------------------------------------------------
+# S6.5: Engagement calc mode and --segment-length flag
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def trajectory_yaml(tmp_path):
+    """Simple two-waypoint trajectory YAML inside the flat DEM extent."""
+    data = {
+        "waypoints": [
+            {"x": 500050.0, "y": 6100090.0, "z_agl": 10.0},
+            {"x": 500050.0, "y": 6100050.0, "z_agl": 0.0},
+        ],
+        "speed_ms": 10.0,
+    }
+    path = tmp_path / "trajectory.yaml"
+    import yaml
+
+    path.write_text(yaml.dump(data), encoding="utf-8")
+    return path
+
+
+@pytest.fixture
+def scenario_trajectory_yaml(flat_dem_path, trajectory_yaml, tmp_path):
+    """Scenario with RF sensor, threat, protected_point, AND trajectory_path set."""
+    import yaml
+
+    data = {
+        "site_dem_path": str(flat_dem_path),
+        "sensor_placements": [
+            {
+                "sensor_name": "DroneShield RfOne Mk2",
+                "position_x": 500050.0,
+                "position_y": 6100050.0,
+                "bearing_deg": 0.0,
+            }
+        ],
+        "threat_profiles": [_DJI_MAVIC_NAME],
+        "protected_point": list(_DEM_CENTRE),
+        "trajectory_path": str(trajectory_yaml),
+    }
+    path = tmp_path / "scenario_trajectory.yaml"
+    path.write_text(yaml.dump(data), encoding="utf-8")
+    return path
+
+
+class TestSimulateCommandS65Trajectory:
+    """S6.5 engagement calc mode and --segment-length CLI flag."""
+
+    def test_trajectory_map_png_created(self, scenario_trajectory_yaml, tmp_path):
+        """Engagement calc mode must write a trajectory map PNG."""
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "simulate",
+                str(scenario_trajectory_yaml),
+                "--sensors",
+                str(_BUNDLED_SENSOR_DIR),
+                "--threats",
+                str(_BUNDLED_THREAT_DIR),
+                "--output-dir",
+                str(tmp_path),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        maps = list(tmp_path.glob("trajectory_*_map.png"))
+        assert len(maps) >= 1, "Expected at least one trajectory map PNG"
+
+    def test_trajectory_mode_prints_time_to_asset(self, scenario_trajectory_yaml, tmp_path):
+        """Engagement calc mode must print time-to-asset in stdout."""
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "simulate",
+                str(scenario_trajectory_yaml),
+                "--sensors",
+                str(_BUNDLED_SENSOR_DIR),
+                "--threats",
+                str(_BUNDLED_THREAT_DIR),
+                "--output-dir",
+                str(tmp_path),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Time to asset" in result.output
+
+    def test_trajectory_mode_no_corridor_overlay(self, scenario_trajectory_yaml, tmp_path):
+        """Engagement calc mode must NOT produce corridor overlay PNGs."""
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "simulate",
+                str(scenario_trajectory_yaml),
+                "--sensors",
+                str(_BUNDLED_SENSOR_DIR),
+                "--threats",
+                str(_BUNDLED_THREAT_DIR),
+                "--output-dir",
+                str(tmp_path),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        overlays = list(tmp_path.glob("corridor_*_overlay.png"))
+        assert len(overlays) == 0, "Engagement calc mode must not produce corridor overlays"
+
+    def test_segment_length_flag_accepted(self, scenario_trajectory_yaml, tmp_path):
+        """--segment-length flag must be accepted and not cause an error."""
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "simulate",
+                str(scenario_trajectory_yaml),
+                "--sensors",
+                str(_BUNDLED_SENSOR_DIR),
+                "--threats",
+                str(_BUNDLED_THREAT_DIR),
+                "--output-dir",
+                str(tmp_path),
+                "--segment-length",
+                "5.0",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+
+    def test_planning_mode_sweep_runs(self, scenario_threat_yaml, tmp_path):
+        """Planning mode (no trajectory_path) runs find_worst_trajectories without error."""
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "simulate",
+                str(scenario_threat_yaml),
+                "--sensors",
+                str(_BUNDLED_SENSOR_DIR),
+                "--threats",
+                str(_BUNDLED_THREAT_DIR),
+                "--output-dir",
+                str(tmp_path),
+                "--segment-length",
+                "10.0",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        # Corridor outputs must still be produced in planning mode
+        overlays = list(tmp_path.glob("corridor_*_overlay.png"))
+        assert len(overlays) >= 1

@@ -14,9 +14,10 @@ matplotlib.use("Agg")  # Non-interactive backend — must be set before importin
 from shapely.geometry import MultiPolygon, Polygon
 
 from salus.engine.threat_corridor import CorridorResult
+from salus.engine.trajectory import DetectionEvent, TrajectoryResult
 from salus.ingest.terrain import load_dem
 from salus.models.sensor import SensorType
-from salus.models.threat import ThreatCorridor
+from salus.models.threat import DroneTrajectory, ThreatCorridor, TrajectoryWaypoint
 from salus.models.zone import Zone, ZoneType
 from salus.report.maps import (
     _hillshade,
@@ -27,6 +28,7 @@ from salus.report.maps import (
     render_gap_map,
     render_layer_coverage_maps,
     render_redundancy_map,
+    render_trajectory_map,
 )
 
 
@@ -926,3 +928,228 @@ class TestRenderCorridorPolarDiagram:
         out = tmp_path / "polar_dup.png"
         with pytest.raises(ValueError, match="duplicate bearings"):
             render_corridor_polar_diagram(results, out)
+
+
+# ---------------------------------------------------------------------------
+# Helpers for trajectory map tests
+# ---------------------------------------------------------------------------
+
+
+def _make_trajectory_result(
+    time_to_asset_s: float = 10.0,
+    time_in_detection_s: float = 5.0,
+    with_events: bool = True,
+) -> TrajectoryResult:
+    """Construct a minimal TrajectoryResult for rendering tests."""
+    events: tuple[DetectionEvent, ...]
+    if with_events:
+        event = DetectionEvent(
+            sensor_name="TestSensor",
+            time_s=2.0,
+            position_x=500050.0,
+            position_y=6100080.0,
+            position_z_agl=5.0,
+            distance_to_asset_m=30.0,
+            segment_index=0,
+        )
+        events = (event,)
+    else:
+        events = ()
+    first = events[0] if events else None
+    time_undetected = time_to_asset_s - time_in_detection_s
+    return TrajectoryResult(
+        detection_events=events,
+        first_detection=first,
+        time_to_asset_s=time_to_asset_s,
+        time_in_detection_s=time_in_detection_s,
+        time_undetected_s=time_undetected,
+        asset_reached_undetected=time_in_detection_s == 0.0,
+        last_gap_before_asset_m=0.0 if time_in_detection_s > 0 else 10.0,
+    )
+
+
+def _make_drone_trajectory(
+    x_start: float = 500050.0,
+    y_start: float = 6100090.0,
+    x_end: float = 500050.0,
+    y_end: float = 6100050.0,
+) -> DroneTrajectory:
+    """Construct a 2-waypoint DroneTrajectory inside the flat DEM extent."""
+    return DroneTrajectory(
+        waypoints=[
+            TrajectoryWaypoint(x=x_start, y=y_start, z_agl=10.0),
+            TrajectoryWaypoint(x=x_end, y=y_end, z_agl=0.0),
+        ],
+        speed_ms=10.0,
+    )
+
+
+# ---------------------------------------------------------------------------
+# render_trajectory_map (S6.5-1)
+# ---------------------------------------------------------------------------
+
+
+class TestRenderTrajectoryMap:
+    def _site_and_coverage(self, flat_dem_path):
+        site = load_dem(flat_dem_path)
+        coverage = np.ones(site.dem.shape, dtype=bool)
+        return site, coverage
+
+    def _centre(self, site):
+        cx = site.origin_x + site.cols * site.resolution / 2.0
+        cy = site.origin_y - site.rows * site.resolution / 2.0
+        return (cx, cy)
+
+    def test_returns_path(self, flat_dem_path, tmp_path):
+        site, cov = self._site_and_coverage(flat_dem_path)
+        traj = _make_drone_trajectory()
+        result_obj = _make_trajectory_result()
+        out = tmp_path / "traj_map.png"
+        result = render_trajectory_map(site, cov, [(traj, result_obj)], self._centre(site), out)
+        assert result == out
+
+    def test_file_exists(self, flat_dem_path, tmp_path):
+        site, cov = self._site_and_coverage(flat_dem_path)
+        traj = _make_drone_trajectory()
+        result_obj = _make_trajectory_result()
+        out = tmp_path / "traj_map.png"
+        render_trajectory_map(site, cov, [(traj, result_obj)], self._centre(site), out)
+        assert out.exists()
+
+    def test_output_is_valid_png(self, flat_dem_path, tmp_path):
+        site, cov = self._site_and_coverage(flat_dem_path)
+        traj = _make_drone_trajectory()
+        result_obj = _make_trajectory_result()
+        out = tmp_path / "traj_map.png"
+        render_trajectory_map(site, cov, [(traj, result_obj)], self._centre(site), out)
+        img = Image.open(out)
+        assert img.format == "PNG"
+        assert img.size[0] > 0
+
+    def test_multiple_trajectories(self, flat_dem_path, tmp_path):
+        """Multiple (trajectory, result) pairs render without error."""
+        site, cov = self._site_and_coverage(flat_dem_path)
+        pairs = [
+            (_make_drone_trajectory(), _make_trajectory_result(time_in_detection_s=2.0)),
+            (
+                _make_drone_trajectory(x_start=500060.0),
+                _make_trajectory_result(time_in_detection_s=8.0),
+            ),
+        ]
+        out = tmp_path / "traj_multi.png"
+        render_trajectory_map(site, cov, pairs, self._centre(site), out)
+        assert out.exists()
+
+    def test_no_detection_events(self, flat_dem_path, tmp_path):
+        """Trajectory with no detection events renders without error."""
+        site, cov = self._site_and_coverage(flat_dem_path)
+        traj = _make_drone_trajectory()
+        result_obj = _make_trajectory_result(time_in_detection_s=0.0, with_events=False)
+        out = tmp_path / "traj_no_events.png"
+        render_trajectory_map(site, cov, [(traj, result_obj)], self._centre(site), out)
+        assert out.exists()
+
+    def test_accepts_str_path(self, flat_dem_path, tmp_path):
+        site, cov = self._site_and_coverage(flat_dem_path)
+        traj = _make_drone_trajectory()
+        result_obj = _make_trajectory_result()
+        out = str(tmp_path / "traj_str.png")
+        result = render_trajectory_map(site, cov, [(traj, result_obj)], self._centre(site), out)
+        assert isinstance(result, Path)
+
+    def test_creates_parent_dir(self, flat_dem_path, tmp_path):
+        site, cov = self._site_and_coverage(flat_dem_path)
+        traj = _make_drone_trajectory()
+        result_obj = _make_trajectory_result()
+        out = tmp_path / "new_sub" / "traj_map.png"
+        assert not out.parent.exists()
+        render_trajectory_map(site, cov, [(traj, result_obj)], self._centre(site), out)
+        assert out.exists()
+
+    def test_empty_trajectory_results_raises(self, flat_dem_path, tmp_path):
+        site, cov = self._site_and_coverage(flat_dem_path)
+        out = tmp_path / "traj_empty.png"
+        with pytest.raises(ValueError, match="empty"):
+            render_trajectory_map(site, cov, [], self._centre(site), out)
+
+    def test_with_sensor_positions(self, flat_dem_path, tmp_path):
+        """sensor_positions are drawn without error."""
+        site, cov = self._site_and_coverage(flat_dem_path)
+        traj = _make_drone_trajectory()
+        result_obj = _make_trajectory_result()
+        cx, cy = self._centre(site)
+        out = tmp_path / "traj_sensors.png"
+        render_trajectory_map(
+            site, cov, [(traj, result_obj)], (cx, cy), out, sensor_positions=[(cx, cy)]
+        )
+        assert out.exists()
+
+    def test_all_undetected(self, flat_dem_path, tmp_path):
+        """Asset reached undetected still renders (single-value normalisation)."""
+        site, cov = self._site_and_coverage(flat_dem_path)
+        traj = _make_drone_trajectory()
+        result_obj = _make_trajectory_result(time_in_detection_s=0.0, with_events=False)
+        out = tmp_path / "traj_undetected.png"
+        render_trajectory_map(site, cov, [(traj, result_obj)], self._centre(site), out)
+        assert out.exists()
+
+
+# ---------------------------------------------------------------------------
+# render_corridor_polar_diagram — trajectory_results_and_bearings extension (S6.5-1)
+# ---------------------------------------------------------------------------
+
+
+class TestRenderCorridorPolarDiagramTrajectoryOverlay:
+    def test_trajectory_only_renders(self, tmp_path):
+        """trajectory_results_and_bearings alone (empty corridor_results) renders."""
+        traj_result = _make_trajectory_result(time_in_detection_s=3.0)
+        pairs = [(0.0, traj_result), (90.0, traj_result), (180.0, traj_result)]
+        out = tmp_path / "polar_traj_only.png"
+        render_corridor_polar_diagram([], out, trajectory_results_and_bearings=pairs)
+        assert out.exists()
+
+    def test_trajectory_only_valid_png(self, tmp_path):
+        traj_result = _make_trajectory_result(time_in_detection_s=3.0)
+        pairs = [(45.0, traj_result), (225.0, traj_result)]
+        out = tmp_path / "polar_traj_png.png"
+        render_corridor_polar_diagram([], out, trajectory_results_and_bearings=pairs)
+        img = Image.open(out)
+        assert img.format == "PNG"
+
+    def test_combined_corridor_and_trajectory(self, tmp_path):
+        """Both corridor and trajectory data render together without error."""
+        corridor_results = [_make_corridor_result(0.0, 60.0), _make_corridor_result(180.0, 80.0)]
+        traj_result = _make_trajectory_result(time_in_detection_s=4.0)
+        pairs = [(90.0, traj_result), (270.0, traj_result)]
+        out = tmp_path / "polar_combined.png"
+        render_corridor_polar_diagram(corridor_results, out, trajectory_results_and_bearings=pairs)
+        assert out.exists()
+
+    def test_empty_both_raises(self, tmp_path):
+        """Both empty raises ValueError."""
+        out = tmp_path / "polar_both_empty.png"
+        with pytest.raises(ValueError, match="empty"):
+            render_corridor_polar_diagram([], out, trajectory_results_and_bearings=None)
+
+    def test_zero_time_to_asset(self, tmp_path):
+        """time_to_asset_s=0 is handled without division by zero."""
+        traj_result = TrajectoryResult(
+            detection_events=(),
+            first_detection=None,
+            time_to_asset_s=0.0,
+            time_in_detection_s=0.0,
+            time_undetected_s=0.0,
+            asset_reached_undetected=True,
+            last_gap_before_asset_m=0.0,
+        )
+        out = tmp_path / "polar_zero_time.png"
+        render_corridor_polar_diagram([], out, trajectory_results_and_bearings=[(0.0, traj_result)])
+        assert out.exists()
+
+    def test_returns_path(self, tmp_path):
+        traj_result = _make_trajectory_result()
+        out = tmp_path / "polar_traj_ret.png"
+        result = render_corridor_polar_diagram(
+            [], out, trajectory_results_and_bearings=[(0.0, traj_result)]
+        )
+        assert result == out

@@ -1,0 +1,33 @@
+# Trajectory example — diving FPV approach from the north
+#
+# Demonstrates a three-waypoint engagement-calc trajectory for use with:
+#
+#   salus simulate scenario.yaml --segment-length 1.0
+#
+# where the scenario YAML includes:
+#   trajectory_path: path/to/trajectory_example.yaml
+#
+# Geometry:
+#   Waypoint 1 — high altitude, 950 m north of the protected asset
+#   Waypoint 2 — medium altitude, 350 m north of the asset (diving approach)
+#   Waypoint 3 — ground level AT the protected asset (0 m AGL)
+#
+# The asset sits at the demo-site centre: (500750, 6100750).
+# Coordinates are in the demo DEM CRS (EPSG:32755 UTM Zone 55S — easting/northing metres).
+#
+# speed_ms: 25 m/s ≈ 90 km/h — representative FPV racing drone sprint speed.
+
+waypoints:
+  - x: 500750.0
+    y: 6101700.0
+    z_agl: 150.0    # High altitude — outside low-coverage detection footprint
+
+  - x: 500750.0
+    y: 6101100.0
+    z_agl: 60.0     # Diving to medium altitude at mid-range
+
+  - x: 500750.0
+    y: 6100750.0
+    z_agl: 0.0      # Ground-level strike at the protected asset
+
+speed_ms: 25.0

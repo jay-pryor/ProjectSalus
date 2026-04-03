@@ -1,0 +1,35 @@
+task_id: S6.5
+timestamp: 2026-04-03T09:30:00Z
+quality_gates:
+  G1_lint: pass
+  G2_format: pass
+  G3_import: pass
+  G4_type: pass       # No new correctness errors; pre-existing untyped-import warnings only
+  G5_security: pass   # bandit -ll -q: no findings
+  G6_unit_test: pass  # 769 passed, 0 failed
+  G7_coverage: pass
+  G8_secrets: pass    # detect-secrets scan src/: results: {}
+  coverage_pct: 91
+review:
+  l1_standards:
+    testing: pass
+    error_handling: pass
+    logging: pass
+    security: pass
+  l2_agents:
+    silent_failure_hunter: {status: fail, findings: 9}   # 3 high, 4 medium, 2 low — all fixed
+    spec_compliance: {status: fail, findings: 1}          # D-159 secondary dimension — resolved
+    type_design_analyzer: {status: pass, findings: 10}   # 0 errors, 2 warnings, 8 info — informational
+    regression_reviewer: {status: pass, findings: 3}     # 0 high/medium, 3 low — all safe
+defect_ids: [D-155, D-156, D-157, D-158, D-159]
+overall: pass
+notes: |
+  S6.5 implements trajectory visualisation and CLI integration.
+  D-155: colorbar vmin==vmax guard added (det_max = det_min+1.0 when all trajectories identical).
+  D-156: find_worst_trajectories failure now propagates corridor_failed=True.
+  D-157: math.isfinite guard on DetectionEvent positions before ax.plot/annotate.
+  D-158: sensor_positions renamed to threat_sensor_positions to eliminate shadowing.
+  D-159: polar diagram secondary dimension uses detection fraction (best available proxy;
+         TrajectoryResult has no altitude/dive-angle field — full spec compliance requires
+         model changes beyond S6.5 scope).
+  Hillshade background added to render_trajectory_map for terrain context consistency.
