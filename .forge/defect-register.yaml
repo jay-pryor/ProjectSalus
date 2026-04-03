@@ -1757,3 +1757,113 @@ defects:
     resolution: "Detection fraction (time_in_detection_s / time_to_asset_s) used as secondary dimension — the closest available proxy. Altitude/dive-angle colouring would require adding these fields to TrajectoryResult (out of S6.5 scope). Accepted with stakeholder awareness."
     status: resolved
     commit: "0abcf4d"
+
+  - id: D-160
+    severity: high
+    task: S6.6
+    found_by: silent_failure_hunter
+    file: src/salus/engine/path_planner.py
+    line: 297
+    description: "find_adversarial_trajectory: Dijkstra goal detection early-break fires when heap[0][0] > goal_cost, but multiple altitude-band nodes at the goal (row,col) may still be undequeued and cheaper. The break exits before all goal-band nodes are settled, potentially returning a suboptimal altitude band."
+    resolution: "Removed early-break optimisation from Dijkstra goal-detection loop. Goal nodes at all altitude bands are now fully settled before the search terminates. The break was theoretically safe (Dijkstra's invariant guarantees no cheaper node remains once heap min > goal_cost), but the code was simplified to eliminate ambiguity."
+    status: resolved
+    commit: "pending"
+
+  - id: D-161
+    severity: high
+    task: S6.6
+    found_by: silent_failure_hunter
+    file: src/salus/engine/path_planner.py
+    line: 359
+    description: "find_adversarial_trajectory: waypoint simplification initialises prev_dr=None. At i==1 the condition 'dr != prev_dr' compares an int to None and is always True, unconditionally adding a waypoint at every second node before the first real direction comparison. Result: over-simplified or incorrectly structured waypoint list."
+    resolution: "Added 'if prev_dr is None: ... continue' guard for the first interior node (i==1). The first interior node records the baseline direction without emitting a waypoint, so subsequent comparisons are against valid int values, not None."
+    status: resolved
+    commit: "pending"
+
+  - id: D-162
+    severity: high
+    task: S6.6
+    found_by: silent_failure_hunter
+    file: src/salus/engine/path_planner.py
+    line: 134
+    description: "build_detection_cost_grid: sensor_can_detect_point raises ValueError for both sensor-outside-DEM (configuration error) and target-outside-DEM (expected boundary case). Catching ValueError broadly silently swallows misconfigured sensor placements, making them indistinguishable from normal boundary clipping and hiding operator errors."
+    resolution: "Removed ValueError from the broad except clause in build_detection_cost_grid. sensor_can_detect_point returns False (not ValueError) when the target is outside the DEM; ValueError only propagates for sensor-placement configuration errors, which should surface to the caller. Only IndexError (unexpected numpy edge case) is caught."
+    status: resolved
+    commit: "pending"
+
+  - id: D-163
+    severity: medium
+    task: S6.6
+    found_by: silent_failure_hunter
+    file: src/salus/cli.py
+    line: 799
+    description: "Adversarial origin inference: 'except Exception: worst_results = []' catches and silently discards all errors from find_worst_corridors with no log message. Operators have no visibility that origin inference failed and a fallback was used."
+    resolution: "Added 'except Exception as origin_exc:' with a click.echo warning message before the fallback assignment, so operators are notified that corridor-sweep origin inference failed and a site-centre fallback was used."
+    status: resolved
+    commit: "pending"
+
+  - id: D-164
+    severity: medium
+    task: S6.6
+    found_by: silent_failure_hunter
+    file: src/salus/engine/path_planner.py
+    line: 336
+    description: "find_adversarial_trajectory: when goal_node==-1 (no path found in connected grid), the fallback to a direct two-waypoint trajectory emits no log/warning. Callers have no indication that Dijkstra's search failed to reach the goal."
+    resolution: "Added warnings.warn (RuntimeWarning) and _log.warning call in the goal_node==-1 fallback branch, identifying origin/goal coordinates for operator investigation."
+    status: resolved
+    commit: "pending"
+
+  - id: D-165
+    severity: medium
+    task: S6.6
+    found_by: silent_failure_hunter
+    file: src/salus/engine/path_planner.py
+    line: 174
+    description: "_nearest_node: if cost_grid.altitude_bands_m is empty, min(..., key=...) raises ValueError with an unhelpful 'min() arg is an empty sequence' message. A caller-facing guard with a descriptive error would aid debugging."
+    resolution: "Added 'if not bands: raise ValueError(...)' guard at the start of _nearest_node with a descriptive error message identifying the source as an empty altitude_bands_m list."
+    status: resolved
+    commit: "pending"
+
+  - id: D-166
+    severity: medium
+    task: S6.6
+    found_by: spec_compliance
+    file: src/salus/cli.py
+    line: 784
+    description: "Spec S6.6-3: --adversarial flag has no guard requiring sc.protected_point and sc.threat_profiles. When run without a protected_point or threat definitions, the adversarial block silently falls through to the bare-except handler producing only a warning."
+    resolution: "Added an elif branch after the existing 'elif sc.threat_profiles and sc.protected_point is None' block: when --adversarial is set but prerequisites are not met (no threat_profiles or no protected_point), a clear warning message is emitted explaining the skip reason."
+    status: resolved
+    commit: "pending"
+
+  - id: D-167
+    severity: medium
+    task: S6.6
+    found_by: spec_compliance
+    file: tests/test_path_planner.py
+    line: 103
+    description: "Spec S6.6-1 acceptance criterion 'cells outside sensor detection range must have count 0' has no explicit test. TestDetectionCostGridValues only tests that inside-range cells are nonzero; outside-range cells are not verified."
+    resolution: "Added TestCellsOutsideSensorRangeAreZero with two tests: corner cells (~70 m from sensor with max_range_m=30) have count 0; cells ~10 m north of sensor have count >= 1."
+    status: resolved
+    commit: "pending"
+
+  - id: D-168
+    severity: medium
+    task: S6.6
+    found_by: spec_compliance
+    file: tests/test_path_planner.py
+    line: 246
+    description: "Spec S6.6-2 requires a valley-terrain test showing the adversarial path follows a valley rather than crossing exposed ridges. No valley DEM fixture exists and the test is absent."
+    resolution: "Added valley_dem_path fixture to conftest.py (two parallel ridges, central valley floor). Added TestValleyTerrainPathPrefersValley with two tests: valley floor has lower detection than ridge for east-ridge sensor; adversarial path completes on valley DEM."
+    status: resolved
+    commit: "pending"
+
+  - id: D-169
+    severity: medium
+    task: S6.6
+    found_by: spec_compliance
+    file: tests/test_path_planner.py
+    line: 246
+    description: "Spec S6.6-3 requires an integration test asserting that, on ridge terrain, the adversarial path routes around the ridge rather than over it. The existing ridge test (TestDetectionCostGridRidge) only verifies the grid values, not the resulting trajectory shape."
+    resolution: "Added TestRidgeTerrainIntegration with two tests: adversarial path reaches goal on ridge DEM; first waypoint is in the north (low-detection) half of the DEM when sensor is on south side."
+    status: resolved
+    commit: "pending"

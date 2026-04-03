@@ -65,3 +65,48 @@ def ridge_dem_path(tmp_path):
     ) as dst:
         dst.write(data, 1)
     return path
+
+
+@pytest.fixture
+def valley_dem_path(tmp_path):
+    """Create a 200x200 DEM with two parallel ridges enclosing a central valley.
+
+    Terrain layout (by column index, west→east):
+    - Cols   0– 39: west ridge at 100 m elevation
+    - Cols  40– 79: west slope ramping down from 100 m to 10 m
+    - Cols  80–119: valley floor at 10 m elevation
+    - Cols 120–159: east slope ramping up from 10 m to 100 m
+    - Cols 160–199: east ridge at 100 m elevation
+
+    A sensor placed on the east ridge (col ~180) cannot see the valley floor
+    (cols 80–119) because the east ridge itself creates a terrain shadow at
+    low altitude — useful for testing that valley-floor cells have detection
+    count 0 and that adversarial paths prefer the valley.
+    """
+    path = tmp_path / "valley.tif"
+    data = np.full((200, 200), 10.0, dtype=np.float64)
+    # West ridge
+    data[:, :40] = 100.0
+    # West slope: linear ramp from 100 → 10 over cols 40–79
+    for c in range(40, 80):
+        data[:, c] = 100.0 - (c - 40) * (90.0 / 40.0)
+    # Valley floor (cols 80–119) already set to 10 m
+    # East slope: linear ramp from 10 → 100 over cols 120–159
+    for c in range(120, 160):
+        data[:, c] = 10.0 + (c - 120) * (90.0 / 40.0)
+    # East ridge
+    data[:, 160:] = 100.0
+    transform = from_bounds(500000, 6100000, 500200, 6100200, 200, 200)
+    with rasterio.open(
+        path,
+        "w",
+        driver="GTiff",
+        height=200,
+        width=200,
+        count=1,
+        dtype="float64",
+        crs=CRS.from_epsg(28354),
+        transform=transform,
+    ) as dst:
+        dst.write(data, 1)
+    return path

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 import sys
 from pathlib import Path
@@ -16,6 +17,7 @@ from salus.engine.coverage import (
     compute_gaps,
     compute_layer_coverage,
 )
+from salus.engine.path_planner import build_detection_cost_grid, find_adversarial_trajectory
 from salus.engine.threat_corridor import find_worst_corridors
 from salus.engine.trajectory import analyse_trajectory, find_worst_trajectories
 from salus.engine.viewshed import clip_viewshed_to_sensor, compute_viewshed
@@ -26,6 +28,7 @@ from salus.ingest.terrain import load_dem
 from salus.models.scenario import SensorPlacement
 from salus.models.sensor import SensorDefinition, SensorType
 from salus.report.maps import (
+    render_adversarial_map,
     render_composite_coverage_map,
     render_corridor_overlay_map,
     render_corridor_polar_diagram,
@@ -234,12 +237,36 @@ def viewshed(
         "Overrides sweep_segment_length_m from the scenario file."
     ),
 )
+@click.option(
+    "--adversarial",
+    "adversarial",
+    is_flag=True,
+    default=False,
+    help=(
+        "Run adversarial path planning: discover the minimum-detection-exposure route "
+        "from origin to the protected asset using Dijkstra's algorithm on a 3D cost grid."
+    ),
+)
+@click.option(
+    "--origin",
+    "origin",
+    default=None,
+    type=(float, float),
+    metavar="X Y",
+    help=(
+        "Adversarial origin coordinates (easting northing). "
+        "Required when --adversarial is set and no corridor results are available. "
+        "If omitted, origin is inferred from the worst-approach corridor."
+    ),
+)
 def simulate(
     scenario: str,
     sensor_dir: str | None,
     threat_dir: str | None,
     output_dir: str,
     segment_length: float | None,
+    adversarial: bool,
+    origin: tuple[float, float] | None,
 ) -> None:
     """Compute sensor-clipped coverage maps from a scenario YAML file.
 
@@ -753,10 +780,113 @@ def simulate(
                     )
                     corridor_failed = True  # D-156: propagate sweep failure to exit code
 
+            # ── Adversarial path planning (optional, --adversarial flag) ─────
+            if adversarial:
+                click.echo(f"\n  Running adversarial path planner for '{threat.name}'…")
+                try:
+                    # Determine threat origin:
+                    # (a) use --origin coordinates if provided, or
+                    # (b) infer from worst corridor bearing at typical_altitude_m.
+                    if origin is not None:
+                        adv_ox, adv_oy = origin
+                        adv_oz = threat.typical_altitude_m
+                    else:
+                        # Derive origin from worst corridor (lowest coverage_pct)
+                        try:
+                            worst_results = find_worst_corridors(
+                                site, all_pairs, threat, sc.protected_point
+                            )
+                        except Exception as origin_exc:
+                            click.echo(
+                                f"  Warning: corridor sweep for origin inference failed:"
+                                f" {origin_exc}. Using site-centre fallback.",
+                                err=True,
+                            )
+                            worst_results = []
+                        if worst_results:
+                            worst_r = worst_results[0]
+                            bearing_rad = math.radians(worst_r.corridor.bearing_deg)
+                            dist = worst_r.corridor.start_distance_m
+                            # Origin is start_distance_m from asset in reverse bearing direction
+                            adv_ox = sc.protected_point[0] - math.sin(bearing_rad) * dist
+                            adv_oy = sc.protected_point[1] - math.cos(bearing_rad) * dist
+                            adv_oz = threat.typical_altitude_m
+                        else:
+                            # Fallback: place origin north of the site extent
+                            _, _, min_y_ext, max_y_ext = site.extent
+                            min_x_ext, max_x_ext, _, _ = site.extent
+                            adv_ox = (min_x_ext + max_x_ext) / 2.0
+                            adv_oy = max_y_ext - site.resolution
+                            adv_oz = threat.typical_altitude_m
+
+                    click.echo(f"  Origin: ({adv_ox:.0f}, {adv_oy:.0f}) at {adv_oz:.0f} m AGL")
+
+                    adv_cost_grid = build_detection_cost_grid(site, all_pairs)
+                    adv_traj = find_adversarial_trajectory(
+                        site,
+                        adv_cost_grid,
+                        adv_ox,
+                        adv_oy,
+                        adv_oz,
+                        sc.protected_point[0],
+                        sc.protected_point[1],
+                        speed_ms=threat.max_speed_ms,
+                    )
+                    effective_seg_len_adv: float = (
+                        segment_length if segment_length is not None else sc.sweep_segment_length_m
+                    )
+                    adv_result = analyse_trajectory(
+                        site,
+                        all_pairs,
+                        adv_traj,
+                        segment_length_m=effective_seg_len_adv,
+                    )
+
+                    click.echo(
+                        f"  Adversarial path: {len(adv_traj.waypoints)} waypoints, "
+                        f"{adv_result.time_to_asset_s:.1f}s to asset"
+                    )
+                    click.echo(
+                        f"  Time in detection:    {adv_result.time_in_detection_s:.1f}s / "
+                        f"{adv_result.time_to_asset_s:.1f}s total"
+                    )
+                    click.echo(f"  Asset reached undetected: {adv_result.asset_reached_undetected}")
+
+                    adv_map_out = output_path / f"adversarial_{safe_threat}_map.png"
+                    render_adversarial_map(
+                        site,
+                        composite,
+                        adv_cost_grid,
+                        adv_traj,
+                        adv_result,
+                        sc.protected_point,
+                        adv_map_out,
+                        title=f"Adversarial Path — {threat.name}",
+                        sensor_positions=threat_sensor_positions,
+                    )
+                    click.echo(f"  → {adv_map_out}")
+                except Exception as exc:
+                    click.echo(
+                        f"  Warning: adversarial path planning failed for '{threat.name}': {exc}",
+                        err=True,
+                    )
+                    corridor_failed = True
+
     elif sc.threat_profiles and sc.protected_point is None:
         click.echo(
             "\nNote: threat_profiles specified in scenario but no protected_point defined "
             "— skipping corridor analysis.",
+            err=True,
+        )
+        if adversarial:
+            click.echo(
+                "Note: --adversarial requires a protected_point in the scenario — skipped.",
+                err=True,
+            )
+    elif adversarial and (not sc.threat_profiles or sc.protected_point is None):
+        click.echo(
+            "Note: --adversarial requires threat_profiles and a protected_point "
+            "in the scenario — skipped.",
             err=True,
         )
 

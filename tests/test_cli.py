@@ -948,3 +948,123 @@ class TestSimulateCommandS65Trajectory:
         # Corridor outputs must still be produced in planning mode
         overlays = list(tmp_path.glob("corridor_*_overlay.png"))
         assert len(overlays) >= 1
+
+
+# ---------------------------------------------------------------------------
+# S6.6: Adversarial path planning CLI tests
+# ---------------------------------------------------------------------------
+
+
+class TestSimulateCommandS66Adversarial:
+    """Integration tests for S6.6 adversarial path planning in salus simulate."""
+
+    def test_adversarial_flag_accepted(self, scenario_threat_yaml, tmp_path):
+        """--adversarial flag must be accepted and not cause an immediate error."""
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "simulate",
+                str(scenario_threat_yaml),
+                "--sensors",
+                str(_BUNDLED_SENSOR_DIR),
+                "--threats",
+                str(_BUNDLED_THREAT_DIR),
+                "--output-dir",
+                str(tmp_path),
+                "--adversarial",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+
+    def test_adversarial_map_png_created(self, scenario_threat_yaml, tmp_path):
+        """--adversarial must write an adversarial map PNG."""
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "simulate",
+                str(scenario_threat_yaml),
+                "--sensors",
+                str(_BUNDLED_SENSOR_DIR),
+                "--threats",
+                str(_BUNDLED_THREAT_DIR),
+                "--output-dir",
+                str(tmp_path),
+                "--adversarial",
+                "--segment-length",
+                "5.0",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        maps = list(tmp_path.glob("adversarial_*_map.png"))
+        assert len(maps) >= 1, f"Expected adversarial map PNG, got: {list(tmp_path.iterdir())}"
+
+    def test_adversarial_with_origin_flag(self, scenario_threat_yaml, tmp_path):
+        """--adversarial with explicit --origin coordinates must succeed."""
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "simulate",
+                str(scenario_threat_yaml),
+                "--sensors",
+                str(_BUNDLED_SENSOR_DIR),
+                "--threats",
+                str(_BUNDLED_THREAT_DIR),
+                "--output-dir",
+                str(tmp_path),
+                "--adversarial",
+                "--origin",
+                "500050.0",
+                "6100090.0",
+                "--segment-length",
+                "10.0",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+
+    def test_adversarial_corridor_outputs_still_produced(self, scenario_threat_yaml, tmp_path):
+        """--adversarial must not suppress corridor overlay/polar outputs."""
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "simulate",
+                str(scenario_threat_yaml),
+                "--sensors",
+                str(_BUNDLED_SENSOR_DIR),
+                "--threats",
+                str(_BUNDLED_THREAT_DIR),
+                "--output-dir",
+                str(tmp_path),
+                "--adversarial",
+                "--segment-length",
+                "10.0",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        overlays = list(tmp_path.glob("corridor_*_overlay.png"))
+        assert len(overlays) >= 1, "Corridor overlay must still be produced with --adversarial"
+
+    def test_adversarial_prints_waypoint_count(self, scenario_threat_yaml, tmp_path):
+        """Adversarial output must mention waypoints in stdout."""
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "simulate",
+                str(scenario_threat_yaml),
+                "--sensors",
+                str(_BUNDLED_SENSOR_DIR),
+                "--threats",
+                str(_BUNDLED_THREAT_DIR),
+                "--output-dir",
+                str(tmp_path),
+                "--adversarial",
+                "--segment-length",
+                "10.0",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "waypoints" in result.output

@@ -13,6 +13,7 @@ import numpy.typing as npt
 from matplotlib.colors import ListedColormap, Normalize
 from shapely.geometry import MultiPolygon, Polygon
 
+from salus.engine.path_planner import DetectionCostGrid
 from salus.engine.threat_corridor import CorridorResult
 from salus.engine.trajectory import TrajectoryResult
 from salus.models.sensor import SensorType
@@ -1306,6 +1307,198 @@ def render_trajectory_map(
                 color="gray",
                 linewidth=_TRAJECTORY_LINEWIDTH,
                 label="Trajectory path",
+            ),
+            plt.Line2D(
+                [0],
+                [0],
+                marker="o",
+                color="w",
+                markerfacecolor="white",
+                markeredgecolor="black",
+                markersize=_DETECTION_MARKER_SIZE,
+                label="Detection event",
+            ),
+            plt.Line2D(
+                [0],
+                [0],
+                marker="*",
+                color="w",
+                markerfacecolor="black",
+                markeredgecolor="white",
+                markersize=12,
+                label="Protected asset",
+            ),
+        ]
+        try:
+            ax.legend(handles=legend_entries, loc="lower left", fontsize=8, framealpha=0.8)
+        except Exception as exc:
+            warnings.warn(f"Legend could not be added: {exc}", stacklevel=2)
+
+        fig.tight_layout()
+        fig.savefig(output_path, dpi=200, bbox_inches="tight")
+    finally:
+        plt.close(fig)
+
+    return output_path
+
+
+def render_adversarial_map(
+    site: SiteModel,
+    composite_coverage: npt.NDArray[np.bool_],
+    cost_grid: DetectionCostGrid,
+    trajectory: DroneTrajectory,
+    trajectory_result: TrajectoryResult,
+    protected_point: tuple[float, float],
+    output_path: str | Path,
+    title: str = "Adversarial Path Analysis",
+    sensor_positions: list[tuple[float, float]] | None = None,
+) -> Path:
+    """Render the adversarial path discovery result as a top-down map.
+
+    Overlays the minimum-cost adversarial trajectory on a coverage heatmap,
+    with the detection cost grid shown as a semi-transparent red heatmap
+    (brighter = more sensors can detect).  Detection events along the path are
+    marked as circle markers labelled with sensor name and detection time.
+
+    Args:
+        site: Site terrain model.
+        composite_coverage: Boolean coverage array (rows x cols).
+        cost_grid: Pre-built detection cost grid (collapsed to max across
+            altitude bands for 2D display).
+        trajectory: The adversarial DroneTrajectory discovered by
+            find_adversarial_trajectory.
+        trajectory_result: Detection analysis of the adversarial trajectory
+            from analyse_trajectory.
+        protected_point: (x, y) of the protected asset.
+        output_path: Where to save the PNG.
+        title: Map title.
+        sensor_positions: Optional sensor positions drawn as triangles.
+
+    Returns:
+        Path to the saved PNG.
+    """
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    px, py = protected_point
+    min_x, max_x, min_y, max_y = site.extent
+
+    # Collapse cost grid to 2D by taking the max detection count across altitude bands.
+    cost_2d = cost_grid.grid.max(axis=0).astype(np.float32)
+
+    fig, ax = plt.subplots(figsize=(12, 10))
+    try:
+        hs = _hillshade(site.dem)
+        ax.imshow(
+            hs,
+            cmap="gray",
+            origin="upper",
+            extent=(min_x, max_x, min_y, max_y),
+            vmin=0,
+            vmax=1,
+            zorder=1,
+        )
+        _add_basemap(ax, site)
+
+        # Coverage overlay (semi-transparent teal)
+        coverage_rgba = np.zeros((*composite_coverage.shape, 4))
+        coverage_rgba[composite_coverage] = [0.498, 0.702, 0.627, 0.35]
+        ax.imshow(
+            coverage_rgba,
+            origin="upper",
+            extent=(min_x, max_x, min_y, max_y),
+            zorder=3,
+        )
+
+        # Detection cost grid heatmap (red = high detection density)
+        if cost_2d.max() > 0:
+            cost_norm = cost_2d / cost_2d.max()
+        else:
+            cost_norm = cost_2d
+        cost_rgba = np.zeros((*cost_norm.shape, 4))
+        cost_rgba[..., 0] = cost_norm  # red channel
+        cost_rgba[..., 3] = cost_norm * 0.4  # alpha proportional to detection count
+        ax.imshow(
+            cost_rgba,
+            origin="upper",
+            extent=(min_x, max_x, min_y, max_y),
+            zorder=4,
+        )
+
+        # Adversarial trajectory path
+        xs = [wp.x for wp in trajectory.waypoints]
+        ys = [wp.y for wp in trajectory.waypoints]
+        ax.plot(
+            xs,
+            ys,
+            color="navy",
+            linewidth=_TRAJECTORY_LINEWIDTH + 0.5,
+            linestyle="--",
+            solid_capstyle="round",
+            zorder=5,
+        )
+        ax.plot(xs[0], ys[0], "o", color="navy", markersize=8, zorder=6)
+
+        # Detection event markers along the adversarial path
+        for event in trajectory_result.detection_events:
+            if not (math.isfinite(event.position_x) and math.isfinite(event.position_y)):
+                continue
+            ax.plot(
+                event.position_x,
+                event.position_y,
+                "o",
+                color="white",
+                markersize=_DETECTION_MARKER_SIZE,
+                markeredgecolor="black",
+                markeredgewidth=0.8,
+                zorder=7,
+            )
+            ax.annotate(
+                f"{event.sensor_name}\n{event.time_s:.1f}s",
+                xy=(event.position_x, event.position_y),
+                xytext=(4, 4),
+                textcoords="offset points",
+                fontsize=6,
+                zorder=8,
+                clip_on=True,
+            )
+
+        # Protected asset marker
+        ax.plot(px, py, "k*", markersize=15, markeredgecolor="white", markeredgewidth=0.5, zorder=9)
+
+        if sensor_positions:
+            for x, y in sensor_positions:
+                ax.plot(
+                    x, y, "r^", markersize=12, markeredgecolor="black", markeredgewidth=1, zorder=8
+                )
+
+        ax.set_title(title, fontsize=14, fontweight="bold")
+        ax.set_xlabel("Easting (m)")
+        ax.set_ylabel("Northing (m)")
+        _add_cartographic_elements(ax)
+
+        # Colorbar for detection density
+        sm = plt.cm.ScalarMappable(
+            cmap="Reds",
+            norm=Normalize(vmin=0, vmax=max(int(cost_2d.max()), 1)),
+        )
+        sm.set_array([])
+        try:
+            cbar = fig.colorbar(sm, ax=ax, fraction=0.03, pad=0.04)
+            cbar.set_label("Detection count (sensors)", fontsize=10)
+        except Exception as exc:
+            warnings.warn(f"Adversarial colorbar could not be added: {exc}", stacklevel=2)
+
+        legend_entries: list = [
+            mpatches.Patch(facecolor="#7fb3a0", alpha=0.5, label="Covered"),
+            mpatches.Patch(facecolor="red", alpha=0.4, label="Detection density"),
+            plt.Line2D(
+                [0],
+                [0],
+                color="navy",
+                linewidth=_TRAJECTORY_LINEWIDTH,
+                linestyle="--",
+                label="Adversarial path",
             ),
             plt.Line2D(
                 [0],

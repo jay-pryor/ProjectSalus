@@ -1153,3 +1153,104 @@ class TestRenderCorridorPolarDiagramTrajectoryOverlay:
             [], out, trajectory_results_and_bearings=[(0.0, traj_result)]
         )
         assert result == out
+
+
+# ---------------------------------------------------------------------------
+# render_adversarial_map (S6.6-3)
+# ---------------------------------------------------------------------------
+
+
+class TestRenderAdversarialMap:
+    def _setup(self, flat_dem_path):
+        from salus.engine.path_planner import build_detection_cost_grid
+
+        site = load_dem(flat_dem_path)
+        coverage = np.ones(site.dem.shape, dtype=bool)
+        cost_grid = build_detection_cost_grid(site, [], altitude_bands_m=[50.0])
+        traj = _make_drone_trajectory()
+        result_obj = _make_trajectory_result()
+        cx = site.origin_x + site.cols * site.resolution / 2.0
+        cy = site.origin_y - site.rows * site.resolution / 2.0
+        return site, coverage, cost_grid, traj, result_obj, (cx, cy)
+
+    def test_returns_path(self, flat_dem_path, tmp_path):
+        from salus.report.maps import render_adversarial_map
+
+        site, cov, cost_grid, traj, result_obj, centre = self._setup(flat_dem_path)
+        out = tmp_path / "adv_map.png"
+        result = render_adversarial_map(site, cov, cost_grid, traj, result_obj, centre, out)
+        assert result == out
+
+    def test_file_exists(self, flat_dem_path, tmp_path):
+        from salus.report.maps import render_adversarial_map
+
+        site, cov, cost_grid, traj, result_obj, centre = self._setup(flat_dem_path)
+        out = tmp_path / "adv_map.png"
+        render_adversarial_map(site, cov, cost_grid, traj, result_obj, centre, out)
+        assert out.exists()
+
+    def test_output_is_valid_png(self, flat_dem_path, tmp_path):
+        from salus.report.maps import render_adversarial_map
+
+        site, cov, cost_grid, traj, result_obj, centre = self._setup(flat_dem_path)
+        out = tmp_path / "adv_map.png"
+        render_adversarial_map(site, cov, cost_grid, traj, result_obj, centre, out)
+        img = Image.open(out)
+        assert img.format == "PNG"
+        assert img.size[0] > 0
+
+    def test_creates_parent_dir(self, flat_dem_path, tmp_path):
+        from salus.report.maps import render_adversarial_map
+
+        site, cov, cost_grid, traj, result_obj, centre = self._setup(flat_dem_path)
+        out = tmp_path / "new_sub" / "adv_map.png"
+        assert not out.parent.exists()
+        render_adversarial_map(site, cov, cost_grid, traj, result_obj, centre, out)
+        assert out.exists()
+
+    def test_accepts_str_path(self, flat_dem_path, tmp_path):
+        from salus.report.maps import render_adversarial_map
+
+        site, cov, cost_grid, traj, result_obj, centre = self._setup(flat_dem_path)
+        out = str(tmp_path / "adv_str.png")
+        result = render_adversarial_map(site, cov, cost_grid, traj, result_obj, centre, out)
+        assert isinstance(result, Path)
+
+    def test_with_sensor_positions(self, flat_dem_path, tmp_path):
+        from salus.report.maps import render_adversarial_map
+
+        site, cov, cost_grid, traj, result_obj, centre = self._setup(flat_dem_path)
+        out = tmp_path / "adv_sensors.png"
+        render_adversarial_map(
+            site, cov, cost_grid, traj, result_obj, centre, out, sensor_positions=[centre]
+        )
+        assert out.exists()
+
+    def test_nonzero_cost_grid(self, flat_dem_path, tmp_path):
+        """Cost grid with nonzero values renders the detection heatmap without error."""
+        from pathlib import Path as PyPath
+
+        from salus.engine.path_planner import build_detection_cost_grid
+        from salus.ingest.sensors import load_sensors
+        from salus.models.scenario import SensorPlacement
+        from salus.report.maps import render_adversarial_map
+
+        site = load_dem(flat_dem_path)
+        coverage = np.ones(site.dem.shape, dtype=bool)
+        sensor_dir = PyPath(__file__).parent.parent / "src" / "salus" / "data" / "sensors"
+        sensors_db = {s.name: s for s in load_sensors(sensor_dir)}
+        sdef = sensors_db["Echodyne EchoGuard"]
+        spl = SensorPlacement(
+            sensor_name="Echodyne EchoGuard",
+            position_x=500050.0,
+            position_y=6100050.0,
+            bearing_deg=0.0,
+        )
+        cost_grid = build_detection_cost_grid(site, [(sdef, spl)], altitude_bands_m=[50.0])
+        traj = _make_drone_trajectory()
+        result_obj = _make_trajectory_result()
+        cx = site.origin_x + site.cols * site.resolution / 2.0
+        cy = site.origin_y - site.rows * site.resolution / 2.0
+        out = tmp_path / "adv_nonzero.png"
+        render_adversarial_map(site, coverage, cost_grid, traj, result_obj, (cx, cy), out)
+        assert out.exists()
