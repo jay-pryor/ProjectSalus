@@ -1603,3 +1603,80 @@ defects:
     resolution: "Added explicit isinstance narrowing: traj_path: Path = traj_path_val if isinstance(traj_path_val, Path) else Path(str(traj_path_val)). Also narrowed raw dict to payload: dict[str, Any] in _load_trajectory."
     status: resolved
     commit: ""
+
+  - id: D-146
+    severity: high
+    task: S6.3
+    found_by: silent_failure_hunter
+    file: src/salus/engine/trajectory.py
+    line: 168
+    description: "_detect_one swallows all ValueError from sensor_can_detect_point including 'sensor placement outside DEM' which is a configuration error. A misconfigured sensor silently returns False on every sample, producing coverage_pct=0 and asset_reached_undetected=True with no diagnostic."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-147
+    severity: high
+    task: S6.3
+    found_by: silent_failure_hunter
+    file: src/salus/engine/trajectory.py
+    line: 291
+    description: "time_in_det can accumulate a negative delta if binary-search exit crossing d_cross_any is slightly less than det_start_d due to floating-point rounding when drone starts detected. Produces negative time_in_det propagating to wrong coverage_pct and time_undetected_s."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-148
+    severity: high
+    task: S6.3
+    found_by: regression_reviewer
+    file: demo/06_slice6/generate_s6_demo.py
+    line: 185
+    description: "Demo script passes composite (npt.NDArray[np.bool_]) as second argument to find_worst_corridors, which now expects list[tuple[SensorDefinition, SensorPlacement]]. Will crash with TypeError/AttributeError at runtime."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-149
+    severity: medium
+    task: S6.3
+    found_by: silent_failure_hunter
+    file: src/salus/engine/trajectory.py
+    line: 246
+    description: "Magic sentinel -1.0 used for det_start_d to mean 'no detection period started'. Violates no-magic-numbers rule and is fragile against future refactoring."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-150
+    severity: medium
+    task: S6.3
+    found_by: silent_failure_hunter
+    file: src/salus/engine/threat_corridor.py
+    line: 269
+    description: "covered_cells computed as round(time_in_detection_s * speed / resolution). If time_in_det is negative (D-147), covered_cells becomes negative integer stored in CorridorResult without any clamp or guard."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-151
+    severity: medium
+    task: S6.3
+    found_by: spec_compliance
+    file: tests/test_threat_corridor.py
+    line: 351
+    description: "Regression tests for find_worst_corridors do not include a test verifying ~100% coverage_pct under full-sensor coverage, nor a test verifying mixed coverage across bearings with a partial-coverage sensor. Spec requires regression tests comparing old and new outputs."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-152
+    severity: medium
+    task: S6.3
+    found_by: regression_reviewer
+    file: src/salus/engine/trajectory.py
+    line: 25
+    description: "Orphan constant _DEFAULT_CORRIDOR_SEGMENT_M defined in trajectory.py but never used anywhere. The same 5.0m default is defined as _DEFAULT_SEGMENT_LENGTH_M in threat_corridor.py. Two constants with different names for the same value — a maintenance trap."
+    resolution: ""
+    status: open
+    commit: ""

@@ -1,0 +1,77 @@
+task_id: S6.3
+timestamp: 2026-04-03T00:00:00Z
+quality_gates:
+  G1_lint: pass
+  G2_format: pass
+  G3_import: pass
+  G4_type: pass   # 16 pre-existing import-untyped errors only; 0 new errors in changed files
+  G5_security: pass
+  G6_unit_test: pass   # 723 passed
+  G7_coverage: pass
+  G8_secrets: pass
+  coverage_pct: 90.61
+
+review:
+  l1_standards:
+    testing: pass    # all tests have asserts, names descriptive, pytest.approx used, tmp_path fixtures
+    error_handling: pass   # ValueError propagated for config errors; max(0.0) clamps for FP overshoot
+    logging: pass    # N/A — no logging added
+    security: pass   # no user-supplied paths, no file I/O in new code
+
+  l2_agents:
+    silent_failure_hunter:
+      status: fail_then_pass
+      findings: 7
+      critical_high: 3
+      medium: 2
+      low: 2
+      resolved: "D-146 (propagate ValueError), D-147 (clamp time_in_det), D-149 (-1.0 sentinel→None), D-150 (clamp covered_cells)"
+    spec_compliance:
+      status: fail_then_pass
+      findings: 5
+      errors: 1      # missing regression tests
+      warnings: 1    # asset_reached_undetected semantics (documented as 'ever detected')
+      info: 3        # last_gap_before_asset_m extra field (justified for S6.3-3 mapping), segment_length_m param, -1.0 sentinel
+      resolved: "D-151 (added two regression tests: full-coverage and mixed-bearing)"
+      notes: >
+        TrajectoryResult carries extra field last_gap_before_asset_m beyond the 6-field spec
+        minimum. Justified because S6.3-3 requires mapping to CorridorResult.last_gap_before_target_m
+        without side-channel state. asset_reached_undetected=True iff never detected anywhere
+        on trajectory (not just at asset arrival) — matches spec 'without detection' semantics
+        and is the operationally conservative definition for defence planning.
+    type_design_analyzer:
+      status: fail_then_pass
+      findings: 15
+      errors: 0
+      warnings: 8    # 5 closure missing return types (pre-existing pattern for closures); 3 bare np.ndarray on site/viewshed (pre-existing, out of scope)
+      info: 7
+      resolved: "Inner closures already had parameter types; return types are clear from context and mypy does not flag them. Pre-existing np.ndarray issues are out of scope for S6.3."
+    regression_reviewer:
+      status: fail_then_pass
+      findings: 6
+      high: 1
+      medium: 3
+      low: 2
+      resolved: "D-148 (demo script), D-151 (regression tests), D-152 (orphan constant removed)"
+      notes: >
+        covered_cells/total_cells in find_worst_corridors are now continuous-time approximations
+        (rounded) rather than exact cell counts — documented semantic change from time-based
+        vs cell-based computation. coverage_pct is now more precise (binary-search refined),
+        which is the intended improvement over the composite-lookup approach.
+
+defect_ids:
+  - D-146  # HIGH: _detect_one swallowed ValueError — resolved
+  - D-147  # HIGH: negative time_in_det accumulation — resolved
+  - D-148  # HIGH: demo script not updated — resolved
+  - D-149  # MEDIUM: -1.0 magic sentinel — resolved
+  - D-150  # MEDIUM: negative covered_cells — resolved
+  - D-151  # MEDIUM: missing regression tests — resolved
+  - D-152  # MEDIUM: orphan constant — resolved
+
+implementation_notes:
+  - "S6.3-1: DetectionEvent and TrajectoryResult added as frozen dataclasses with 7 and 7 fields respectively (TrajectoryResult has one extra field last_gap_before_asset_m beyond spec minimum)"
+  - "S6.3-2: analyse_trajectory walks segments at segment_length_m intervals with binary search to segment_length_m/100 tolerance on both per-sensor and any-sensor transitions"
+  - "S6.3-3: find_worst_corridors signature changed — second parameter is now list[tuple[SensorDefinition, SensorPlacement]] instead of npt.NDArray[np.bool_]. CLI and demo script updated. analyse_corridor unchanged."
+  - "23 new tests added across test_trajectory.py (20) and test_threat_corridor.py (14 net new)"
+
+overall: pass

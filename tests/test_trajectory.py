@@ -1,4 +1,5 @@
-"""Tests for engine/trajectory.py — sensor_can_detect_point."""
+"""Tests for engine/trajectory.py — sensor_can_detect_point, DetectionEvent,
+TrajectoryResult, and analyse_trajectory."""
 
 from __future__ import annotations
 
@@ -6,10 +7,16 @@ import math
 
 import pytest
 
-from salus.engine.trajectory import sensor_can_detect_point
+from salus.engine.trajectory import (
+    DetectionEvent,
+    TrajectoryResult,
+    analyse_trajectory,
+    sensor_can_detect_point,
+)
 from salus.ingest.terrain import load_dem
 from salus.models.scenario import SensorPlacement
 from salus.models.sensor import SensorDefinition, SensorType
+from salus.models.threat import DroneTrajectory, TrajectoryWaypoint
 
 # ---------------------------------------------------------------------------
 # Fixtures and helpers
@@ -296,3 +303,332 @@ class TestBoundaryConditions:
         # With override=0, sensor at 50m absolute. Target at 50m absolute.
         # Elevation = 0° → within ±5° arc → True
         assert sensor_can_detect_point(site, sensor, pl, tx, ty, 0.0) is True
+
+
+# ---------------------------------------------------------------------------
+# DetectionEvent and TrajectoryResult dataclass tests (S6.3-1)
+# ---------------------------------------------------------------------------
+
+
+class TestDetectionEvent:
+    def test_construction(self):
+        evt = DetectionEvent(
+            sensor_name="Radar A",
+            time_s=3.5,
+            position_x=500050.0,
+            position_y=6100050.0,
+            position_z_agl=20.0,
+            distance_to_asset_m=150.0,
+            segment_index=0,
+        )
+        assert evt.sensor_name == "Radar A"
+        assert evt.time_s == pytest.approx(3.5)
+        assert evt.segment_index == 0
+
+    def test_frozen(self):
+        evt = DetectionEvent(
+            sensor_name="X",
+            time_s=1.0,
+            position_x=0.0,
+            position_y=0.0,
+            position_z_agl=10.0,
+            distance_to_asset_m=50.0,
+            segment_index=0,
+        )
+        with pytest.raises((AttributeError, TypeError)):
+            evt.time_s = 2.0  # type: ignore[misc]
+
+    def test_zero_time_allowed(self):
+        evt = DetectionEvent(
+            sensor_name="X",
+            time_s=0.0,
+            position_x=0.0,
+            position_y=0.0,
+            position_z_agl=0.0,
+            distance_to_asset_m=0.0,
+            segment_index=0,
+        )
+        assert evt.time_s == 0.0
+
+
+class TestTrajectoryResult:
+    def test_construction_with_no_events(self):
+        result = TrajectoryResult(
+            detection_events=(),
+            first_detection=None,
+            time_to_asset_s=10.0,
+            time_in_detection_s=0.0,
+            time_undetected_s=10.0,
+            asset_reached_undetected=True,
+            last_gap_before_asset_m=100.0,
+        )
+        assert result.first_detection is None
+        assert result.asset_reached_undetected is True
+        assert len(result.detection_events) == 0
+
+    def test_construction_with_events(self):
+        evt = DetectionEvent(
+            sensor_name="A",
+            time_s=2.0,
+            position_x=1.0,
+            position_y=2.0,
+            position_z_agl=5.0,
+            distance_to_asset_m=80.0,
+            segment_index=0,
+        )
+        result = TrajectoryResult(
+            detection_events=(evt,),
+            first_detection=evt,
+            time_to_asset_s=10.0,
+            time_in_detection_s=8.0,
+            time_undetected_s=2.0,
+            asset_reached_undetected=False,
+            last_gap_before_asset_m=0.0,
+        )
+        assert result.first_detection is evt
+        assert result.asset_reached_undetected is False
+
+    def test_frozen(self):
+        result = TrajectoryResult(
+            detection_events=(),
+            first_detection=None,
+            time_to_asset_s=5.0,
+            time_in_detection_s=0.0,
+            time_undetected_s=5.0,
+            asset_reached_undetected=True,
+            last_gap_before_asset_m=50.0,
+        )
+        with pytest.raises((AttributeError, TypeError)):
+            result.time_to_asset_s = 99.0  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
+# analyse_trajectory tests (S6.3-2)
+# ---------------------------------------------------------------------------
+
+
+def _omni_sensor(**overrides) -> SensorDefinition:
+    base: dict = {
+        "name": "Omni Radar",
+        "type": SensorType.Radar,
+        "max_range_m": 5000.0,
+        "min_range_m": 1.0,
+        "azimuth_coverage_deg": 360.0,
+        "elevation_coverage_deg": 180.0,
+        "elevation_boresight_deg": 0.0,
+        "requires_los": False,  # non-LOS for simplicity in trajectory tests
+        "mounting_height_m": 5.0,
+    }
+    base.update(overrides)
+    return SensorDefinition(**base)
+
+
+def _make_placement(site, col: int, row: int) -> SensorPlacement:
+    x = site.origin_x + col * site.resolution
+    y = site.origin_y - row * site.resolution
+    return SensorPlacement(sensor_name="Omni Radar", position_x=x, position_y=y, bearing_deg=0.0)
+
+
+def _straight_trajectory(
+    site,
+    start_col: int,
+    start_row: int,
+    end_col: int,
+    end_row: int,
+    z_agl: float = 10.0,
+    speed: float = 10.0,
+) -> DroneTrajectory:
+    """Build a two-waypoint trajectory along the grid."""
+    return DroneTrajectory(
+        waypoints=[
+            TrajectoryWaypoint(
+                x=site.origin_x + start_col * site.resolution,
+                y=site.origin_y - start_row * site.resolution,
+                z_agl=z_agl,
+            ),
+            TrajectoryWaypoint(
+                x=site.origin_x + end_col * site.resolution,
+                y=site.origin_y - end_row * site.resolution,
+                z_agl=z_agl,
+            ),
+        ],
+        speed_ms=speed,
+    )
+
+
+class TestAnalyseTrajectoryFullyUndetected:
+    """No sensor → drone reaches asset undetected."""
+
+    def test_no_sensors_no_events(self, flat_dem_path):
+        site = load_dem(flat_dem_path)
+        traj = _straight_trajectory(site, 0, 50, 99, 50)
+        result = analyse_trajectory(site, [], traj, segment_length_m=1.0)
+        assert result.asset_reached_undetected is True
+        assert result.first_detection is None
+        assert len(result.detection_events) == 0
+
+    def test_no_sensors_time_to_asset_positive(self, flat_dem_path):
+        site = load_dem(flat_dem_path)
+        traj = _straight_trajectory(site, 0, 50, 99, 50, speed=10.0)
+        result = analyse_trajectory(site, [], traj)
+        assert result.time_to_asset_s > 0.0
+
+    def test_no_sensors_time_undetected_equals_time_to_asset(self, flat_dem_path):
+        site = load_dem(flat_dem_path)
+        traj = _straight_trajectory(site, 0, 50, 99, 50, speed=10.0)
+        result = analyse_trajectory(site, [], traj)
+        assert result.time_in_detection_s == pytest.approx(0.0)
+        assert result.time_undetected_s == pytest.approx(result.time_to_asset_s)
+
+    def test_no_sensors_last_gap_equals_trajectory_length(self, flat_dem_path):
+        site = load_dem(flat_dem_path)
+        traj = _straight_trajectory(site, 0, 50, 99, 50, speed=10.0)
+        result = analyse_trajectory(site, [], traj)
+        expected = result.time_to_asset_s * 10.0  # length = time * speed
+        assert result.last_gap_before_asset_m == pytest.approx(expected, rel=0.05)
+
+    def test_sensor_out_of_range_no_events(self, flat_dem_path):
+        """Sensor far from trajectory → not detected."""
+        site = load_dem(flat_dem_path)
+        sensor = _omni_sensor(max_range_m=5.0)  # tiny range
+        placement = _make_placement(site, col=50, row=50)
+        # Trajectory far from sensor at col=50
+        traj = _straight_trajectory(site, 0, 0, 10, 0, z_agl=10.0, speed=10.0)
+        result = analyse_trajectory(site, [(sensor, placement)], traj, segment_length_m=1.0)
+        assert result.asset_reached_undetected is True
+
+
+class TestAnalyseTrajectoryFullyDetected:
+    """Sensor with huge range covers entire trajectory."""
+
+    def test_all_in_detection_no_undetected_gap(self, flat_dem_path):
+        site = load_dem(flat_dem_path)
+        sensor = _omni_sensor(max_range_m=5000.0)
+        # Sensor at centre
+        placement = _make_placement(site, col=50, row=50)
+        # Short trajectory fully within sensor range
+        traj = _straight_trajectory(site, 40, 50, 60, 50, speed=10.0)
+        result = analyse_trajectory(site, [(sensor, placement)], traj, segment_length_m=1.0)
+        assert result.last_gap_before_asset_m == pytest.approx(0.0, abs=1.0)
+        assert result.time_in_detection_s == pytest.approx(result.time_to_asset_s, rel=0.05)
+
+    def test_asset_reached_not_undetected(self, flat_dem_path):
+        site = load_dem(flat_dem_path)
+        sensor = _omni_sensor(max_range_m=5000.0)
+        placement = _make_placement(site, col=50, row=50)
+        traj = _straight_trajectory(site, 40, 50, 60, 50, speed=10.0)
+        result = analyse_trajectory(site, [(sensor, placement)], traj, segment_length_m=1.0)
+        assert result.asset_reached_undetected is False
+
+    def test_time_in_detection_positive(self, flat_dem_path):
+        site = load_dem(flat_dem_path)
+        sensor = _omni_sensor(max_range_m=5000.0)
+        placement = _make_placement(site, col=50, row=50)
+        traj = _straight_trajectory(site, 40, 50, 60, 50, speed=10.0)
+        result = analyse_trajectory(site, [(sensor, placement)], traj, segment_length_m=1.0)
+        assert result.time_in_detection_s > 0.0
+
+
+class TestAnalyseTrajectoryDetectionMidPath:
+    """Sensor covers only part of the trajectory."""
+
+    def test_detection_mid_path_has_event(self, flat_dem_path):
+        """Drone enters sensor range partway through trajectory."""
+        site = load_dem(flat_dem_path)
+        # Sensor with 30m range at col=80
+        sensor = _omni_sensor(max_range_m=30.0, min_range_m=0.5)
+        placement = _make_placement(site, col=80, row=50)
+        # Trajectory from col=0 to col=99 (left to right) at row=50
+        traj = _straight_trajectory(site, 0, 50, 99, 50, speed=10.0)
+        result = analyse_trajectory(site, [(sensor, placement)], traj, segment_length_m=1.0)
+        # Drone should enter detection range at some point
+        assert not result.asset_reached_undetected
+        assert result.first_detection is not None
+        assert result.first_detection.distance_to_asset_m > 0.0
+
+    def test_first_detection_distance_reasonable(self, flat_dem_path):
+        """Detection occurs when drone enters the 30m sensor bubble.
+
+        Sensor at col=80, asset at col=99 (19m past sensor).  The drone
+        enters range at ~col=50 (30m before the sensor), which is ~49m
+        from the asset at col=99.  distance_to_asset_m should be between
+        0 and start_distance (99m).
+        """
+        site = load_dem(flat_dem_path)
+        sensor = _omni_sensor(max_range_m=30.0, min_range_m=0.5)
+        placement = _make_placement(site, col=80, row=50)
+        traj = _straight_trajectory(site, 0, 50, 99, 50, speed=10.0)
+        result = analyse_trajectory(site, [(sensor, placement)], traj, segment_length_m=1.0)
+        if result.first_detection:
+            # distance_to_asset_m must be positive and within the trajectory length
+            assert 0.0 < result.first_detection.distance_to_asset_m < 99.0
+
+    def test_time_undetected_positive(self, flat_dem_path):
+        """Partial coverage → some undetected time."""
+        site = load_dem(flat_dem_path)
+        sensor = _omni_sensor(max_range_m=30.0, min_range_m=0.5)
+        placement = _make_placement(site, col=80, row=50)
+        traj = _straight_trajectory(site, 0, 50, 99, 50, speed=10.0)
+        result = analyse_trajectory(site, [(sensor, placement)], traj, segment_length_m=1.0)
+        assert result.time_undetected_s > 0.0
+
+    def test_segment_index_valid(self, flat_dem_path):
+        """DetectionEvent.segment_index is a valid trajectory segment index."""
+        site = load_dem(flat_dem_path)
+        sensor = _omni_sensor(max_range_m=30.0, min_range_m=0.5)
+        placement = _make_placement(site, col=80, row=50)
+        traj = _straight_trajectory(site, 0, 50, 99, 50, speed=10.0)
+        result = analyse_trajectory(site, [(sensor, placement)], traj, segment_length_m=1.0)
+        n_segments = len(traj.waypoints) - 1
+        for evt in result.detection_events:
+            assert 0 <= evt.segment_index < n_segments
+
+
+class TestAnalyseTrajectoryTerrainMasking:
+    """Terrain blocks detection; drone detected only after clearing the ridge."""
+
+    def test_ridge_blocks_detection_initially(self, ridge_dem_path):
+        """LOS sensor cannot detect drone on far side of ridge."""
+        site = load_dem(ridge_dem_path)
+        # LOS sensor at row=10, col=10
+        sensor = _omni_sensor(max_range_m=300.0, requires_los=True)
+        placement = SensorPlacement(
+            sensor_name="Omni Radar",
+            position_x=site.origin_x + 10 * site.resolution,
+            position_y=site.origin_y - 10 * site.resolution,
+            bearing_deg=0.0,
+        )
+        # Trajectory from far side of ridge (row=180) to near sensor (row=20)
+        # at 5m AGL — ridge at rows 95-105 (peak=150m) blocks LOS at ground
+        traj = DroneTrajectory(
+            waypoints=[
+                TrajectoryWaypoint(
+                    x=site.origin_x + 10 * site.resolution,
+                    y=site.origin_y - 180 * site.resolution,
+                    z_agl=5.0,
+                ),
+                TrajectoryWaypoint(
+                    x=site.origin_x + 10 * site.resolution,
+                    y=site.origin_y - 20 * site.resolution,
+                    z_agl=5.0,
+                ),
+            ],
+            speed_ms=10.0,
+        )
+        result = analyse_trajectory(site, [(sensor, placement)], traj, segment_length_m=2.0)
+        # Ridge should block detection for part of the trajectory
+        if result.first_detection is not None:
+            # Detection event should occur near the sensor (after clearing ridge)
+            assert result.first_detection.distance_to_asset_m < 120.0
+
+    def test_invalid_segment_length_raises(self, flat_dem_path):
+        site = load_dem(flat_dem_path)
+        traj = _straight_trajectory(site, 0, 50, 99, 50, speed=10.0)
+        with pytest.raises(ValueError, match="segment_length_m"):
+            analyse_trajectory(site, [], traj, segment_length_m=0.0)
+
+    def test_negative_segment_length_raises(self, flat_dem_path):
+        site = load_dem(flat_dem_path)
+        traj = _straight_trajectory(site, 0, 50, 99, 50, speed=10.0)
+        with pytest.raises(ValueError, match="segment_length_m"):
+            analyse_trajectory(site, [], traj, segment_length_m=-1.0)

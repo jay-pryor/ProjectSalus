@@ -10,6 +10,8 @@ from salus.engine.threat_corridor import (
     analyse_corridor,
     find_worst_corridors,
 )
+from salus.models.scenario import SensorPlacement
+from salus.models.sensor import SensorDefinition, SensorType
 from salus.models.site import SiteModel
 from salus.models.threat import ThreatCorridor, ThreatProfile
 
@@ -317,78 +319,148 @@ class TestGuards:
 
 
 # ---------------------------------------------------------------------------
-# find_worst_corridors (S6-3)
+# find_worst_corridors (S6.3-3) — 3D sensor-based sweep
 # ---------------------------------------------------------------------------
+
+# Shared sensor helpers for find_worst_corridors tests.
+
+
+def _omni_sensor(name: str = "Test Omni", max_range_m: float = 1000.0) -> SensorDefinition:
+    return SensorDefinition(
+        name=name,
+        type=SensorType.Radar,
+        max_range_m=max_range_m,
+        min_range_m=0.5,
+        azimuth_coverage_deg=360.0,
+        elevation_coverage_deg=180.0,
+        elevation_boresight_deg=0.0,
+        requires_los=False,
+        mounting_height_m=5.0,
+    )
+
+
+def _centre_placement(site: SiteModel, name: str = "Test Omni") -> SensorPlacement:
+    return SensorPlacement(
+        sensor_name=name,
+        position_x=_CENTRE_X,
+        position_y=_CENTRE_Y,
+        bearing_deg=0.0,
+    )
 
 
 class TestFindWorstCorridors:
-    def test_returns_list_of_corridor_results(self, site_10m, all_covered, threat_fast):
-        results = find_worst_corridors(site_10m, all_covered, threat_fast, (_CENTRE_X, _CENTRE_Y))
+    """Regression and behaviour tests for the refactored 3D corridor sweep."""
+
+    def test_returns_list_of_corridor_results(self, site_10m, threat_fast):
+        """Returns a list of CorridorResult objects."""
+        results = find_worst_corridors(site_10m, [], threat_fast, (_CENTRE_X, _CENTRE_Y))
         assert isinstance(results, list)
         assert all(isinstance(r, CorridorResult) for r in results)
 
-    def test_default_num_bearings_is_36(self, site_10m, all_covered, threat_fast):
-        results = find_worst_corridors(site_10m, all_covered, threat_fast, (_CENTRE_X, _CENTRE_Y))
+    def test_default_num_bearings_is_36(self, site_10m, threat_fast):
+        results = find_worst_corridors(site_10m, [], threat_fast, (_CENTRE_X, _CENTRE_Y))
         assert len(results) == 36
 
-    def test_custom_num_bearings(self, site_10m, all_covered, threat_fast):
+    def test_custom_num_bearings(self, site_10m, threat_fast):
         results = find_worst_corridors(
-            site_10m, all_covered, threat_fast, (_CENTRE_X, _CENTRE_Y), num_bearings=8
+            site_10m, [], threat_fast, (_CENTRE_X, _CENTRE_Y), num_bearings=8
         )
         assert len(results) == 8
 
-    def test_sorted_ascending_by_coverage_pct(self, site_10m, all_covered, threat_fast):
-        results = find_worst_corridors(site_10m, all_covered, threat_fast, (_CENTRE_X, _CENTRE_Y))
+    def test_sorted_ascending_by_coverage_pct(self, site_10m, threat_fast):
+        """Results must be sorted worst (lowest coverage) first."""
+        results = find_worst_corridors(site_10m, [], threat_fast, (_CENTRE_X, _CENTRE_Y))
         pcts = [r.coverage_pct for r in results]
         assert pcts == sorted(pcts)
 
-    def test_worst_case_is_first(self, site_10m, none_covered, threat_fast):
-        # With no coverage, all corridors have 0% — worst is still first.
-        results = find_worst_corridors(site_10m, none_covered, threat_fast, (_CENTRE_X, _CENTRE_Y))
-        assert results[0].coverage_pct <= results[-1].coverage_pct
-
-    def test_all_covered_all_100_pct(self, site_10m, all_covered, threat_fast):
-        results = find_worst_corridors(site_10m, all_covered, threat_fast, (_CENTRE_X, _CENTRE_Y))
+    def test_no_sensors_all_zero_pct(self, site_10m, threat_fast):
+        """No sensors → 0% detection on every corridor."""
+        results = find_worst_corridors(site_10m, [], threat_fast, (_CENTRE_X, _CENTRE_Y))
         for r in results:
-            assert r.coverage_pct == pytest.approx(100.0)
+            assert r.coverage_pct == pytest.approx(0.0)
 
-    def test_bearings_cover_full_360(self, site_10m, all_covered, threat_fast):
+    def test_no_sensors_first_detection_none(self, site_10m, threat_fast):
+        """No sensors → no first detection distance on any corridor."""
+        results = find_worst_corridors(site_10m, [], threat_fast, (_CENTRE_X, _CENTRE_Y))
+        for r in results:
+            assert r.first_detection_distance_m is None
+
+    def test_large_sensor_coverage_positive(self, site_10m, threat_fast):
+        """Omnidirectional sensor with huge range → positive coverage on corridors."""
+        sensor = _omni_sensor(max_range_m=5000.0)
+        placement = _centre_placement(site_10m)
         results = find_worst_corridors(
-            site_10m, all_covered, threat_fast, (_CENTRE_X, _CENTRE_Y), num_bearings=4
+            site_10m, [(sensor, placement)], threat_fast, (_CENTRE_X, _CENTRE_Y)
+        )
+        assert any(r.coverage_pct > 0.0 for r in results)
+
+    def test_bearings_cover_full_360(self, site_10m, threat_fast):
+        """Generated bearings span all 4 quadrants."""
+        results = find_worst_corridors(
+            site_10m, [], threat_fast, (_CENTRE_X, _CENTRE_Y), num_bearings=4
         )
         bearings = {r.corridor.bearing_deg for r in results}
         assert len(bearings) == 4
 
-    def test_threat_name_in_all_results(self, site_10m, all_covered, threat_fast):
-        results = find_worst_corridors(site_10m, all_covered, threat_fast, (_CENTRE_X, _CENTRE_Y))
+    def test_threat_name_in_all_results(self, site_10m, threat_fast):
+        results = find_worst_corridors(site_10m, [], threat_fast, (_CENTRE_X, _CENTRE_Y))
         for r in results:
             assert r.threat_name == threat_fast.name
 
-    def test_partial_coverage_produces_mixed_results(self, site_10m, threat_fast):
-        # Cover only the east half: corridors from the east should show higher
-        # coverage than corridors from the west.
-        partial = np.zeros((site_10m.rows, site_10m.cols), dtype=bool)
-        partial[:, 50:] = True
-        results = find_worst_corridors(
-            site_10m, partial, threat_fast, (_CENTRE_X, _CENTRE_Y), num_bearings=36
-        )
-        pcts = [r.coverage_pct for r in results]
-        assert min(pcts) < max(pcts)
-
-    def test_zero_num_bearings_raises(self, site_10m, all_covered, threat_fast):
+    def test_zero_num_bearings_raises(self, site_10m, threat_fast):
         with pytest.raises(ValueError, match="num_bearings"):
-            find_worst_corridors(
-                site_10m, all_covered, threat_fast, (_CENTRE_X, _CENTRE_Y), num_bearings=0
-            )
+            find_worst_corridors(site_10m, [], threat_fast, (_CENTRE_X, _CENTRE_Y), num_bearings=0)
 
-    def test_negative_num_bearings_raises(self, site_10m, all_covered, threat_fast):
+    def test_negative_num_bearings_raises(self, site_10m, threat_fast):
         with pytest.raises(ValueError, match="num_bearings"):
-            find_worst_corridors(
-                site_10m, all_covered, threat_fast, (_CENTRE_X, _CENTRE_Y), num_bearings=-1
-            )
+            find_worst_corridors(site_10m, [], threat_fast, (_CENTRE_X, _CENTRE_Y), num_bearings=-1)
 
-    def test_num_bearings_one_returns_single_result(self, site_10m, all_covered, threat_fast):
+    def test_num_bearings_one_returns_single_result(self, site_10m, threat_fast):
         results = find_worst_corridors(
-            site_10m, all_covered, threat_fast, (_CENTRE_X, _CENTRE_Y), num_bearings=1
+            site_10m, [], threat_fast, (_CENTRE_X, _CENTRE_Y), num_bearings=1
         )
         assert len(results) == 1
+
+    def test_inf_protected_point_raises(self, site_10m, threat_fast):
+        with pytest.raises(ValueError, match="finite"):
+            find_worst_corridors(site_10m, [], threat_fast, (float("inf"), _CENTRE_Y))
+
+    def test_full_coverage_sensor_near_100_pct(self, site_10m, threat_fast):
+        """Regression: sensor covering entire site → all corridors near 100%.
+
+        Equivalent to old test_all_covered_all_100_pct with composite array.
+        """
+        sensor = _omni_sensor(max_range_m=10000.0)
+        placement = _centre_placement(site_10m)
+        results = find_worst_corridors(
+            site_10m, [(sensor, placement)], threat_fast, (_CENTRE_X, _CENTRE_Y)
+        )
+        for r in results:
+            assert r.coverage_pct > 90.0, (
+                f"Expected >90% with full-range sensor, got {r.coverage_pct:.1f}% "
+                f"for bearing {r.corridor.bearing_deg}"
+            )
+
+    def test_partial_coverage_mixed_across_bearings(self, site_10m, threat_fast):
+        """Regression: offset sensor → coverage spread across bearings.
+
+        Equivalent to old test_partial_coverage_produces_mixed_results.
+        """
+        sensor = _omni_sensor(name="Side Sensor", max_range_m=200.0)
+        placement = SensorPlacement(
+            sensor_name="Side Sensor",
+            position_x=_ORIGIN_X + 10 * _RESOLUTION,
+            position_y=_CENTRE_Y,
+            bearing_deg=0.0,
+        )
+        results = find_worst_corridors(
+            site_10m,
+            [(sensor, placement)],
+            threat_fast,
+            (_CENTRE_X, _CENTRE_Y),
+            num_bearings=36,
+        )
+        pcts = [r.coverage_pct for r in results]
+        assert min(pcts) < max(pcts), (
+            f"Expected coverage spread across bearings, got uniform {pcts[0]:.1f}%"
+        )

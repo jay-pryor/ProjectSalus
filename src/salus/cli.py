@@ -588,7 +588,8 @@ def simulate(
         for threat in matched_threats:
             click.echo(f"\n  Threat: {threat.name}")
             try:
-                results = find_worst_corridors(site, composite, threat, sc.protected_point)
+                all_pairs = [pair for pairs in placements_by_type.values() for pair in pairs]
+                results = find_worst_corridors(site, all_pairs, threat, sc.protected_point)
             except Exception as exc:
                 click.echo(
                     f"  Warning: corridor analysis failed for '{threat.name}': {exc}",

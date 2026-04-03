@@ -1,7 +1,7 @@
 """Threat corridor coverage analysis.
 
-Samples the composite coverage map along a straight-line drone approach
-corridor and computes detection metrics.
+Provides both 2D composite-based corridor analysis (analyse_corridor) and
+the 3D sensor-based worst-corridor sweep (find_worst_corridors).
 """
 
 from __future__ import annotations
@@ -12,14 +12,20 @@ from dataclasses import dataclass
 import numpy as np
 import numpy.typing as npt
 
+from salus.engine.trajectory import analyse_trajectory
+from salus.models.scenario import SensorPlacement
+from salus.models.sensor import SensorDefinition
 from salus.models.site import SiteModel
-from salus.models.threat import ThreatCorridor, ThreatProfile
+from salus.models.threat import DroneTrajectory, ThreatCorridor, ThreatProfile, TrajectoryWaypoint
 
 # Minimum number of samples along a corridor (includes the protected point itself).
 _MIN_SAMPLES: int = 1
 
 # Default number of compass bearings to sweep in find_worst_corridors.
 _DEFAULT_NUM_BEARINGS: int = 36  # every 10 degrees
+
+# Default segment length for the 3D corridor sweep (planning fidelity).
+_DEFAULT_SEGMENT_LENGTH_M: float = 5.0
 
 
 @dataclass(frozen=True)
@@ -172,29 +178,34 @@ def analyse_corridor(
 
 def find_worst_corridors(
     site: SiteModel,
-    composite_coverage: npt.NDArray[np.bool_],
+    sensor_placements: list[tuple[SensorDefinition, SensorPlacement]],
     threat: ThreatProfile,
     protected_point: tuple[float, float],
     num_bearings: int = _DEFAULT_NUM_BEARINGS,
+    segment_length_m: float = _DEFAULT_SEGMENT_LENGTH_M,
 ) -> list[CorridorResult]:
     """Test all approach bearings and return corridors ranked worst-to-best.
 
-    Generates ``num_bearings`` evenly-spaced compass bearings covering the full
-    360-degree threat space, runs ``analyse_corridor`` for each, and returns the
-    results sorted by ``coverage_pct`` ascending (lowest coverage first, i.e.
-    worst-case approach first).
+    Constructs a two-waypoint ``DroneTrajectory`` for each bearing and
+    delegates to ``analyse_trajectory`` for 3D sensor-based detection.
+    Results are sorted by ``coverage_pct`` ascending (lowest coverage first,
+    i.e. worst-case approach first).
 
-    The corridor for each bearing uses ``threat.typical_altitude_m`` as altitude
-    and a start distance of half the site's shortest diagonal as a reasonable
-    default, clamped to a minimum of ``site.resolution``.
+    The corridor for each bearing runs from a start point at
+    ``start_distance_m`` in the reverse-bearing direction, to the asset at
+    ``threat.typical_altitude_m`` AGL.  Start distance defaults to half the
+    site's shorter axis, clamped to a minimum of one grid cell.
 
     Args:
         site: Site model providing grid geometry and resolution.
-        composite_coverage: Boolean 2D array matching ``site.dem`` shape.
-        threat: Threat profile — provides altitude and speed for corridor setup.
+        sensor_placements: All active sensors as ``(SensorDefinition,
+            SensorPlacement)`` pairs.
+        threat: Threat profile — provides altitude and speed.
         protected_point: (x, y) CRS coordinates of the asset being protected.
         num_bearings: Number of evenly-spaced bearings to test (default 36 =
             every 10 degrees).  Must be >= 1.
+        segment_length_m: Sampling interval passed to ``analyse_trajectory``
+            (metres, default 5.0 for planning fidelity).
 
     Returns:
         List of ``CorridorResult`` sorted by ``coverage_pct`` ascending.
@@ -202,11 +213,15 @@ def find_worst_corridors(
         exactly ``num_bearings`` entries.
 
     Raises:
-        ValueError: If ``num_bearings`` < 1, or if ``composite_coverage`` fails
-            the guards in ``analyse_corridor``.
+        ValueError: If ``num_bearings`` < 1, or if ``protected_point``
+            contains non-finite coordinates.
     """
     if num_bearings < 1:
         raise ValueError(f"num_bearings must be >= 1, got {num_bearings}")
+
+    px, py = protected_point
+    if not (math.isfinite(px) and math.isfinite(py)):
+        raise ValueError(f"protected_point coordinates must be finite, got ({px}, {py})")
 
     # Default start distance: half the site's shorter axis, minimum 1 cell.
     min_axis_m = min(site.rows, site.cols) * site.resolution
@@ -214,16 +229,58 @@ def find_worst_corridors(
 
     step_deg = 360.0 / num_bearings
     results: list[CorridorResult] = []
+    speed = threat.max_speed_ms
+    altitude = threat.typical_altitude_m
 
     for i in range(num_bearings):
         bearing = (i * step_deg) % 360.0
+        bearing_rad = math.radians(bearing)
+        sin_b = math.sin(bearing_rad)
+        cos_b = math.cos(bearing_rad)
+
+        # Start point: distance from asset in the reverse-bearing direction.
+        start_x = px - sin_b * start_distance_m
+        start_y = py - cos_b * start_distance_m
+
+        traj = DroneTrajectory(
+            waypoints=[
+                TrajectoryWaypoint(x=start_x, y=start_y, z_agl=altitude),
+                TrajectoryWaypoint(x=px, y=py, z_agl=altitude),
+            ],
+            speed_ms=speed,
+        )
+        tr = analyse_trajectory(site, sensor_placements, traj, segment_length_m)
+
+        # Map TrajectoryResult → CorridorResult for backward compatibility.
         corridor = ThreatCorridor(
             bearing_deg=bearing,
-            altitude_m=threat.typical_altitude_m,
+            altitude_m=altitude,
             start_distance_m=start_distance_m,
         )
-        result = analyse_corridor(site, composite_coverage, corridor, threat, protected_point)
-        results.append(result)
+        coverage_pct = (
+            (tr.time_in_detection_s / tr.time_to_asset_s * 100.0)
+            if tr.time_to_asset_s > 0.0
+            else 0.0
+        )
+        first_detection_m: float | None = (
+            tr.first_detection.distance_to_asset_m if tr.first_detection else None
+        )
+        # Approximate cell counts from timing and resolution (clamped non-negative).
+        covered_cells: int = max(0, round(tr.time_in_detection_s * speed / site.resolution))
+        total_cells: int = max(0, round(tr.time_to_asset_s * speed / site.resolution))
+
+        results.append(
+            CorridorResult(
+                corridor=corridor,
+                threat_name=threat.name,
+                coverage_pct=coverage_pct,
+                first_detection_distance_m=first_detection_m,
+                last_gap_before_target_m=tr.last_gap_before_asset_m,
+                time_in_coverage_s=tr.time_in_detection_s,
+                covered_cells=covered_cells,
+                total_cells=total_cells,
+            )
+        )
 
     # Sort ascending by coverage_pct — worst (least covered) first.
     results.sort(key=lambda r: r.coverage_pct)
