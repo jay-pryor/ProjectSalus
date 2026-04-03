@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, field_validator
 _BEARING_MAX_DEG: float = 360.0  # exclusive upper bound for compass bearing
 _MIN_WIDTH_M: float = 1.0  # minimum corridor width in metres
 _MIN_DISTANCE_M: float = 0.0  # minimum corridor start distance in metres
+_MIN_WAYPOINTS: int = 2  # minimum waypoint count for a valid trajectory
 
 
 class EvasionCapability(StrEnum):
@@ -23,6 +24,74 @@ class EvasionCapability(StrEnum):
 
     advanced = "advanced"
     """Advanced evasion — RF-silent autonomous flight, terrain-masking, GPS-denied."""
+
+
+class TrajectoryWaypoint(BaseModel):
+    """A single 3D point in a drone trajectory.
+
+    Coordinates are in the scenario CRS (metres). ``z_agl`` is altitude
+    above ground level in metres.
+    """
+
+    x: float
+    """Easting in CRS units (metres)."""
+
+    y: float
+    """Northing in CRS units (metres)."""
+
+    z_agl: float
+    """Altitude above ground level in metres."""
+
+    @field_validator("x", "y")
+    @classmethod
+    def _coord_finite(cls, v: float) -> float:
+        if not math.isfinite(v):
+            raise ValueError(f"coordinate must be finite, got {v}")
+        return v
+
+    @field_validator("z_agl")
+    @classmethod
+    def _z_agl_valid(cls, v: float) -> float:
+        if not math.isfinite(v):
+            raise ValueError(f"z_agl must be finite, got {v}")
+        if v < 0.0:
+            raise ValueError(f"z_agl must be >= 0 (AGL altitude cannot be negative), got {v}")
+        return v
+
+
+class DroneTrajectory(BaseModel):
+    """A 3D piecewise-linear drone trajectory.
+
+    An ordered list of waypoints defines the path; each consecutive pair of
+    waypoints forms one linear segment. Curved or complex paths are
+    approximated by combining many shorter segments.
+
+    ``speed_ms`` is treated as constant along the entire trajectory. Segment
+    length during analysis is a runtime parameter passed to ``analyse_trajectory``,
+    not stored here.
+    """
+
+    waypoints: list[TrajectoryWaypoint]
+    """Ordered list of 3D waypoints. Must contain at least two points."""
+
+    speed_ms: float
+    """Constant drone speed along the trajectory in metres per second (> 0)."""
+
+    @field_validator("waypoints")
+    @classmethod
+    def _min_waypoints(cls, v: list[TrajectoryWaypoint]) -> list[TrajectoryWaypoint]:
+        if len(v) < _MIN_WAYPOINTS:
+            raise ValueError(
+                f"waypoints must contain at least {_MIN_WAYPOINTS} points, got {len(v)}"
+            )
+        return v
+
+    @field_validator("speed_ms")
+    @classmethod
+    def _speed_positive(cls, v: float) -> float:
+        if not math.isfinite(v) or v <= 0.0:
+            raise ValueError(f"speed_ms must be a finite value > 0, got {v}")
+        return v
 
 
 class ThreatProfile(BaseModel):

@@ -9,9 +9,52 @@ import yaml
 from pydantic import ValidationError
 
 from salus.models.scenario import ScenarioConfig
+from salus.models.threat import DroneTrajectory
 
 # Fields in the raw YAML dict that contain file paths needing resolution.
-_PATH_FIELDS: tuple[str, ...] = ("site_dem_path", "site_dsm_path", "boundary_path")
+_PATH_FIELDS: tuple[str, ...] = (
+    "site_dem_path",
+    "site_dsm_path",
+    "boundary_path",
+    "trajectory_path",
+)
+
+
+def _load_trajectory(path: Path) -> DroneTrajectory:
+    """Load a :class:`~salus.models.threat.DroneTrajectory` from a YAML file.
+
+    Args:
+        path: Absolute path to the trajectory YAML file.
+
+    Returns:
+        Validated :class:`~salus.models.threat.DroneTrajectory` instance.
+
+    Raises:
+        FileNotFoundError: If the trajectory file does not exist.
+        OSError: If the file cannot be read.
+        ValueError: If the YAML is invalid or fails model validation.
+    """
+    try:
+        with path.open(encoding="utf-8") as fh:
+            raw: Any = yaml.safe_load(fh)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Trajectory file not found: {path}")
+    except yaml.YAMLError as exc:
+        raise ValueError(f"Invalid YAML in trajectory file {path}: {exc}") from exc
+    except OSError as exc:
+        raise OSError(f"Cannot read trajectory file {path}: {exc}") from exc
+
+    if raw is None:
+        raise ValueError(f"Trajectory file is empty: {path}")
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"Trajectory file must be a YAML mapping, got {type(raw).__name__}: {path}"
+        )
+    payload: dict[str, Any] = raw
+    try:
+        return DroneTrajectory(**payload)
+    except (ValidationError, TypeError) as exc:
+        raise ValueError(f"Invalid trajectory configuration in {path}: {exc}") from exc
 
 
 def load_scenario(path: str | Path) -> ScenarioConfig:
@@ -57,6 +100,11 @@ def load_scenario(path: str | Path) -> ScenarioConfig:
     # Narrow the type once we know it is a dict.
     data: dict[str, Any] = raw
 
+    # Discard any literal 'trajectory' key that may appear in the YAML —
+    # the trajectory field is only populated by the loader via trajectory_path.
+    # A raw dict under 'trajectory' would bypass _load_trajectory's validation.
+    data.pop("trajectory", None)
+
     # Resolve relative paths against the scenario file's parent directory.
     scenario_dir = path.parent
     for field in _PATH_FIELDS:
@@ -68,6 +116,17 @@ def load_scenario(path: str | Path) -> ScenarioConfig:
                     f"got {type(field_val).__name__}: {path}"
                 )
             data[field] = (scenario_dir / str(field_val)).resolve()
+
+    # If a trajectory path is present, load the DroneTrajectory YAML now so
+    # the returned ScenarioConfig carries the parsed trajectory object.
+    # traj_path_val is a resolved Path set by the loop above — assert the type
+    # to narrow away Any from dict[str, Any].get().
+    traj_path_val = data.get("trajectory_path")
+    if traj_path_val is not None:
+        traj_path: Path = (
+            traj_path_val if isinstance(traj_path_val, Path) else Path(str(traj_path_val))
+        )
+        data["trajectory"] = _load_trajectory(traj_path)
 
     try:
         return ScenarioConfig(**data)

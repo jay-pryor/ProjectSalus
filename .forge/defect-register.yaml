@@ -1537,3 +1537,69 @@ defects:
     resolution: "Accepted as low risk given DEM extent constraints; resolution guard added for D-136 covers the zero-resolution edge case."
     status: deferred
     commit: ""
+
+  - id: D-140
+    severity: high
+    task: S6.2
+    found_by: silent_failure_hunter
+    file: src/salus/models/threat.py
+    line: 42
+    description: "TrajectoryWaypoint.z_agl validated for finiteness but not for >= 0. A negative AGL altitude passes model validation and flows into sensor_can_detect_point as tz_abs = target_dem_val + tz_agl, producing an absolute elevation below terrain with no error or warning."
+    resolution: "Split _coord_finite into separate validators; added _z_agl_valid that checks both finiteness and z_agl >= 0."
+    status: resolved
+    commit: ""
+
+  - id: D-141
+    severity: high
+    task: S6.2
+    found_by: silent_failure_hunter
+    file: src/salus/models/scenario.py
+    line: 144
+    description: "No model-level invariant enforcing that trajectory is populated when trajectory_path is non-None. A caller that constructs ScenarioConfig directly with trajectory_path set will silently get trajectory=None, causing downstream reads of sc.trajectory to be incorrect."
+    resolution: "Deferred — trajectory field is clearly documented as loader-set; typical usage goes through load_scenario which always populates it. Enforcing at model level would break direct ScenarioConfig construction in tests and CLI code."
+    status: deferred
+    commit: ""
+
+  - id: D-142
+    severity: medium
+    task: S6.2
+    found_by: silent_failure_hunter
+    file: src/salus/ingest/scenario.py
+    line: 37
+    description: "TOCTOU race in _load_trajectory: path.exists() check is not atomic with path.open(). If file deleted between the two calls, OSError is raised but re-raised as a generic OSError, losing the FileNotFoundError type that the docstring promises to callers."
+    resolution: "Removed preliminary exists() check; catch FileNotFoundError specifically in the open() try block and re-raise as FileNotFoundError to preserve the documented exception type."
+    status: resolved
+    commit: ""
+
+  - id: D-143
+    severity: medium
+    task: S6.2
+    found_by: silent_failure_hunter
+    file: src/salus/models/threat.py
+    line: 71
+    description: "DroneTrajectory._min_waypoints validates count >= 2 but does not validate that consecutive waypoints are distinct. Duplicate consecutive waypoints create a zero-length segment; future Slice 6.3 interpolation code will silently produce NaN directions/timings."
+    resolution: "Deferred to S6.3 — the downstream consumer (analyse_trajectory) does not yet exist. Guard will be added at the interpolation layer in S6.3."
+    status: deferred
+    commit: ""
+
+  - id: D-144
+    severity: medium
+    task: S6.2
+    found_by: silent_failure_hunter
+    file: src/salus/ingest/scenario.py
+    line: 118
+    description: "If a scenario YAML contains a literal 'trajectory:' mapping key (not 'trajectory_path'), the raw dict is passed directly to Pydantic without going through _load_trajectory's file-existence, empty-file, and structure checks. The raw dict coercion may silently succeed, bypassing intended validation path."
+    resolution: "Added data.pop('trajectory', None) at the start of load_scenario to discard any direct trajectory mapping from YAML before processing, forcing all trajectory loading through _load_trajectory."
+    status: resolved
+    commit: ""
+
+  - id: D-145
+    severity: medium
+    task: S6.2
+    found_by: type_design_analyzer
+    file: src/salus/ingest/scenario.py
+    line: 118
+    description: "traj_path_val retrieved via data.get('trajectory_path') has static type Any (from dict[str, Any]). Passed to Path(traj_path_val) without type narrowing, defeating mypy's ability to verify the Path() call is safe."
+    resolution: "Added explicit isinstance narrowing: traj_path: Path = traj_path_val if isinstance(traj_path_val, Path) else Path(str(traj_path_val)). Also narrowed raw dict to payload: dict[str, Any] in _load_trajectory."
+    status: resolved
+    commit: ""

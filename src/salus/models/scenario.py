@@ -7,6 +7,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field, field_validator
 
+from salus.models.threat import DroneTrajectory
+
 _BEARING_MAX_DEG: float = 360.0  # exclusive upper bound for compass bearing
 
 
@@ -135,6 +137,14 @@ class ScenarioConfig(BaseModel):
     """CRS coordinates (x, y) of the protected asset for corridor analysis.
     Required when threat_profiles is non-empty; ignored otherwise."""
 
+    trajectory_path: Path | None = None
+    """Path to a DroneTrajectory YAML file for engagement-calc runs.
+    None = corridor-sweep planning mode only."""
+
+    trajectory: DroneTrajectory | None = None
+    """Loaded DroneTrajectory instance. Populated by load_scenario when
+    trajectory_path is set; not read directly from the scenario YAML."""
+
     @field_validator("site_dem_path", mode="before")
     @classmethod
     def _site_dem_path_non_empty(cls, v: object) -> object:
@@ -161,4 +171,17 @@ class ScenarioConfig(BaseModel):
             x, y = v
             if not (math.isfinite(x) and math.isfinite(y)):
                 raise ValueError(f"protected_point coordinates must be finite, got ({x}, {y})")
+        return v
+
+    @field_validator("trajectory_path", mode="before")
+    @classmethod
+    def _trajectory_path_valid(cls, v: object) -> object:
+        if v is None:
+            return v
+        if isinstance(v, str) and not v.strip():
+            raise ValueError("trajectory_path must not be empty or whitespace")
+        elif isinstance(v, Path) and not v.parts:
+            raise ValueError("trajectory_path must not be an empty path")
+        elif not isinstance(v, (str, Path)):
+            raise ValueError(f"trajectory_path must be a string or Path, got {type(v).__name__}")
         return v

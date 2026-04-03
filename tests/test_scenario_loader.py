@@ -222,3 +222,87 @@ class TestLoadScenarioErrors:
         scenario_file.write_text("site_dem_path: 42\n", encoding="utf-8")
         with pytest.raises(ValueError, match="must be a string path"):
             load_scenario(scenario_file)
+
+
+class TestLoadScenarioTrajectory:
+    """Tests for trajectory_path resolution and DroneTrajectory loading."""
+
+    _TRAJ_YAML = """\
+        speed_ms: 15.0
+        waypoints:
+          - x: 500000.0
+            y: 6100000.0
+            z_agl: 80.0
+          - x: 500300.0
+            y: 6100000.0
+            z_agl: 50.0
+          - x: 500600.0
+            y: 6100000.0
+            z_agl: 20.0
+        """
+
+    def test_trajectory_loaded_when_path_set(self, tmp_path):
+        """When trajectory_path is set, load_scenario populates trajectory."""
+        traj_file = _write_yaml(tmp_path / "approach.yaml", self._TRAJ_YAML)
+        scenario_file = _write_yaml(
+            tmp_path / "scenario.yaml",
+            f"site_dem_path: site.tif\ntrajectory_path: {traj_file.name}\n",
+        )
+        sc = load_scenario(scenario_file)
+        assert sc.trajectory is not None
+        assert len(sc.trajectory.waypoints) == 3
+        assert sc.trajectory.speed_ms == pytest.approx(15.0)
+        assert sc.trajectory.waypoints[0].z_agl == pytest.approx(80.0)
+
+    def test_trajectory_path_resolved_to_absolute(self, tmp_path):
+        """trajectory_path is resolved to absolute just like other path fields."""
+        _write_yaml(tmp_path / "approach.yaml", self._TRAJ_YAML)
+        scenario_file = _write_yaml(
+            tmp_path / "scenario.yaml",
+            "site_dem_path: site.tif\ntrajectory_path: approach.yaml\n",
+        )
+        sc = load_scenario(scenario_file)
+        assert sc.trajectory_path == (tmp_path / "approach.yaml").resolve()
+
+    def test_trajectory_none_when_path_absent(self, tmp_path):
+        """trajectory is None when trajectory_path is not in the scenario file."""
+        scenario_file = _write_yaml(
+            tmp_path / "scenario.yaml",
+            "site_dem_path: site.tif\n",
+        )
+        sc = load_scenario(scenario_file)
+        assert sc.trajectory is None
+        assert sc.trajectory_path is None
+
+    def test_trajectory_file_not_found_raises(self, tmp_path):
+        """Missing trajectory file raises FileNotFoundError."""
+        scenario_file = _write_yaml(
+            tmp_path / "scenario.yaml",
+            "site_dem_path: site.tif\ntrajectory_path: nonexistent.yaml\n",
+        )
+        with pytest.raises(FileNotFoundError, match="Trajectory file not found"):
+            load_scenario(scenario_file)
+
+    def test_invalid_trajectory_yaml_raises(self, tmp_path):
+        """A trajectory file with invalid YAML raises ValueError."""
+        bad = tmp_path / "bad_traj.yaml"
+        bad.write_text("speed_ms: [unclosed\n", encoding="utf-8")
+        scenario_file = _write_yaml(
+            tmp_path / "scenario.yaml",
+            f"site_dem_path: site.tif\ntrajectory_path: {bad.name}\n",
+        )
+        with pytest.raises(ValueError, match="Invalid YAML"):
+            load_scenario(scenario_file)
+
+    def test_invalid_trajectory_content_raises(self, tmp_path):
+        """A trajectory file with valid YAML but invalid DroneTrajectory raises ValueError."""
+        bad = _write_yaml(
+            tmp_path / "bad_traj.yaml",
+            "speed_ms: 0.0\nwaypoints:\n  - {x: 0.0, y: 0.0, z_agl: 50.0}\n",
+        )
+        scenario_file = _write_yaml(
+            tmp_path / "scenario.yaml",
+            f"site_dem_path: site.tif\ntrajectory_path: {bad.name}\n",
+        )
+        with pytest.raises(ValueError, match="Invalid trajectory"):
+            load_scenario(scenario_file)

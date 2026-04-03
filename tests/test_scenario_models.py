@@ -296,3 +296,40 @@ class TestScenarioConfig:
                 site_dem_path=tmp_path / "dem.tif",
                 protected_point=(500050.0, math.inf),
             )
+
+    def test_trajectory_path_default_none(self, tmp_path):
+        """trajectory_path defaults to None."""
+        sc = ScenarioConfig(site_dem_path=tmp_path / "dem.tif")
+        assert sc.trajectory_path is None
+
+    def test_trajectory_default_none(self, tmp_path):
+        """trajectory defaults to None."""
+        sc = ScenarioConfig(site_dem_path=tmp_path / "dem.tif")
+        assert sc.trajectory is None
+
+    def test_trajectory_path_accepts_path(self, tmp_path):
+        """trajectory_path accepts a Path value."""
+        traj = tmp_path / "approach.yaml"
+        sc = ScenarioConfig(site_dem_path=tmp_path / "dem.tif", trajectory_path=traj)
+        assert sc.trajectory_path == traj
+
+    def test_trajectory_path_accepts_string(self, tmp_path):
+        """trajectory_path accepts a string, coerced to Path."""
+        traj = tmp_path / "approach.yaml"
+        sc = ScenarioConfig(site_dem_path=tmp_path / "dem.tif", trajectory_path=str(traj))
+        assert isinstance(sc.trajectory_path, Path)
+
+    def test_trajectory_path_empty_string_raises(self, tmp_path):
+        """Empty string for trajectory_path is invalid."""
+        with pytest.raises(ValidationError, match="trajectory_path"):
+            ScenarioConfig(site_dem_path=tmp_path / "dem.tif", trajectory_path="")
+
+    def test_trajectory_path_whitespace_raises(self, tmp_path):
+        """Whitespace-only trajectory_path is invalid."""
+        with pytest.raises(ValidationError, match="trajectory_path"):
+            ScenarioConfig(site_dem_path=tmp_path / "dem.tif", trajectory_path="   ")
+
+    def test_trajectory_path_non_path_raises(self, tmp_path):
+        """Non-string/Path value for trajectory_path is invalid."""
+        with pytest.raises(ValidationError, match="trajectory_path"):
+            ScenarioConfig(site_dem_path=tmp_path / "dem.tif", trajectory_path=42)  # type: ignore[arg-type]
