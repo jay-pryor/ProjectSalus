@@ -1690,7 +1690,7 @@ defects:
     description: "find_worst_trajectories: empty altitudes_m=[] list passes validation loop (zero iterations), enters outer loop zero times, and returns [] with no exception. Any caller accessing results[0] gets IndexError far from the cause."
     resolution: "Added len(effective_altitudes)==0 and len(effective_dive_angles)==0 guards that raise ValueError before entering the sweep loop."
     status: resolved
-    commit: "pending"
+    commit: "d72c589"
 
   - id: D-154
     severity: high
