@@ -1338,7 +1338,7 @@ defects:
     description: "NaN bypasses all </<=/=> numeric field validators in ThreatProfile (rcs_m2, max_speed_ms, typical_altitude_m) and ThreatCorridor (altitude_m, width_m, start_distance_m). IEEE-754: NaN comparisons always return False, so validators silently accept NaN, producing models with NaN field values that corrupt downstream engine calculations."
     resolution: "Added math.isfinite(v) guard to all six numeric field validators. Added 6 NaN regression tests."
     status: resolved
-    commit: "pending"
+    commit: "0abcf4d"
 
   - id: D-122
     severity: medium
@@ -1349,7 +1349,7 @@ defects:
     description: "NaN/Inf in protected_point coordinates propagates silently: .astype(int) on NaN produces implementation-defined large integer with RuntimeWarning only; in_bounds becomes all-False, function returns CorridorResult with coverage_pct=0 indistinguishable from a legitimately uncovered corridor."
     resolution: "Added math.isfinite(px) and math.isfinite(py) guard before array construction. Added 2 regression tests."
     status: resolved
-    commit: "pending"
+    commit: "0abcf4d"
 
   - id: D-123
     severity: low
@@ -1701,7 +1701,7 @@ defects:
     description: "ScenarioConfig._sweep_altitudes_valid and _sweep_dive_angles_valid do not reject empty lists []. sweep_altitudes_m=[] and sweep_dive_angles_deg=[] pass Pydantic validation silently and propagate to find_worst_trajectories, which returns an empty result list with no error."
     resolution: "Added len(v)==0 guard at the start of both validators, raising ValueError before item-level validation."
     status: resolved
-    commit: "pending"
+    commit: "0abcf4d"
 
   - id: D-155
     severity: high
@@ -1712,7 +1712,7 @@ defects:
     description: "render_trajectory_map: when all trajectories have identical time_in_detection_s (e.g. all 0.0), det_min==det_max so Normalize(vmin=0, vmax=0) is passed to the colorbar. Matplotlib silently clips to midpoint, making the colorbar labels meaningless."
     resolution: "Guard: if det_max <= det_min, set det_max = det_min + 1.0 so the colorbar always has a meaningful span."
     status: resolved
-    commit: "pending"
+    commit: "0abcf4d"
 
   - id: D-156
     severity: medium
@@ -1723,7 +1723,7 @@ defects:
     description: "Planning sweep mode: find_worst_trajectories failure is caught and warned but does not set corridor_failed=True. Exit code 0 is returned despite the sweep failing, breaking pipeline error propagation."
     resolution: "Added corridor_failed = True inside the except block so sweep failure propagates to exit code 1."
     status: resolved
-    commit: "pending"
+    commit: "0abcf4d"
 
   - id: D-157
     severity: medium
@@ -1734,7 +1734,7 @@ defects:
     description: "render_trajectory_map: DetectionEvent.position_x/y are used in ax.plot() and ax.annotate() without a math.isfinite guard. A NaN/inf from binary-search interpolation would silently produce an invisible annotation."
     resolution: "Added math.isfinite check before ax.plot/annotate; non-finite events emit warnings.warn and are skipped."
     status: resolved
-    commit: "pending"
+    commit: "0abcf4d"
 
   - id: D-158
     severity: medium
@@ -1745,7 +1745,7 @@ defects:
     description: "sensor_positions is built outside the threat loop and reused, but the variable name shadows an earlier binding at line 495. If the blocks are ever reordered, the wrong position list could be passed to rendering. Code intent is unclear."
     resolution: "Renamed to threat_sensor_positions to eliminate shadowing and clarify intent."
     status: resolved
-    commit: "pending"
+    commit: "0abcf4d"
 
   - id: D-159
     severity: medium
@@ -1756,4 +1756,4 @@ defects:
     description: "render_corridor_polar_diagram extension: spec requires colouring trajectory bars by a secondary dimension (altitude or dive angle). Implementation colours by detection fraction (time_in_detection_s / time_to_asset_s). TrajectoryResult has no altitude/dive-angle field, so full compliance requires model changes beyond S6.5 scope."
     resolution: "Detection fraction (time_in_detection_s / time_to_asset_s) used as secondary dimension — the closest available proxy. Altitude/dive-angle colouring would require adding these fields to TrajectoryResult (out of S6.5 scope). Accepted with stakeholder awareness."
     status: resolved
-    commit: "pending"
+    commit: "0abcf4d"
