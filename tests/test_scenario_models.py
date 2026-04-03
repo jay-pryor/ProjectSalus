@@ -333,3 +333,98 @@ class TestScenarioConfig:
         """Non-string/Path value for trajectory_path is invalid."""
         with pytest.raises(ValidationError, match="trajectory_path"):
             ScenarioConfig(site_dem_path=tmp_path / "dem.tif", trajectory_path=42)  # type: ignore[arg-type]
+
+    def test_sweep_altitudes_default_none(self, tmp_path):
+        """sweep_altitudes_m defaults to None."""
+        sc = ScenarioConfig(site_dem_path=tmp_path / "dem.tif")
+        assert sc.sweep_altitudes_m is None
+
+    def test_sweep_altitudes_valid(self, tmp_path):
+        """sweep_altitudes_m accepts a list of non-negative finite floats."""
+        sc = ScenarioConfig(
+            site_dem_path=tmp_path / "dem.tif",
+            sweep_altitudes_m=[0.0, 50.0, 150.0],
+        )
+        assert sc.sweep_altitudes_m == [0.0, 50.0, 150.0]
+
+    def test_sweep_altitudes_empty_list_raises(self, tmp_path):
+        """sweep_altitudes_m=[] raises ValidationError (would silently produce empty sweep)."""
+        with pytest.raises(ValidationError, match="sweep_altitudes_m"):
+            ScenarioConfig(
+                site_dem_path=tmp_path / "dem.tif",
+                sweep_altitudes_m=[],
+            )
+
+    def test_sweep_altitudes_negative_raises(self, tmp_path):
+        """Negative altitude in sweep_altitudes_m raises ValidationError."""
+        with pytest.raises(ValidationError, match="sweep_altitudes_m"):
+            ScenarioConfig(
+                site_dem_path=tmp_path / "dem.tif",
+                sweep_altitudes_m=[50.0, -10.0],
+            )
+
+    def test_sweep_dive_angles_default_none(self, tmp_path):
+        """sweep_dive_angles_deg defaults to None."""
+        sc = ScenarioConfig(site_dem_path=tmp_path / "dem.tif")
+        assert sc.sweep_dive_angles_deg is None
+
+    def test_sweep_dive_angles_valid(self, tmp_path):
+        """sweep_dive_angles_deg accepts values in [-90, 0]."""
+        sc = ScenarioConfig(
+            site_dem_path=tmp_path / "dem.tif",
+            sweep_dive_angles_deg=[-90.0, -45.0, 0.0],
+        )
+        assert sc.sweep_dive_angles_deg == [-90.0, -45.0, 0.0]
+
+    def test_sweep_dive_angles_empty_list_raises(self, tmp_path):
+        """sweep_dive_angles_deg=[] raises ValidationError (would silently produce empty sweep)."""
+        with pytest.raises(ValidationError, match="sweep_dive_angles_deg"):
+            ScenarioConfig(
+                site_dem_path=tmp_path / "dem.tif",
+                sweep_dive_angles_deg=[],
+            )
+
+    def test_sweep_dive_angles_positive_raises(self, tmp_path):
+        """Positive dive angle (ascending) raises ValidationError."""
+        with pytest.raises(ValidationError, match="sweep_dive_angles_deg"):
+            ScenarioConfig(
+                site_dem_path=tmp_path / "dem.tif",
+                sweep_dive_angles_deg=[10.0],
+            )
+
+    def test_sweep_dive_angles_below_minus_90_raises(self, tmp_path):
+        """Dive angle below -90 raises ValidationError."""
+        with pytest.raises(ValidationError, match="sweep_dive_angles_deg"):
+            ScenarioConfig(
+                site_dem_path=tmp_path / "dem.tif",
+                sweep_dive_angles_deg=[-91.0],
+            )
+
+    def test_sweep_segment_length_default(self, tmp_path):
+        """sweep_segment_length_m defaults to 5.0."""
+        sc = ScenarioConfig(site_dem_path=tmp_path / "dem.tif")
+        assert sc.sweep_segment_length_m == pytest.approx(5.0)
+
+    def test_sweep_segment_length_valid(self, tmp_path):
+        """Positive sweep_segment_length_m is accepted."""
+        sc = ScenarioConfig(
+            site_dem_path=tmp_path / "dem.tif",
+            sweep_segment_length_m=0.5,
+        )
+        assert sc.sweep_segment_length_m == pytest.approx(0.5)
+
+    def test_sweep_segment_length_zero_raises(self, tmp_path):
+        """sweep_segment_length_m=0 raises ValidationError."""
+        with pytest.raises(ValidationError, match="sweep_segment_length_m"):
+            ScenarioConfig(
+                site_dem_path=tmp_path / "dem.tif",
+                sweep_segment_length_m=0.0,
+            )
+
+    def test_sweep_segment_length_negative_raises(self, tmp_path):
+        """Negative sweep_segment_length_m raises ValidationError."""
+        with pytest.raises(ValidationError, match="sweep_segment_length_m"):
+            ScenarioConfig(
+                site_dem_path=tmp_path / "dem.tif",
+                sweep_segment_length_m=-1.0,
+            )

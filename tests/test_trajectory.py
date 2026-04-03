@@ -5,18 +5,21 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import pytest
 
 from salus.engine.trajectory import (
     DetectionEvent,
     TrajectoryResult,
     analyse_trajectory,
+    find_worst_trajectories,
     sensor_can_detect_point,
 )
 from salus.ingest.terrain import load_dem
 from salus.models.scenario import SensorPlacement
 from salus.models.sensor import SensorDefinition, SensorType
-from salus.models.threat import DroneTrajectory, TrajectoryWaypoint
+from salus.models.site import SiteModel
+from salus.models.threat import DroneTrajectory, ThreatProfile, TrajectoryWaypoint
 
 # ---------------------------------------------------------------------------
 # Fixtures and helpers
@@ -632,3 +635,227 @@ class TestAnalyseTrajectoryTerrainMasking:
         traj = _straight_trajectory(site, 0, 50, 99, 50, speed=10.0)
         with pytest.raises(ValueError, match="segment_length_m"):
             analyse_trajectory(site, [], traj, segment_length_m=-1.0)
+
+
+# ---------------------------------------------------------------------------
+# find_worst_trajectories tests (S6.4-1)
+# ---------------------------------------------------------------------------
+
+# 100×100 flat DEM constants (same as test_threat_corridor)
+_FWT_ROWS: int = 100
+_FWT_COLS: int = 100
+_FWT_RESOLUTION: float = 10.0
+_FWT_ORIGIN_X: float = 500000.0
+_FWT_ORIGIN_Y: float = 6100000.0
+
+
+def _fwt_site() -> SiteModel:
+    """100×100 flat DEM at 10 m resolution."""
+    dem = np.full((_FWT_ROWS, _FWT_COLS), 50.0)
+    return SiteModel(
+        dem=dem,
+        resolution=_FWT_RESOLUTION,
+        origin_x=_FWT_ORIGIN_X,
+        origin_y=_FWT_ORIGIN_Y,
+    )
+
+
+def _fwt_threat(typical_altitude_m: float = 50.0, max_speed_ms: float = 20.0) -> ThreatProfile:
+    return ThreatProfile(
+        name="FWT Threat",
+        rcs_m2=0.01,
+        rf_signature="2.4 GHz",
+        max_speed_ms=max_speed_ms,
+        typical_altitude_m=typical_altitude_m,
+    )
+
+
+class TestFindWorstTrajectories:
+    """Tests for find_worst_trajectories (S6.4-1)."""
+
+    def test_single_bearing_returns_one_result(self):
+        """num_bearings=1 with one altitude and one dive angle → exactly 1 result."""
+        site = _fwt_site()
+        threat = _fwt_threat()
+        px = _FWT_ORIGIN_X + 50 * _FWT_RESOLUTION
+        py = _FWT_ORIGIN_Y - 50 * _FWT_RESOLUTION
+        results = find_worst_trajectories(
+            site,
+            [],
+            threat,
+            protected_point=(px, py),
+            num_bearings=1,
+        )
+        assert len(results) == 1
+
+    def test_full_sweep_count(self):
+        """Result count equals num_bearings × len(altitudes) × len(dive_angles)."""
+        site = _fwt_site()
+        threat = _fwt_threat()
+        px = _FWT_ORIGIN_X + 50 * _FWT_RESOLUTION
+        py = _FWT_ORIGIN_Y - 50 * _FWT_RESOLUTION
+        num_bearings = 8
+        altitudes = [30.0, 60.0]
+        dive_angles = [0.0, -30.0]
+        results = find_worst_trajectories(
+            site,
+            [],
+            threat,
+            protected_point=(px, py),
+            num_bearings=num_bearings,
+            altitudes_m=altitudes,
+            dive_angles_deg=dive_angles,
+        )
+        assert len(results) == num_bearings * len(altitudes) * len(dive_angles)
+
+    def test_default_altitudes_uses_threat_altitude(self):
+        """altitudes_m=None defaults to [threat.typical_altitude_m]."""
+        site = _fwt_site()
+        threat = _fwt_threat(typical_altitude_m=75.0)
+        px = _FWT_ORIGIN_X + 50 * _FWT_RESOLUTION
+        py = _FWT_ORIGIN_Y - 50 * _FWT_RESOLUTION
+        results = find_worst_trajectories(
+            site,
+            [],
+            threat,
+            protected_point=(px, py),
+            num_bearings=4,
+        )
+        # 4 bearings × 1 altitude × 1 dive angle = 4
+        assert len(results) == 4
+
+    def test_worst_has_lowest_time_in_detection(self):
+        """First result has the lowest time_in_detection_s across all results."""
+        site = _fwt_site()
+        threat = _fwt_threat()
+        px = _FWT_ORIGIN_X + 50 * _FWT_RESOLUTION
+        py = _FWT_ORIGIN_Y - 50 * _FWT_RESOLUTION
+        # Sensor with limited range — some bearings will be partially undetected
+        sensor = _omni_sensor(max_range_m=150.0, min_range_m=1.0)
+        placement = _make_placement(site, col=50, row=50)
+        results = find_worst_trajectories(
+            site,
+            [(sensor, placement)],
+            threat,
+            protected_point=(px, py),
+            num_bearings=8,
+        )
+        assert len(results) == 8
+        min_det = min(r.time_in_detection_s for r in results)
+        assert results[0].time_in_detection_s == pytest.approx(min_det)
+
+    def test_sorted_ascending_by_time_in_detection(self):
+        """Results are sorted by time_in_detection_s ascending."""
+        site = _fwt_site()
+        threat = _fwt_threat()
+        px = _FWT_ORIGIN_X + 50 * _FWT_RESOLUTION
+        py = _FWT_ORIGIN_Y - 50 * _FWT_RESOLUTION
+        sensor = _omni_sensor(max_range_m=150.0, min_range_m=1.0)
+        placement = _make_placement(site, col=50, row=50)
+        results = find_worst_trajectories(
+            site,
+            [(sensor, placement)],
+            threat,
+            protected_point=(px, py),
+            num_bearings=12,
+        )
+        for i in range(len(results) - 1):
+            assert results[i].time_in_detection_s <= results[i + 1].time_in_detection_s
+
+    def test_no_sensors_all_undetected(self):
+        """With no sensors, all results have time_in_detection_s=0 and undetected=True."""
+        site = _fwt_site()
+        threat = _fwt_threat()
+        px = _FWT_ORIGIN_X + 50 * _FWT_RESOLUTION
+        py = _FWT_ORIGIN_Y - 50 * _FWT_RESOLUTION
+        results = find_worst_trajectories(
+            site,
+            [],
+            threat,
+            protected_point=(px, py),
+            num_bearings=4,
+        )
+        for r in results:
+            assert r.time_in_detection_s == pytest.approx(0.0)
+            assert r.asset_reached_undetected is True
+
+    def test_num_bearings_zero_raises(self):
+        """num_bearings=0 raises ValueError."""
+        site = _fwt_site()
+        threat = _fwt_threat()
+        px = _FWT_ORIGIN_X + 50 * _FWT_RESOLUTION
+        py = _FWT_ORIGIN_Y - 50 * _FWT_RESOLUTION
+        with pytest.raises(ValueError, match="num_bearings"):
+            find_worst_trajectories(site, [], threat, protected_point=(px, py), num_bearings=0)
+
+    def test_negative_altitude_raises(self):
+        """Negative altitude in altitudes_m raises ValueError."""
+        site = _fwt_site()
+        threat = _fwt_threat()
+        px = _FWT_ORIGIN_X + 50 * _FWT_RESOLUTION
+        py = _FWT_ORIGIN_Y - 50 * _FWT_RESOLUTION
+        with pytest.raises(ValueError, match="altitudes_m"):
+            find_worst_trajectories(
+                site,
+                [],
+                threat,
+                protected_point=(px, py),
+                altitudes_m=[-10.0],
+            )
+
+    def test_dive_angle_out_of_range_raises(self):
+        """dive_angles_deg value > 0 raises ValueError."""
+        site = _fwt_site()
+        threat = _fwt_threat()
+        px = _FWT_ORIGIN_X + 50 * _FWT_RESOLUTION
+        py = _FWT_ORIGIN_Y - 50 * _FWT_RESOLUTION
+        with pytest.raises(ValueError, match="dive_angles_deg"):
+            find_worst_trajectories(
+                site,
+                [],
+                threat,
+                protected_point=(px, py),
+                dive_angles_deg=[10.0],  # positive angle: invalid
+            )
+
+    def test_non_finite_protected_point_raises(self):
+        """Non-finite protected_point raises ValueError."""
+        site = _fwt_site()
+        threat = _fwt_threat()
+        with pytest.raises(ValueError, match="protected_point"):
+            find_worst_trajectories(
+                site,
+                [],
+                threat,
+                protected_point=(math.inf, 0.0),
+            )
+
+    def test_empty_altitudes_list_raises(self):
+        """altitudes_m=[] raises ValueError — would silently return empty list."""
+        site = _fwt_site()
+        threat = _fwt_threat()
+        px = _FWT_ORIGIN_X + 50 * _FWT_RESOLUTION
+        py = _FWT_ORIGIN_Y - 50 * _FWT_RESOLUTION
+        with pytest.raises(ValueError, match="altitudes_m"):
+            find_worst_trajectories(
+                site,
+                [],
+                threat,
+                protected_point=(px, py),
+                altitudes_m=[],
+            )
+
+    def test_empty_dive_angles_list_raises(self):
+        """dive_angles_deg=[] raises ValueError — would silently return empty list."""
+        site = _fwt_site()
+        threat = _fwt_threat()
+        px = _FWT_ORIGIN_X + 50 * _FWT_RESOLUTION
+        py = _FWT_ORIGIN_Y - 50 * _FWT_RESOLUTION
+        with pytest.raises(ValueError, match="dive_angles_deg"):
+            find_worst_trajectories(
+                site,
+                [],
+                threat,
+                protected_point=(px, py),
+                dive_angles_deg=[],
+            )

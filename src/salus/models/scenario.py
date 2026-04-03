@@ -145,6 +145,19 @@ class ScenarioConfig(BaseModel):
     """Loaded DroneTrajectory instance. Populated by load_scenario when
     trajectory_path is set; not read directly from the scenario YAML."""
 
+    sweep_altitudes_m: list[float] | None = None
+    """Altitudes AGL (metres) to sweep in find_worst_trajectories.
+    All values must be non-negative finite.  None = use threat default altitude."""
+
+    sweep_dive_angles_deg: list[float] | None = None
+    """Descent angles (degrees) to sweep in find_worst_trajectories.
+    All values must be in [-90, 0]: 0 = horizontal, -90 = vertical dive.
+    None = horizontal only ([0])."""
+
+    sweep_segment_length_m: float = 5.0
+    """Sampling interval for the trajectory sweep (metres, > 0).  Smaller values
+    increase fidelity and computation time.  Default 5.0 for planning fidelity."""
+
     @field_validator("site_dem_path", mode="before")
     @classmethod
     def _site_dem_path_non_empty(cls, v: object) -> object:
@@ -184,4 +197,37 @@ class ScenarioConfig(BaseModel):
             raise ValueError("trajectory_path must not be an empty path")
         elif not isinstance(v, (str, Path)):
             raise ValueError(f"trajectory_path must be a string or Path, got {type(v).__name__}")
+        return v
+
+    @field_validator("sweep_altitudes_m")
+    @classmethod
+    def _sweep_altitudes_valid(cls, v: list[float] | None) -> list[float] | None:
+        if v is None:
+            return v
+        if len(v) == 0:
+            raise ValueError("sweep_altitudes_m must not be an empty list")
+        for i, alt in enumerate(v):
+            if not math.isfinite(alt) or alt < 0.0:
+                raise ValueError(
+                    f"sweep_altitudes_m[{i}] must be a non-negative finite value, got {alt}"
+                )
+        return v
+
+    @field_validator("sweep_dive_angles_deg")
+    @classmethod
+    def _sweep_dive_angles_valid(cls, v: list[float] | None) -> list[float] | None:
+        if v is None:
+            return v
+        if len(v) == 0:
+            raise ValueError("sweep_dive_angles_deg must not be an empty list")
+        for i, angle in enumerate(v):
+            if not math.isfinite(angle) or not (-90.0 <= angle <= 0.0):
+                raise ValueError(f"sweep_dive_angles_deg[{i}] must be in [-90, 0], got {angle}")
+        return v
+
+    @field_validator("sweep_segment_length_m")
+    @classmethod
+    def _sweep_segment_length_positive(cls, v: float) -> float:
+        if not math.isfinite(v) or v <= 0.0:
+            raise ValueError(f"sweep_segment_length_m must be a finite value > 0, got {v}")
         return v

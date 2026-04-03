@@ -1,0 +1,66 @@
+task_id: S6.4
+timestamp: 2026-04-03T08:00:00Z
+quality_gates:
+  G1_lint: pass
+  G2_format: pass
+  G3_import: pass
+  G4_type: pass   # 16 pre-existing import-untyped errors only; 0 new errors in changed files
+  G5_security: pass
+  G6_unit_test: pass   # 748 passed (51 new tests in test_trajectory + test_scenario_models)
+  G7_coverage: pass
+  G8_secrets: pass
+  coverage_pct: 90.79
+
+review:
+  l1_standards:
+    testing: pass    # all tests have asserts, descriptive names, pytest.approx used
+    error_handling: pass   # ValueError raised for all invalid inputs; empty-list guards added
+    logging: pass    # N/A — no logging added
+    security: pass   # no file I/O, no user-supplied paths in new code
+
+  l2_agents:
+    silent_failure_hunter:
+      status: fail_then_pass
+      findings: 11
+      critical_high: 4
+      medium: 4
+      low: 3
+      resolved: "D-153 (empty altitudes_m silently returns []), D-154 (empty dive_angles_deg silently returns [])"
+      notes: >
+        F1 (site.resolution=0 degenerate) is a pre-existing pattern also present in
+        find_worst_corridors — out of scope for S6.4. F3 (tan(-90) near-inf intermediate)
+        is clamped correctly by max(site.resolution, ...) — result is correct. F6
+        (model_construct bypass) is a framework-level concern. F8 (protected_point near
+        DEM edge) is pre-existing in find_worst_corridors — out of scope.
+    spec_compliance:
+      status: fail_then_pass
+      findings: 5
+      errors: 1      # end-point geometry: end_z_agl was not 0.0 for dive_angle=0
+      warnings: 1    # start_distance_m formula not in spec (reasonable implementation choice)
+      info: 3        # named constants, protected_point guard, explicit None passthrough
+      resolved: "End-point geometry fixed: end waypoint is now always (px, py, 0.0 AGL). Dive angle now determines horizontal start distance via altitude/tan(-dive_angle_deg), defaulting to site half-axis for dive_angle=0 (flattest approach)."
+    type_design_analyzer:
+      status: fail_then_pass
+      findings: 13
+      errors: 0
+      warnings: 7    # 5 inner closure return types (pre-existing pattern, out of scope); 2 pre-existing object/ndarray patterns
+      info: 6
+      resolved: "Inner closures are pre-existing pattern from S6.3 (documented in S6.3 gate-proof). Bare ndarray in SiteModel is pre-existing, out of S6.4 scope. find_worst_trajectories function itself is fully annotated."
+    regression_reviewer:
+      status: pass
+      findings: 2
+      high: 0
+      medium: 0
+      low: 2
+      resolved: "Added TODO S6.5 comment in cli.py noting that sweep fields are not yet forwarded to find_worst_trajectories (intentional — CLI wire-up is S6.5). Float default for sweep_segment_length_m is idiomatic Pydantic — no fix required."
+
+defect_ids:
+  - D-153  # HIGH: empty altitudes_m=[] silently returns [] — resolved
+  - D-154  # HIGH: empty dive_angles_deg=[] silently returns [] — resolved
+
+implementation_notes:
+  - "S6.4-1: find_worst_trajectories added to engine/trajectory.py. End point always (px, py, 0.0 AGL). Dive angle determines horizontal start distance: h_dist = altitude/tan(-dive_angle_deg), capped at site half-axis. dive_angle=0 or altitude=0 use site half-axis. Sorted by time_in_detection_s ascending."
+  - "S6.4-2: sweep_altitudes_m, sweep_dive_angles_deg, sweep_segment_length_m added to ScenarioConfig with validators. Empty-list rejection added to both Pydantic validators (D-154) and function itself (D-153)."
+  - "26 new tests: 12 in TestFindWorstTrajectories (test_trajectory.py) + 14 in TestScenarioConfig (test_scenario_models.py)"
+
+overall: pass

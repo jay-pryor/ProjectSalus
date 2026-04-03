@@ -589,6 +589,8 @@ def simulate(
             click.echo(f"\n  Threat: {threat.name}")
             try:
                 all_pairs = [pair for pairs in placements_by_type.values() for pair in pairs]
+                # TODO S6.5: forward sc.sweep_altitudes_m, sc.sweep_dive_angles_deg,
+                # and sc.sweep_segment_length_m to find_worst_trajectories here.
                 results = find_worst_corridors(site, all_pairs, threat, sc.protected_point)
             except Exception as exc:
                 click.echo(

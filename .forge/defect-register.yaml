@@ -1677,6 +1677,28 @@ defects:
     file: src/salus/engine/trajectory.py
     line: 25
     description: "Orphan constant _DEFAULT_CORRIDOR_SEGMENT_M defined in trajectory.py but never used anywhere. The same 5.0m default is defined as _DEFAULT_SEGMENT_LENGTH_M in threat_corridor.py. Two constants with different names for the same value — a maintenance trap."
-    resolution: ""
-    status: open
-    commit: ""
+    resolution: "Removed orphan constant from trajectory.py in S6.3 implementation"
+    status: resolved
+    commit: "2a561fc"
+
+  - id: D-153
+    severity: high
+    task: S6.4
+    found_by: silent_failure_hunter
+    file: src/salus/engine/trajectory.py
+    line: 406
+    description: "find_worst_trajectories: empty altitudes_m=[] list passes validation loop (zero iterations), enters outer loop zero times, and returns [] with no exception. Any caller accessing results[0] gets IndexError far from the cause."
+    resolution: "Added len(effective_altitudes)==0 and len(effective_dive_angles)==0 guards that raise ValueError before entering the sweep loop."
+    status: resolved
+    commit: "pending"
+
+  - id: D-154
+    severity: high
+    task: S6.4
+    found_by: silent_failure_hunter
+    file: src/salus/models/scenario.py
+    line: 202
+    description: "ScenarioConfig._sweep_altitudes_valid and _sweep_dive_angles_valid do not reject empty lists []. sweep_altitudes_m=[] and sweep_dive_angles_deg=[] pass Pydantic validation silently and propagate to find_worst_trajectories, which returns an empty result list with no error."
+    resolution: "Added len(v)==0 guard at the start of both validators, raising ValueError before item-level validation."
+    status: resolved
+    commit: "pending"
