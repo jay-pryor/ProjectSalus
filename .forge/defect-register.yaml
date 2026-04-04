@@ -1954,7 +1954,7 @@ defects:
     description: "NaN values in DEM nodata cells propagate through np.gradient into gradient_magnitude. NaN > threshold evaluates to False so nodata cells silently pass the slope filter and are included as candidate positions. Sensors can be placed at invalid terrain positions."
     resolution: "Wrapped np.sqrt gradient computation with np.nan_to_num(nan=_STEEP_SLOPE_THRESHOLD + 1.0) so nodata cells map to a value exceeding the threshold and are excluded."
     status: resolved
-    commit: "pending"
+    commit: "6766887"
 
   - id: D-178
     severity: high
@@ -1965,7 +1965,7 @@ defects:
     description: "Broad except Exception in candidate-scoring loop logs only at DEBUG level (off in production). If every candidate fails for a sensor, the sensor is silently skipped with no WARNING-level indication. Caller cannot distinguish early-exit from wholesale computation failure."
     resolution: "Added failed_candidates counter; post-loop guard emits WARNING when all candidates raised exceptions, distinguishing total failure from no-improvement skip."
     status: resolved
-    commit: "pending"
+    commit: "6766887"
 
   - id: D-179
     severity: high
@@ -1976,7 +1976,7 @@ defects:
     description: "When total_weight == 0.0 (all PlacementWeights are zero and no zones defined), every candidate scores 0.0. Only the first candidate ever wins (0.0 > -1.0), so every sensor is silently placed at the first position rather than the best coverage position. No warning is emitted."
     resolution: "Added early WARNING log when total_weight == 0.0 describing degenerate scoring behaviour and advising to set non-zero weights."
     status: resolved
-    commit: "pending"
+    commit: "6766887"
 
   - id: D-180
     severity: medium
@@ -1987,7 +1987,7 @@ defects:
     description: "When best_score == 0.0 (sensor covers only exclusion-zone cells), the sensor is still placed without any warning. Callers that use placement count or coverage percentage to assess quality are misled."
     resolution: "Added post-placement WARNING when best_score <= 0.0 advising user to review zone weights or candidate positions."
     status: resolved
-    commit: "pending"
+    commit: "6766887"
 
   - id: D-181
     severity: medium
@@ -1998,7 +1998,7 @@ defects:
     description: "In _build_weight_map, boundary_mask(site, zone.geometry) is called without guarding for invalid/empty Shapely geometries. A failure mid-loop leaves weight_map partially constructed and the traceback contains no zone name context for diagnosis."
     resolution: "Wrapped boundary_mask call in try/except; re-raises as RuntimeError with zone name and type in message for diagnosis."
     status: resolved
-    commit: "pending"
+    commit: "6766887"
 
   - id: D-182
     severity: medium
@@ -2009,7 +2009,7 @@ defects:
     description: "In the --write-scenario path, `raw_scenario.get('sensor_placements') or []` only replaces falsy values. A non-empty string or non-list value is trusted and causes `TypeError` on concatenation, which is not caught by the `except OSError` guard."
     resolution: "Replaced `or []` with explicit isinstance(list) check; non-list values default to empty list."
     status: resolved
-    commit: "pending"
+    commit: "6766887"
 
   - id: D-183
     severity: medium
@@ -2020,7 +2020,7 @@ defects:
     description: "In the --write-scenario path, yaml.safe_dump is guarded only with `except OSError`. If any SensorPlacement field holds a numpy scalar, yaml.representer.RepresenterError is raised (not an OSError subclass) and propagates unhandled, bypassing the user-friendly error message."
     resolution: "Widened except to (OSError, yaml.YAMLError); serialised_placements now casts all numeric fields via float() to prevent numpy scalar representation errors."
     status: resolved
-    commit: "pending"
+    commit: "6766887"
 
   - id: D-184
     severity: high
