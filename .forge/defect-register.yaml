@@ -2218,7 +2218,7 @@ defects:
     description: "Non-LOS path: if placement.position_x or position_y is non-finite (e.g. NaN), np.sqrt produces NaN, range_mask becomes all-False, and the engagement zone is silently all-False with no error raised."
     resolution: "Added math.isfinite guard on position_x and position_y at top of compute_single_effector_coverage; raises ValueError with coordinates."
     status: resolved
-    commit: ""
+    commit: "a759806"
 
   - id: D-202
     severity: high
@@ -2229,7 +2229,7 @@ defects:
     description: "No site.resolution <= 0 guard in _clip_to_effector. If resolution=0, coordinate grids collapse to a single point (all cells mapped to origin), producing a silently wrong uniform-distance range_mask."
     resolution: "Added resolution guard at top of _clip_to_effector: raises ValueError if not finite or <= 0, consistent with viewshed.clip_viewshed_to_sensor."
     status: resolved
-    commit: ""
+    commit: "a759806"
 
   - id: D-203
     severity: medium
@@ -2240,7 +2240,7 @@ defects:
     description: "compute_effector_layer_coverage loop has no per-effector exception handler. A GDAL RuntimeError from compute_viewshed aborts the entire layer with no log identifying which effector caused the failure."
     resolution: "Wrapped per-effector call in try/except Exception; re-raises as RuntimeError naming the effector and its position."
     status: resolved
-    commit: ""
+    commit: "a759806"
 
   - id: D-204
     severity: medium
@@ -2251,7 +2251,7 @@ defects:
     description: "Empty effector_pairs list returns all-False array silently. A configuration error (effector list not populated) would not be distinguishable from a valid zero-effector scenario without a warning log."
     resolution: "Added _log.warning call when effector_pairs is empty before the union loop."
     status: resolved
-    commit: ""
+    commit: "a759806"
 
   - id: D-205
     severity: medium
@@ -2262,4 +2262,4 @@ defects:
     description: "Local variable effector_agl lacks explicit float annotation; intermediate arrays in _clip_to_effector (col_coords, row_coords, cell_x, cell_y, dx, dy, dist) lack annotations. Project rule: type-annotate everything."
     resolution: "Added explicit type annotations for effector_agl and all intermediate NDArray variables in _clip_to_effector."
     status: resolved
-    commit: ""
+    commit: "a759806"
