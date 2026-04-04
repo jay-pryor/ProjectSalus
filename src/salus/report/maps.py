@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import warnings
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
@@ -20,6 +21,9 @@ from salus.models.sensor import SensorType
 from salus.models.site import SiteModel
 from salus.models.threat import DroneTrajectory
 from salus.models.zone import Zone, ZoneType
+
+if TYPE_CHECKING:
+    from salus.engine.comparison import ComparisonResult
 
 # Distinct colour per sensor type for per-layer and composite maps
 _SENSOR_TYPE_COLOURS: dict[SensorType, str] = {
@@ -1532,3 +1536,466 @@ def render_adversarial_map(
         plt.close(fig)
 
     return output_path
+
+
+# ---------------------------------------------------------------------------
+# Configuration comparison map (S10)
+# ---------------------------------------------------------------------------
+
+# Colours for the four delta categories.
+_DELTA_COLOUR_A_ONLY: str = "#e74c3c"  # red   — A covers, B does not
+_DELTA_COLOUR_B_ONLY: str = "#2ecc71"  # green — B covers, A does not
+_DELTA_COLOUR_BOTH: str = "#95a5a6"  # grey  — both cover
+# Neither = transparent (not drawn)
+
+
+def render_delta_map(
+    site: SiteModel,
+    comparison: "ComparisonResult",
+    output_path: str | Path,
+    title: str = "Coverage Delta Map (A vs B)",
+    sensor_positions_a: list[tuple[float, float]] | None = None,
+    sensor_positions_b: list[tuple[float, float]] | None = None,
+) -> Path:
+    """Render a coverage delta map comparing two sensor configurations.
+
+    Cells are coloured by category:
+
+    - **Grey** — both A and B cover this cell.
+    - **Red** — only A covers this cell (B loses coverage here).
+    - **Green** — only B covers this cell (B gains coverage here).
+    - **Transparent** — neither configuration covers this cell.
+
+    A hillshade background provides topographic context.
+
+    Args:
+        site: Site terrain model (used for hillshade and coordinate extent).
+        comparison: Output of :func:`~salus.engine.comparison.compare_configs`.
+        output_path: Where to write the PNG file.  Parent directories are
+            created if absent.
+        title: Map title.
+        sensor_positions_a: Optional ``(x, y)`` positions for configuration A
+            sensors (rendered as red triangles).
+        sensor_positions_b: Optional ``(x, y)`` positions for configuration B
+            sensors (rendered as green squares).
+
+    Returns:
+        Resolved :class:`~pathlib.Path` to the written PNG file.
+
+    Raises:
+        TypeError: If ``comparison`` is not a :class:`ComparisonResult`.
+    """
+    from salus.engine.comparison import (
+        DELTA_A_ONLY,
+        DELTA_B_ONLY,
+        DELTA_BOTH,
+        ComparisonResult,
+    )
+
+    if not isinstance(comparison, ComparisonResult):
+        raise TypeError(f"comparison must be a ComparisonResult, got {type(comparison).__name__}")
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    min_x, max_x, min_y, max_y = site.extent
+    extent = (min_x, max_x, min_y, max_y)
+    delta = comparison.delta_grid
+
+    fig, ax = plt.subplots(figsize=(12, 10))
+    try:
+        # D-197: catch hillshade failure and enrich the error with DEM diagnostics.
+        try:
+            hs = _hillshade(site.dem)
+        except ValueError as exc:
+            is_float = np.issubdtype(site.dem.dtype, np.floating)
+            nan_count = int(np.isnan(site.dem).sum()) if is_float else 0
+            raise ValueError(
+                f"render_delta_map: hillshade failed ({nan_count} NaN cell(s) in DEM): {exc}"
+            ) from exc
+        ax.imshow(hs, cmap="gray", extent=extent, origin="upper", alpha=0.6, zorder=1)
+        _add_basemap(ax, site)
+
+        for mask_val, colour in (
+            (DELTA_BOTH, _DELTA_COLOUR_BOTH),
+            (DELTA_A_ONLY, _DELTA_COLOUR_A_ONLY),
+            (DELTA_B_ONLY, _DELTA_COLOUR_B_ONLY),
+        ):
+            mask = delta == mask_val
+            if not mask.any():
+                continue
+            overlay = np.ma.masked_where(~mask, np.ones_like(delta, dtype=float))
+            ax.imshow(
+                overlay,
+                cmap=ListedColormap([colour]),
+                extent=extent,
+                origin="upper",
+                alpha=0.50,
+                zorder=2,
+                vmin=0,
+                vmax=1,
+            )
+
+        if sensor_positions_a:
+            for x, y in sensor_positions_a:
+                ax.plot(
+                    x,
+                    y,
+                    "r^",
+                    markersize=10,
+                    markeredgecolor="black",
+                    markeredgewidth=1,
+                    zorder=7,
+                )
+        if sensor_positions_b:
+            for x, y in sensor_positions_b:
+                ax.plot(
+                    x,
+                    y,
+                    "gs",
+                    markersize=10,
+                    markeredgecolor="black",
+                    markeredgewidth=1,
+                    zorder=7,
+                )
+
+        sign = "+" if comparison.coverage_delta_pct >= 0 else ""
+        subtitle = (
+            f"{comparison.label_a}: {comparison.coverage_pct_a:.1f}%  \u2192  "
+            f"{comparison.label_b}: {comparison.coverage_pct_b:.1f}%  "
+            f"({sign}{comparison.coverage_delta_pct:.1f}%)"
+        )
+        ax.set_title(f"{title}\n{subtitle}", fontsize=13, fontweight="bold")
+        ax.set_xlabel("Easting (m)")
+        ax.set_ylabel("Northing (m)")
+        _add_cartographic_elements(ax)
+
+        legend_handles: list[mpatches.Patch] = [
+            mpatches.Patch(facecolor=_DELTA_COLOUR_BOTH, alpha=0.6, label="Both cover"),
+            mpatches.Patch(
+                facecolor=_DELTA_COLOUR_A_ONLY,
+                alpha=0.6,
+                label=f"{comparison.label_a} only",
+            ),
+            mpatches.Patch(
+                facecolor=_DELTA_COLOUR_B_ONLY,
+                alpha=0.6,
+                label=f"{comparison.label_b} only",
+            ),
+        ]
+        ax.legend(handles=legend_handles, loc="lower left", fontsize=9, framealpha=0.8)
+
+        fig.tight_layout()
+        fig.savefig(output_path, dpi=200, bbox_inches="tight")
+    finally:
+        plt.close(fig)
+
+    return output_path.resolve()
+
+
+# ---------------------------------------------------------------------------
+# Effector coverage maps (S11-2)
+# ---------------------------------------------------------------------------
+
+# Teal overlay colour for effector engagement zones.
+# Intentionally distinct from _SENSOR_TYPE_COLOURS[SensorType.Radar] (#3498db) so
+# effector zones and radar detection layers are visually distinguishable on composite maps.
+_EFFECTOR_COVERAGE_COLOUR: str = "#1abc9c"
+
+# Amber overlay colour for "detected but cannot engage" cells.
+_DETECTION_NO_ENGAGEMENT_COLOUR: str = "#f39c12"
+
+
+def render_effector_coverage_map(
+    site: SiteModel,
+    effector_coverage: npt.NDArray[np.bool_],
+    output_path: str | Path,
+    title: str = "Effector Coverage Map",
+    effector_positions: list[tuple[float, float]] | None = None,
+    boundary: Polygon | MultiPolygon | None = None,
+    zones: list[Zone] | None = None,
+) -> Path:
+    """Render the effector engagement zone as a distinct blue overlay on terrain.
+
+    Cells where at least one effector can engage a target are shown in blue
+    against a hillshade background.  This layer is intentionally distinct from
+    sensor detection coverage (green) so operators can visually compare the two.
+
+    Args:
+        site: Site terrain model.
+        effector_coverage: Boolean 2D array — ``True`` where at least one
+            effector can engage a target.  Typically the output of
+            :func:`~salus.engine.effector_coverage.compute_effector_layer_coverage`.
+        output_path: Where to save the PNG.  Parent directories are created if
+            absent.
+        title: Map title.
+        effector_positions: Optional list of ``(x, y)`` CRS positions to mark
+            as blue triangles (▲) on the map.
+        boundary: Optional site boundary polygon to draw as an outline.
+        zones: Optional zone overlays.
+
+    Returns:
+        Resolved :class:`~pathlib.Path` to the saved PNG file.
+
+    Raises:
+        ValueError: If *effector_coverage* is not a 2-D array or has zero
+            elements.
+    """
+    if effector_coverage.ndim != 2:
+        raise ValueError(f"effector_coverage must be 2-D, got ndim={effector_coverage.ndim}")
+    if effector_coverage.size == 0:
+        raise ValueError("effector_coverage has zero elements — cannot render map")
+    # D-210: guard against shape mismatch producing silently mis-registered overlay
+    if effector_coverage.shape != site.dem.shape:
+        raise ValueError(
+            f"effector_coverage shape {effector_coverage.shape} != "
+            f"site.dem shape {site.dem.shape} — arrays must match"
+        )
+    # D-206/D-208: cast to float before isnan — integer-dtype DEMs raise TypeError
+    if np.issubdtype(site.dem.dtype, np.floating) and np.any(np.isnan(site.dem)):
+        raise ValueError(
+            f"site.dem contains NaN values — fill nodata before rendering {output_path}"
+        )
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    min_x, max_x, min_y, max_y = site.extent
+    extent = (min_x, max_x, min_y, max_y)
+
+    fig, ax = plt.subplots(1, 1, figsize=(12, 10))
+    try:
+        hs = _hillshade(site.dem)
+        ax.imshow(hs, cmap="gray", extent=extent, origin="upper", alpha=0.7, zorder=1)
+
+        _add_basemap(ax, site)
+
+        # Blue overlay for effector engagement zone
+        eff_display = np.ma.masked_where(
+            ~effector_coverage.astype(bool), effector_coverage.astype(float)
+        )
+        ax.imshow(
+            eff_display,
+            cmap=ListedColormap([_EFFECTOR_COVERAGE_COLOUR]),
+            extent=extent,
+            origin="upper",
+            alpha=0.55,
+            zorder=2,
+        )
+
+        _render_boundary(ax, boundary)
+        _render_zones(ax, zones)
+
+        if effector_positions:
+            for x, y in effector_positions:
+                ax.plot(
+                    x,
+                    y,
+                    marker="^",
+                    color=_EFFECTOR_COVERAGE_COLOUR,
+                    markersize=12,
+                    markeredgecolor="black",
+                    markeredgewidth=1,
+                    zorder=7,
+                )
+
+        cov_pct = effector_coverage.astype(bool).sum() / effector_coverage.size * 100.0
+        ax.set_title(
+            f"{title} ({cov_pct:.1f}% engagement coverage)",
+            fontsize=14,
+            fontweight="bold",
+        )
+        ax.set_xlabel("Easting (m)")
+        ax.set_ylabel("Northing (m)")
+        _add_cartographic_elements(ax)
+
+        legend_handles = [
+            mpatches.Patch(
+                facecolor=_EFFECTOR_COVERAGE_COLOUR,
+                alpha=0.6,
+                label="Effector engagement zone",
+            )
+        ]
+        ax.legend(handles=legend_handles, loc="lower left", fontsize=9, framealpha=0.8)
+
+        fig.tight_layout()
+        fig.savefig(output_path, dpi=200, bbox_inches="tight")
+    finally:
+        plt.close(fig)
+
+    return output_path.resolve()
+
+
+def render_detection_without_engagement_map(
+    site: SiteModel,
+    sensor_composite: npt.NDArray[np.bool_],
+    effector_coverage: npt.NDArray[np.bool_],
+    output_path: str | Path,
+    title: str = "Detection-Without-Engagement Gap Map",
+    sensor_positions: list[tuple[float, float]] | None = None,
+    effector_positions: list[tuple[float, float]] | None = None,
+    boundary: Polygon | MultiPolygon | None = None,
+    zones: list[Zone] | None = None,
+) -> Path:
+    """Render a map highlighting "detection-without-engagement" gaps.
+
+    Cells are coloured by three categories:
+
+    - **Grey-green** — detected by sensors *and* covered by an effector: the
+      threat can be seen and defeated.
+    - **Amber** — detected by sensors but *not* covered by any effector: an
+      operator can observe the drone but cannot stop it.  These are the
+      critical "detection-without-engagement" gaps.
+    - **Transparent** — not detected by any sensor: outside the surveillance
+      perimeter entirely.
+
+    Args:
+        site: Site terrain model.
+        sensor_composite: Any-sensor composite boolean coverage array — output
+            of :func:`~salus.engine.coverage.compute_composite_coverage`.
+        effector_coverage: Effector engagement zone boolean array — output of
+            :func:`~salus.engine.effector_coverage.compute_effector_layer_coverage`.
+        output_path: Where to save the PNG.  Parent directories are created if
+            absent.
+        title: Map title.
+        sensor_positions: Optional list of ``(x, y)`` sensor positions to mark
+            as red triangles (▲).
+        effector_positions: Optional list of ``(x, y)`` effector positions to
+            mark as blue squares (■).
+        boundary: Optional site boundary polygon to draw as an outline.
+        zones: Optional zone overlays.
+
+    Returns:
+        Resolved :class:`~pathlib.Path` to the saved PNG file.
+
+    Raises:
+        ValueError: If *sensor_composite* and *effector_coverage* have
+            different shapes, or if either has zero elements.
+    """
+    if sensor_composite.shape != effector_coverage.shape:
+        raise ValueError(
+            f"sensor_composite shape {sensor_composite.shape} != "
+            f"effector_coverage shape {effector_coverage.shape} — arrays must match"
+        )
+    if sensor_composite.size == 0:
+        raise ValueError("arrays have zero elements — cannot render map")
+    # D-211: guard against shape mismatch vs DEM producing silently mis-registered overlays
+    if sensor_composite.shape != site.dem.shape:
+        raise ValueError(
+            f"sensor_composite shape {sensor_composite.shape} != "
+            f"site.dem shape {site.dem.shape} — arrays must match"
+        )
+    # D-206/D-209: cast check — integer-dtype DEMs raise TypeError with np.isnan
+    if np.issubdtype(site.dem.dtype, np.floating) and np.any(np.isnan(site.dem)):
+        raise ValueError(
+            f"site.dem contains NaN values — fill nodata before rendering {output_path}"
+        )
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    min_x, max_x, min_y, max_y = site.extent
+    extent = (min_x, max_x, min_y, max_y)
+
+    sensor_bool: npt.NDArray[np.bool_] = sensor_composite.astype(bool)
+    effector_bool: npt.NDArray[np.bool_] = effector_coverage.astype(bool)
+
+    # D-207: warn when sensor coverage is empty — gap map will be blank
+    if not sensor_bool.any():
+        warnings.warn(
+            "sensor_composite has no True cells — detection-without-engagement map "
+            "will be blank. Check that sensor coverage was computed correctly.",
+            UserWarning,
+            stacklevel=2,
+        )
+
+    # Cells with both sensor detection and effector coverage (good)
+    both_covered: npt.NDArray[np.bool_] = sensor_bool & effector_bool
+    # Cells detected but NOT engageable (the critical gap)
+    det_no_engage: npt.NDArray[np.bool_] = sensor_bool & ~effector_bool
+
+    fig, ax = plt.subplots(1, 1, figsize=(12, 10))
+    try:
+        hs = _hillshade(site.dem)
+        ax.imshow(hs, cmap="gray", extent=extent, origin="upper", alpha=0.7, zorder=1)
+
+        _add_basemap(ax, site)
+
+        # Grey-green: detected AND engageable
+        both_display = np.ma.masked_where(~both_covered, both_covered.astype(float))
+        ax.imshow(
+            both_display,
+            cmap=ListedColormap(["#7fb3a0"]),
+            extent=extent,
+            origin="upper",
+            alpha=0.5,
+            zorder=2,
+        )
+
+        # Amber: detected but NOT engageable — the gap
+        gap_display = np.ma.masked_where(~det_no_engage, det_no_engage.astype(float))
+        ax.imshow(
+            gap_display,
+            cmap=ListedColormap([_DETECTION_NO_ENGAGEMENT_COLOUR]),
+            extent=extent,
+            origin="upper",
+            alpha=0.65,
+            zorder=3,
+        )
+
+        _render_boundary(ax, boundary)
+        _render_zones(ax, zones)
+
+        # Sensor positions (red triangles)
+        if sensor_positions:
+            for x, y in sensor_positions:
+                ax.plot(
+                    x,
+                    y,
+                    "r^",
+                    markersize=12,
+                    markeredgecolor="black",
+                    markeredgewidth=1,
+                    zorder=7,
+                )
+
+        # Effector positions (blue squares)
+        if effector_positions:
+            for x, y in effector_positions:
+                ax.plot(
+                    x,
+                    y,
+                    marker="s",
+                    color=_EFFECTOR_COVERAGE_COLOUR,
+                    markersize=10,
+                    markeredgecolor="black",
+                    markeredgewidth=1,
+                    zorder=7,
+                )
+
+        gap_pct = det_no_engage.sum() / max(sensor_bool.sum(), 1) * 100.0
+        ax.set_title(
+            f"{title} ({gap_pct:.1f}% of detected area unengageable)",
+            fontsize=14,
+            fontweight="bold",
+        )
+        ax.set_xlabel("Easting (m)")
+        ax.set_ylabel("Northing (m)")
+        _add_cartographic_elements(ax)
+
+        legend_handles = [
+            mpatches.Patch(facecolor="#7fb3a0", alpha=0.6, label="Detected + engageable"),
+            mpatches.Patch(
+                facecolor=_DETECTION_NO_ENGAGEMENT_COLOUR,
+                alpha=0.7,
+                label="Detected — NO effector coverage (gap)",
+            ),
+        ]
+        ax.legend(handles=legend_handles, loc="lower left", fontsize=9, framealpha=0.8)
+
+        fig.tight_layout()
+        fig.savefig(output_path, dpi=200, bbox_inches="tight")
+    finally:
+        plt.close(fig)
+
+    return output_path.resolve()

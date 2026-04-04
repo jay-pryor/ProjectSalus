@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 
 import matplotlib
@@ -25,6 +26,8 @@ from salus.report.maps import (
     render_corridor_overlay_map,
     render_corridor_polar_diagram,
     render_coverage_map,
+    render_detection_without_engagement_map,
+    render_effector_coverage_map,
     render_gap_map,
     render_layer_coverage_maps,
     render_redundancy_map,
@@ -460,14 +463,12 @@ class TestRenderCompositeCoverageMap:
 
     def test_no_crs_skips_basemap_with_warning(self, flat_dem_path, tmp_path):
         """site.crs_epsg=None emits a warning but still produces a PNG."""
-        import warnings as _warnings
-
         site = load_dem(flat_dem_path)
         object.__setattr__(site, "crs_epsg", None)
         layers = _two_layer_coverages(site)
         out = tmp_path / "no_crs.png"
-        with _warnings.catch_warnings(record=True):
-            _warnings.simplefilter("always")
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("always")
             render_composite_coverage_map(site, layers, out)
         assert out.exists()
 
@@ -1254,3 +1255,246 @@ class TestRenderAdversarialMap:
         out = tmp_path / "adv_nonzero.png"
         render_adversarial_map(site, coverage, cost_grid, traj, result_obj, (cx, cy), out)
         assert out.exists()
+
+
+# ---------------------------------------------------------------------------
+# S11-2: Effector coverage map tests
+# ---------------------------------------------------------------------------
+
+
+class TestRenderEffectorCoverageMap:
+    """Tests for render_effector_coverage_map (S11-2)."""
+
+    def test_returns_resolved_path(self, flat_dem_path, tmp_path):
+        """Function must return the resolved output path."""
+        site = load_dem(flat_dem_path)
+        cov = np.ones(site.dem.shape, dtype=bool)
+        out = tmp_path / "effector.png"
+        result = render_effector_coverage_map(site, cov, out)
+        assert result == out.resolve()
+        assert result.exists()
+
+    def test_output_is_valid_png(self, flat_dem_path, tmp_path):
+        """Output must be a readable PNG image."""
+        site = load_dem(flat_dem_path)
+        cov = np.ones(site.dem.shape, dtype=bool)
+        out = tmp_path / "effector.png"
+        render_effector_coverage_map(site, cov, out)
+        img = Image.open(out)
+        assert img.format == "PNG"
+        assert img.size[0] > 0
+
+    def test_all_false_coverage_still_renders(self, flat_dem_path, tmp_path):
+        """An all-False effector coverage array must still produce a valid PNG."""
+        site = load_dem(flat_dem_path)
+        cov = np.zeros(site.dem.shape, dtype=bool)
+        out = tmp_path / "effector_empty.png"
+        result = render_effector_coverage_map(site, cov, out)
+        assert result.exists()
+        img = Image.open(out)
+        assert img.format == "PNG"
+
+    def test_partial_coverage_renders(self, flat_dem_path, tmp_path):
+        """Partial coverage must render without error."""
+        site = load_dem(flat_dem_path)
+        cov = np.zeros(site.dem.shape, dtype=bool)
+        cov[:50, :50] = True
+        out = tmp_path / "effector_partial.png"
+        result = render_effector_coverage_map(site, cov, out)
+        assert result.exists()
+
+    def test_creates_parent_directory(self, flat_dem_path, tmp_path):
+        """Missing parent directories must be created."""
+        site = load_dem(flat_dem_path)
+        cov = np.ones(site.dem.shape, dtype=bool)
+        out = tmp_path / "nested" / "dirs" / "effector.png"
+        result = render_effector_coverage_map(site, cov, out)
+        assert result.exists()
+
+    def test_effector_positions_accepted(self, flat_dem_path, tmp_path):
+        """effector_positions kwarg must be accepted without error."""
+        site = load_dem(flat_dem_path)
+        cov = np.ones(site.dem.shape, dtype=bool)
+        out = tmp_path / "effector_pos.png"
+        cx = site.origin_x + site.cols * site.resolution / 2.0
+        cy = site.origin_y - site.rows * site.resolution / 2.0
+        result = render_effector_coverage_map(site, cov, out, effector_positions=[(cx, cy)])
+        assert result.exists()
+
+    def test_non_2d_raises(self, flat_dem_path, tmp_path):
+        """Non-2D input must raise ValueError."""
+        site = load_dem(flat_dem_path)
+        bad_cov = np.ones(100, dtype=bool)
+        out = tmp_path / "effector.png"
+        with pytest.raises(ValueError, match="2-D"):
+            render_effector_coverage_map(site, bad_cov, out)
+
+    def test_zero_element_array_raises(self, flat_dem_path, tmp_path):
+        """Zero-element array must raise ValueError."""
+        site = load_dem(flat_dem_path)
+        bad_cov = np.zeros((0, 0), dtype=bool)
+        out = tmp_path / "effector.png"
+        with pytest.raises(ValueError, match="zero elements"):
+            render_effector_coverage_map(site, bad_cov, out)
+
+    def test_custom_title_accepted(self, flat_dem_path, tmp_path):
+        """Custom title kwarg must be accepted."""
+        site = load_dem(flat_dem_path)
+        cov = np.ones(site.dem.shape, dtype=bool)
+        out = tmp_path / "effector_title.png"
+        result = render_effector_coverage_map(site, cov, out, title="My Effector Map")
+        assert result.exists()
+
+    def test_nan_dem_raises(self, flat_dem_path, tmp_path):
+        """NaN values in site.dem must raise ValueError before rendering."""
+        site = load_dem(flat_dem_path)
+        site.dem[0, 0] = float("nan")
+        cov = np.ones(site.dem.shape, dtype=bool)
+        out = tmp_path / "effector_nan.png"
+        with pytest.raises(ValueError, match="NaN"):
+            render_effector_coverage_map(site, cov, out)
+
+    def test_shape_mismatch_vs_dem_raises(self, flat_dem_path, tmp_path):
+        """effector_coverage shape != site.dem.shape must raise ValueError."""
+        site = load_dem(flat_dem_path)
+        bad_cov = np.ones((10, 10), dtype=bool)  # wrong shape
+        out = tmp_path / "effector_shape.png"
+        with pytest.raises(ValueError, match="shape"):
+            render_effector_coverage_map(site, bad_cov, out)
+
+
+class TestRenderDetectionWithoutEngagementMap:
+    """Tests for render_detection_without_engagement_map (S11-2)."""
+
+    def test_returns_resolved_path(self, flat_dem_path, tmp_path):
+        """Function must return the resolved output path."""
+        site = load_dem(flat_dem_path)
+        sensor = np.ones(site.dem.shape, dtype=bool)
+        effector = np.ones(site.dem.shape, dtype=bool)
+        out = tmp_path / "dwe_gap.png"
+        result = render_detection_without_engagement_map(site, sensor, effector, out)
+        assert result == out.resolve()
+        assert result.exists()
+
+    def test_output_is_valid_png(self, flat_dem_path, tmp_path):
+        """Output must be a readable PNG image."""
+        site = load_dem(flat_dem_path)
+        sensor = np.ones(site.dem.shape, dtype=bool)
+        effector = np.zeros(site.dem.shape, dtype=bool)
+        out = tmp_path / "dwe_gap.png"
+        render_detection_without_engagement_map(site, sensor, effector, out)
+        img = Image.open(out)
+        assert img.format == "PNG"
+        assert img.size[0] > 0
+
+    def test_full_gap_scenario_renders(self, flat_dem_path, tmp_path):
+        """All sensor coverage, no effector coverage — worst-case gap — must render."""
+        site = load_dem(flat_dem_path)
+        sensor = np.ones(site.dem.shape, dtype=bool)
+        effector = np.zeros(site.dem.shape, dtype=bool)
+        out = tmp_path / "full_gap.png"
+        result = render_detection_without_engagement_map(site, sensor, effector, out)
+        assert result.exists()
+
+    def test_no_gap_scenario_renders(self, flat_dem_path, tmp_path):
+        """Full effector coverage matching sensor coverage — zero gap — must render."""
+        site = load_dem(flat_dem_path)
+        sensor = np.ones(site.dem.shape, dtype=bool)
+        effector = np.ones(site.dem.shape, dtype=bool)
+        out = tmp_path / "no_gap.png"
+        result = render_detection_without_engagement_map(site, sensor, effector, out)
+        assert result.exists()
+
+    def test_partial_gap_renders(self, flat_dem_path, tmp_path):
+        """Partial gap (some cells covered by both, some only sensor) must render."""
+        site = load_dem(flat_dem_path)
+        sensor = np.ones(site.dem.shape, dtype=bool)
+        effector = np.zeros(site.dem.shape, dtype=bool)
+        effector[:50, :50] = True  # effectors only cover top-left quadrant
+        out = tmp_path / "partial_gap.png"
+        result = render_detection_without_engagement_map(site, sensor, effector, out)
+        assert result.exists()
+
+    def test_creates_parent_directory(self, flat_dem_path, tmp_path):
+        """Missing parent directories must be created."""
+        site = load_dem(flat_dem_path)
+        sensor = np.ones(site.dem.shape, dtype=bool)
+        effector = np.ones(site.dem.shape, dtype=bool)
+        out = tmp_path / "nested" / "dwe.png"
+        result = render_detection_without_engagement_map(site, sensor, effector, out)
+        assert result.exists()
+
+    def test_sensor_and_effector_positions_accepted(self, flat_dem_path, tmp_path):
+        """Both sensor_positions and effector_positions kwargs accepted without error."""
+        site = load_dem(flat_dem_path)
+        sensor = np.ones(site.dem.shape, dtype=bool)
+        effector = np.ones(site.dem.shape, dtype=bool)
+        out = tmp_path / "dwe_pos.png"
+        cx = site.origin_x + site.cols * site.resolution / 2.0
+        cy = site.origin_y - site.rows * site.resolution / 2.0
+        result = render_detection_without_engagement_map(
+            site,
+            sensor,
+            effector,
+            out,
+            sensor_positions=[(cx, cy)],
+            effector_positions=[(cx - 10.0, cy - 10.0)],
+        )
+        assert result.exists()
+
+    def test_shape_mismatch_raises(self, flat_dem_path, tmp_path):
+        """Shape mismatch between sensor_composite and effector_coverage must raise ValueError."""
+        site = load_dem(flat_dem_path)
+        sensor = np.ones(site.dem.shape, dtype=bool)
+        effector = np.ones((10, 10), dtype=bool)  # wrong shape
+        out = tmp_path / "dwe.png"
+        with pytest.raises(ValueError, match="shape"):
+            render_detection_without_engagement_map(site, sensor, effector, out)
+
+    def test_zero_element_arrays_raise(self, flat_dem_path, tmp_path):
+        """Zero-element arrays must raise ValueError."""
+        site = load_dem(flat_dem_path)
+        bad = np.zeros((0, 0), dtype=bool)
+        out = tmp_path / "dwe.png"
+        with pytest.raises(ValueError, match="zero elements"):
+            render_detection_without_engagement_map(site, bad, bad, out)
+
+    def test_no_sensor_coverage_renders(self, flat_dem_path, tmp_path):
+        """Zero sensor coverage (nothing detected) must render without error."""
+        site = load_dem(flat_dem_path)
+        sensor = np.zeros(site.dem.shape, dtype=bool)
+        effector = np.ones(site.dem.shape, dtype=bool)
+        out = tmp_path / "no_sensor.png"
+        result = render_detection_without_engagement_map(site, sensor, effector, out)
+        assert result.exists()
+
+    def test_nan_dem_raises(self, flat_dem_path, tmp_path):
+        """NaN values in site.dem must raise ValueError before rendering."""
+        site = load_dem(flat_dem_path)
+        site.dem[0, 0] = float("nan")
+        sensor = np.ones(site.dem.shape, dtype=bool)
+        effector = np.ones(site.dem.shape, dtype=bool)
+        out = tmp_path / "dwe_nan.png"
+        with pytest.raises(ValueError, match="NaN"):
+            render_detection_without_engagement_map(site, sensor, effector, out)
+
+    def test_shape_mismatch_vs_dem_raises(self, flat_dem_path, tmp_path):
+        """sensor_composite shape != site.dem.shape must raise ValueError."""
+        site = load_dem(flat_dem_path)
+        bad = np.ones((10, 10), dtype=bool)  # wrong shape but they match each other
+        out = tmp_path / "dwe_dem_shape.png"
+        with pytest.raises(ValueError, match="shape"):
+            render_detection_without_engagement_map(site, bad, bad, out)
+
+    def test_empty_sensor_warns(self, flat_dem_path, tmp_path):
+        """All-False sensor composite must emit a UserWarning about blank map."""
+        site = load_dem(flat_dem_path)
+        sensor = np.zeros(site.dem.shape, dtype=bool)
+        effector = np.zeros(site.dem.shape, dtype=bool)
+        out = tmp_path / "dwe_empty_warn.png"
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            render_detection_without_engagement_map(site, sensor, effector, out)
+        assert any(issubclass(w.category, UserWarning) for w in caught), (
+            "Expected a UserWarning when sensor_composite is all-False"
+        )

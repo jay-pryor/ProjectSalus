@@ -1,0 +1,43 @@
+task_id: S11-2
+timestamp: 2026-04-04T06:00:00Z
+quality_gates:
+  G1_lint: pass
+  G2_format: pass
+  G3_import: pass
+  G4_type: pass        # 18 pre-existing import-untyped errors; 0 new errors from S11-2 code
+  G5_security: pass
+  G6_unit_test: pass   # 24 new tests all pass; all pre-existing tests pass
+  G7_coverage: pass    # New functions (lines 1707+) 100% covered; full suite >80%
+  G8_secrets: pass     # detect-secrets scan: no secrets found
+  coverage_pct: 100    # src/salus/report/maps.py lines 1707-1990 (new functions): 0 uncovered
+review:
+  l1_standards:
+    testing: pass
+    error_handling: pass
+    logging: pass      # No new logging added; warning() via warnings.warn() per standard
+    security: pass
+  l2_agents:
+    silent_failure_hunter: {status: fail, findings: 6}   # 3H 2M 1L — all resolved D-208..D-213
+    spec_compliance: {status: pass, findings: 3}         # 3 info (S10 untracked files in working tree; not S11-2 scope)
+    type_design_analyzer: {status: fail, findings: 8}    # 0E 5W 3I — all warnings are pre-existing module patterns not in S11-2 scope
+    regression_reviewer: {status: pass, findings: 2}     # 2L — low: colour constant (resolved as D-212); local alias (resolved as D-213)
+defect_ids: [D-206, D-207, D-208, D-209, D-210, D-211, D-212, D-213]
+overall: pass
+notes: >
+  New functions in src/salus/report/maps.py implement:
+  (1) render_effector_coverage_map — blue (#1abc9c teal) overlay on hillshade terrain showing
+      engagement zones; includes effector position markers, boundary/zones, coverage % in title.
+  (2) render_detection_without_engagement_map — gap analysis map with three categories:
+      grey-green (detected+engageable), amber (detected but no effector coverage = gap),
+      transparent (undetected); shows gap% as fraction of detected area in title.
+  Both functions validate: 2-D input, non-zero size, shape match vs site.dem, and
+  NaN pre-flight check (D-208/D-209: uses np.issubdtype guard for integer-dtype DEM safety).
+  Shape mismatch vs site.dem raises ValueError (D-210/D-211) to prevent silently mis-registered overlays.
+  _EFFECTOR_COVERAGE_COLOUR changed to #1abc9c teal (D-212) to be visually distinct from
+  Radar sensor blue (#3498db) on composite maps.
+  24 new tests added (11 for render_effector_coverage_map, 13 for render_detection_without_engagement_map).
+  Type design warnings (W) are all pre-existing bare np.ndarray annotations in older maps.py
+  functions and SiteModel — no errors in S11-2 code itself; not in scope to fix existing module.
+  Pre-existing S10 untracked files (charts.py, cli.py changes) in working tree are NOT part
+  of this S11-2 commit; staged selectively with git add -p.
+</content>
