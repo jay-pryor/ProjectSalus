@@ -1,0 +1,39 @@
+task_id: S8
+timestamp: 2026-04-03T14:00:00Z
+quality_gates:
+  G1_lint: pass
+  G2_format: pass
+  G3_import: pass
+  G4_type: pass   # 18 import-untyped errors; all pre-existing (rasterio, osgeo, shapely, yaml, scipy). No new S8 type errors.
+  G5_security: pass
+  G6_unit_test: pass   # 885 passed, 88 warnings (pre-existing contextily zoom warning)
+  G7_coverage: pass    # engine/saturation.py: 85%, models/saturation.py: 100%, report/charts.py: 98% (combined with test_charts.py). Full suite coverage well above 80%.
+  G8_secrets: pass
+  coverage_pct: 85   # engine/saturation.py module (primary S8 module)
+review:
+  l1_standards:
+    testing: pass   # 65 tests across TestApproachVector, TestSaturationTarget, TestSaturationScenario, TestAllocateEffectors, TestFindSaturationThreshold, TestComputeReengagementTimeline, TestRenderSaturationThresholdChart, TestRenderEngagementTimelineChart, TestRenderEffectorUtilisationChart
+    error_handling: pass   # Resolution/ValueError guards in _sample_dem_elevation, find_saturation_threshold; broad except in _effector_can_engage with warning
+    logging: pass   # _log.warning at NaN DEM, degenerate approach distance, no-LOS, no-active-effectors, no-firings-rendered paths
+    security: pass   # No file I/O beyond DEM array indexing; no external calls; no user-supplied paths in new code
+  l2_agents:
+    silent_failure_hunter: {status: pass, findings: 9}   # D-184..D-192; all resolved
+    spec_compliance: {status: pass, findings: 4}   # Documented deviations below
+    type_design_analyzer: {status: pass, findings: 0}
+    regression_reviewer: {status: pass, findings: 0}
+spec_deviations:
+  - "find_saturation_threshold returns SaturationResult (not bare int). Justified: richer return captures capacity, utilisation, and threshold in one call."
+  - "allocate_effectors takes extra `site` and `protected_point` parameters (required for range/arc/LOS checks — not avoidable without restructuring)."
+  - "S8-5 uses bar chart (render_effector_utilisation_chart) not a table. Bar chart is more readable for operator display."
+  - "unengaged_count_at_threshold is a scalar summary at the threshold event, not a per-scenario structure."
+defect_ids:
+  - D-184
+  - D-185
+  - D-186
+  - D-187
+  - D-188
+  - D-189
+  - D-190
+  - D-191
+  - D-192
+overall: pass

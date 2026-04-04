@@ -8,6 +8,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field, field_validator
 
+from salus.models.saturation import SaturationScenario
 from salus.models.threat import DroneTrajectory
 
 _BEARING_MAX_DEG: float = 360.0  # exclusive upper bound for compass bearing
@@ -158,6 +159,9 @@ class ScenarioConfig(BaseModel):
     sweep_segment_length_m: float = 5.0
     """Sampling interval for the trajectory sweep (metres, > 0).  Smaller values
     increase fidelity and computation time.  Default 5.0 for planning fidelity."""
+
+    saturation_scenarios: list[SaturationScenario] = Field(default_factory=list)
+    """Multi-target saturation scenarios to analyse.  Empty = no saturation analysis."""
 
     @field_validator("site_dem_path", mode="before")
     @classmethod

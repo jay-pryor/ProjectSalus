@@ -2029,9 +2029,9 @@ defects:
     file: src/salus/engine/saturation.py
     line: 57
     description: "NaN nodata cells in the DEM propagate silently through _sample_dem_elevation. NaN tgt_z_abs reaches line_of_sight_3d, raises ValueError, caught by except block, returns False — target silently classified as un-engageable. SaturationResult understates capacity with no warning."
-    resolution: ""
-    status: open
-    commit: ""
+    resolution: "Added math.isnan(val) guard in _sample_dem_elevation; logs WARNING with cell coordinates and returns 0.0 rather than propagating NaN."
+    status: resolved
+    commit: "pending"
 
   - id: D-185
     severity: high
@@ -2040,9 +2040,9 @@ defects:
     file: src/salus/engine/saturation.py
     line: 53
     description: "_sample_dem_elevation divides by site.resolution with no zero-guard. SiteModel has no resolution validator. resolution=0.0 produces ZeroDivisionError that propagates to CLI's broad except, silently aborting saturation analysis."
-    resolution: ""
-    status: open
-    commit: ""
+    resolution: "Added `if site.resolution <= 0.0: raise ValueError(...)` guard at entry to _sample_dem_elevation before any division."
+    status: resolved
+    commit: "pending"
 
   - id: D-186
     severity: high
@@ -2051,9 +2051,9 @@ defects:
     file: src/salus/engine/saturation.py
     line: 297
     description: "approach_distance = max_range * 0.75. Very small max_range_m (e.g. 1e-9) produces approach_distance = 0.0 after floating-point, causing ApproachVector._distance_positive ValueError inside find_saturation_threshold. Not caught; propagates to CLI except, silently aborting sweep."
-    resolution: ""
-    status: open
-    commit: ""
+    resolution: "Added guard in find_saturation_threshold: if approach_distance <= 0 or not finite, log WARNING and return zero-capacity SaturationResult."
+    status: resolved
+    commit: "pending"
 
   - id: D-187
     severity: high
@@ -2062,9 +2062,9 @@ defects:
     file: src/salus/cli.py
     line: 992
     description: "When saturation_threshold_n = max_targets + 1 (never reached), threshold_data only contains N=1..20, all with unengaged=0. The axvline at saturation_threshold_n=21 is not drawn. Chart appears identical to a fully-handled scenario — no indicator that threshold was never hit."
-    resolution: ""
-    status: open
-    commit: ""
+    resolution: "Detects threshold_never_reached case; annotates chart title with '(not reached within N=max_n)' and pushes sat_threshold_line off-chart so axvline is not drawn misleadingly."
+    status: resolved
+    commit: "pending"
 
   - id: D-188
     severity: high
@@ -2073,9 +2073,9 @@ defects:
     file: src/salus/cli.py
     line: 1042
     description: "sc.protected_point is typed as tuple[float,float]|None. The outer guard ensures non-None at this call site, but there is no type assertion. A future refactor removing the guard would cause TypeError inside _target_crs_position with no callsite context."
-    resolution: ""
-    status: open
-    commit: ""
+    resolution: "Added `assert sc.protected_point is not None, '...'` immediately before allocate_effectors call to narrow type and provide explicit diagnostic message."
+    status: resolved
+    commit: "pending"
 
   - id: D-189
     severity: medium
@@ -2084,9 +2084,9 @@ defects:
     file: src/salus/engine/saturation.py
     line: 118
     description: "_effector_can_engage catches only ValueError from line_of_sight_3d. Other exceptions (IndexError, MemoryError) propagate uncaught to CLI, where the target is silently dropped. Warning log does not include exception type."
-    resolution: ""
-    status: open
-    commit: ""
+    resolution: "Widened `except ValueError` to `except Exception as los_exc` with `# noqa: BLE001`; warning log now includes `type(los_exc).__name__` for diagnostics."
+    status: resolved
+    commit: "pending"
 
   - id: D-190
     severity: medium
@@ -2095,9 +2095,9 @@ defects:
     file: src/salus/engine/saturation.py
     line: 425
     description: "compute_reengagement_timeline: when no placement passes active_names filter, per_effector_engagements is empty and min_cycle_time = math.inf. Guard resets it to window_s (60.0). ReengagementResult.reengagement_cycle_time_s returns 60.0 masquerading as a real measurement."
-    resolution: ""
-    status: open
-    commit: ""
+    resolution: "Changed fallback from window_s to 0.0 so callers can distinguish 'no active effectors' from a real measurement; also logs WARNING."
+    status: resolved
+    commit: "pending"
 
   - id: D-191
     severity: medium
@@ -2106,9 +2106,9 @@ defects:
     file: src/salus/engine/saturation.py
     line: 466
     description: "_BEARING_MAX_DEG declared twice — once used at line 297 and re-exported at line 466. Duplicate private constant: future divergence would silently produce wrong bearing distributions. Remove redundant re-declaration."
-    resolution: ""
-    status: open
-    commit: ""
+    resolution: "Removed the duplicate re-declaration at end of file. The single authoritative definition at the top of the constants block is retained with an explanatory comment."
+    status: resolved
+    commit: "pending"
 
   - id: D-192
     severity: medium
@@ -2117,6 +2117,6 @@ defects:
     file: src/salus/report/charts.py
     line: 474
     description: "render_engagement_timeline_chart: when reaction_s > window_s, while loop never executes, idle bar drawn with no firing events. No warning emitted — chart consumer cannot distinguish 'effector too slow' from data error."
-    resolution: ""
-    status: open
-    commit: ""
+    resolution: "Added `fired` boolean flag in loop; post-loop `if not fired: _log.warning(...)` emits WARNING with effector name, reaction_time, and window_s."
+    status: resolved
+    commit: "pending"

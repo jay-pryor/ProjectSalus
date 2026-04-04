@@ -1,4 +1,4 @@
-"""Kill-chain Gantt chart rendering (S7).
+"""Kill-chain Gantt chart rendering (S7) and saturation analysis charts (S8).
 
 Produces a horizontal stacked-bar diagram showing D-T-I-D-E-A phase durations
 against available time for each approach corridor.  Green margin = feasible;
@@ -24,9 +24,11 @@ from pathlib import Path
 import matplotlib
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
+import matplotlib.ticker
 
 from salus.engine.kill_chain import required_time
 from salus.engine.threat_corridor import CorridorResult
+from salus.models.saturation import ReengagementResult, SaturationResult
 from salus.models.scenario import KillChainConfig, KillChainResult
 from salus.models.sensor import EffectorDefinition
 
@@ -318,3 +320,287 @@ def render_kill_chain_summary_chart(
         output_path,
         title=title,
     )
+
+
+# ---------------------------------------------------------------------------
+# Saturation analysis charts (S8)
+# ---------------------------------------------------------------------------
+
+# Colours for the saturation threshold bar chart.
+_SAT_ENGAGED_COLOUR: str = "#2ecc71"  # green — fully handled
+_SAT_UNENGAGED_COLOUR: str = "#e74c3c"  # red — unengaged targets
+_SAT_THRESHOLD_LINE_COLOUR: str = "#c0392b"  # dark red — threshold marker
+
+# Colours for the engagement timeline Gantt bars.
+_TIMELINE_FIRING_COLOUR: str = "#3498db"  # blue — active engagement
+_TIMELINE_RELOAD_COLOUR: str = "#bdc3c7"  # grey — reloading
+_TIMELINE_IDLE_COLOUR: str = "#ecf0f1"  # light grey — idle bar background
+
+# Colour for the utilisation bar chart.
+_UTIL_COLOUR: str = "#9b59b6"  # purple
+
+
+def render_saturation_threshold_chart(
+    threshold_data: dict[int, int],
+    saturation_threshold_n: int,
+    output_path: str | Path,
+    title: str = "Saturation Threshold Analysis",
+) -> Path:
+    """Render a bar chart of unengaged targets versus simultaneous target count.
+
+    Each bar represents the number of unengaged targets for a given number of
+    simultaneous attackers.  A vertical dashed line marks the saturation
+    threshold (the first N where at least one target is unengaged).
+
+    Args:
+        threshold_data: Mapping from target count N to number of unengaged
+            targets at that N.  Must not be empty.
+        saturation_threshold_n: The saturation threshold value to mark.
+        output_path: Output PNG path.  Parent directories are created if absent.
+        title: Chart title.
+
+    Returns:
+        Resolved Path to the written PNG.
+
+    Raises:
+        ValueError: If ``threshold_data`` is empty.
+    """
+    if not threshold_data:
+        raise ValueError("threshold_data must not be empty")
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    ns = sorted(threshold_data.keys())
+    unengaged = [threshold_data[n] for n in ns]
+    colours = [_SAT_UNENGAGED_COLOUR if u > 0 else _SAT_ENGAGED_COLOUR for u in unengaged]
+
+    fig, ax = plt.subplots(figsize=(_DEFAULT_FIG_WIDTH, 5.0))
+
+    ax.bar(ns, unengaged, color=colours, edgecolor="white", linewidth=0.5)
+
+    # Mark saturation threshold.
+    if saturation_threshold_n in threshold_data:
+        ax.axvline(
+            x=saturation_threshold_n,
+            color=_SAT_THRESHOLD_LINE_COLOUR,
+            linewidth=2.0,
+            linestyle="--",
+            label=f"Saturation threshold (N={saturation_threshold_n})",
+        )
+        ax.legend(fontsize=9, framealpha=0.8)
+
+    ax.set_xlabel("Simultaneous targets", fontsize=10)
+    ax.set_ylabel("Unengaged targets", fontsize=10)
+    ax.set_title(title, fontsize=12, fontweight="bold")
+    ax.set_xticks(ns)
+    ax.yaxis.set_major_locator(matplotlib.ticker.MaxNLocator(integer=True))
+    ax.grid(axis="y", linestyle=":", alpha=0.4)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    try:
+        plt.tight_layout()
+        fig.savefig(output_path, dpi=150, bbox_inches="tight")
+    finally:
+        plt.close(fig)
+
+    _log.info("Saturation threshold chart written to %s", output_path)
+    return output_path.resolve()
+
+
+def render_engagement_timeline_chart(
+    reengagement_result: ReengagementResult,
+    effector_timing: dict[str, tuple[float, float]],
+    output_path: str | Path,
+    title: str = "Effector Re-engagement Timeline",
+) -> Path:
+    """Render a Gantt chart of effector firing events over the engagement window.
+
+    Shows each effector as a row with alternating firing (blue) and reload
+    (grey) segments, illustrating the temporal capacity of the effector network.
+
+    Args:
+        reengagement_result: Pre-computed re-engagement timeline.
+        effector_timing: Mapping from effector name to
+            ``(reaction_time_s, reload_time_s)`` for computing shot positions.
+            Must contain an entry for every key in
+            ``reengagement_result.per_effector_engagements``.
+        output_path: Output PNG path.
+        title: Chart title.
+
+    Returns:
+        Resolved Path to the written PNG.
+
+    Raises:
+        ValueError: If ``reengagement_result.per_effector_engagements`` is
+            empty, or if ``effector_timing`` is missing a required key.
+    """
+    per_eff = reengagement_result.per_effector_engagements
+    if not per_eff:
+        raise ValueError("reengagement_result.per_effector_engagements must not be empty")
+
+    missing = [name for name in per_eff if name not in effector_timing]
+    if missing:
+        raise ValueError(f"effector_timing is missing keys: {missing}")
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    window_s = reengagement_result.window_s
+    effector_names = sorted(per_eff.keys())
+    n_rows = len(effector_names)
+
+    fig_height = max(3.0, n_rows * (_DEFAULT_BAR_HEIGHT + 0.5) + 1.5)
+    fig, ax = plt.subplots(figsize=(_DEFAULT_FIG_WIDTH, fig_height))
+
+    for row_idx, name in enumerate(effector_names):
+        y = n_rows - 1 - row_idx
+        reaction_s, reload_s = effector_timing[name]
+        cycle_s = reaction_s + reload_s
+
+        # Draw window background.
+        ax.barh(
+            y,
+            window_s,
+            left=0.0,
+            height=_DEFAULT_BAR_HEIGHT,
+            color=_TIMELINE_IDLE_COLOUR,
+            edgecolor="#cccccc",
+            linewidth=0.3,
+        )
+
+        # Draw firing segments.
+        t = 0.0
+        fired = False
+        while t + reaction_s <= window_s:
+            fired = True
+            fire_start = t
+            fire_end = min(t + reaction_s, window_s)
+            ax.barh(
+                y,
+                fire_end - fire_start,
+                left=fire_start,
+                height=_DEFAULT_BAR_HEIGHT,
+                color=_TIMELINE_FIRING_COLOUR,
+                edgecolor="white",
+                linewidth=0.3,
+            )
+            t += reaction_s
+            if reload_s > 0.0:
+                reload_start = t
+                reload_end = min(t + reload_s, window_s)
+                ax.barh(
+                    y,
+                    reload_end - reload_start,
+                    left=reload_start,
+                    height=_DEFAULT_BAR_HEIGHT,
+                    color=_TIMELINE_RELOAD_COLOUR,
+                    edgecolor="white",
+                    linewidth=0.3,
+                )
+                t += reload_s
+            if cycle_s <= 0.0:
+                break
+        if not fired:
+            _log.warning(
+                "Effector '%s': reaction_time %.1fs exceeds window %.1fs"
+                " — no engagements rendered.",
+                name,
+                reaction_s,
+                window_s,
+            )
+
+    ax.set_yticks(range(n_rows))
+    ax.set_yticklabels(list(reversed(effector_names)), fontsize=9)
+    ax.set_xlim(0.0, window_s)
+    ax.set_xlabel("Time (s)", fontsize=10)
+    ax.set_title(title, fontsize=12, fontweight="bold")
+    ax.grid(axis="x", linestyle=":", alpha=0.4)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    fire_patch = mpatches.Patch(color=_TIMELINE_FIRING_COLOUR, label="Engaging")
+    reload_patch = mpatches.Patch(color=_TIMELINE_RELOAD_COLOUR, label="Reloading")
+    ax.legend(handles=[fire_patch, reload_patch], fontsize=8, framealpha=0.8, loc="lower right")
+
+    try:
+        plt.tight_layout()
+        fig.savefig(output_path, dpi=150, bbox_inches="tight")
+    finally:
+        plt.close(fig)
+
+    _log.info("Engagement timeline chart written to %s", output_path)
+    return output_path.resolve()
+
+
+def render_effector_utilisation_chart(
+    saturation_result: SaturationResult,
+    output_path: str | Path,
+    title: str = "Effector Utilisation at Saturation Threshold",
+) -> Path:
+    """Render a bar chart of per-effector utilisation at the saturation threshold.
+
+    Each bar shows the fraction of an effector's simultaneous engagement
+    capacity that was used in the last fully-handled scenario before saturation.
+
+    Args:
+        saturation_result: Completed saturation sweep result.
+        output_path: Output PNG path.
+        title: Chart title.
+
+    Returns:
+        Resolved Path to the written PNG.
+
+    Raises:
+        ValueError: If ``saturation_result.per_effector_utilisation`` is empty.
+    """
+    utilisation = saturation_result.per_effector_utilisation
+    if not utilisation:
+        raise ValueError("saturation_result.per_effector_utilisation must not be empty")
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    names = sorted(utilisation.keys())
+    values = [utilisation[n] * 100.0 for n in names]
+
+    fig, ax = plt.subplots(figsize=(_DEFAULT_FIG_WIDTH, max(3.0, len(names) * 0.6 + 2.0)))
+
+    bars = ax.barh(
+        range(len(names)),
+        values,
+        color=_UTIL_COLOUR,
+        edgecolor="white",
+        linewidth=0.5,
+    )
+
+    # Annotate each bar with the percentage.
+    for bar, pct in zip(bars, values):
+        ax.text(
+            min(pct + 1.0, 105.0),
+            bar.get_y() + bar.get_height() / 2.0,
+            f"{pct:.0f}%",
+            va="center",
+            ha="left",
+            fontsize=8,
+        )
+
+    ax.set_yticks(range(len(names)))
+    ax.set_yticklabels(names, fontsize=9)
+    ax.set_xlim(0.0, 110.0)
+    ax.set_xlabel("Utilisation (%)", fontsize=10)
+    ax.set_title(title, fontsize=12, fontweight="bold")
+    ax.axvline(x=100.0, color="#e74c3c", linewidth=1.0, linestyle="--", alpha=0.6)
+    ax.grid(axis="x", linestyle=":", alpha=0.4)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    try:
+        plt.tight_layout()
+        fig.savefig(output_path, dpi=150, bbox_inches="tight")
+    finally:
+        plt.close(fig)
+
+    _log.info("Effector utilisation chart written to %s", output_path)
+    return output_path.resolve()
