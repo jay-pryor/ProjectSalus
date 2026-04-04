@@ -2273,7 +2273,7 @@ defects:
     description: "Neither render_effector_coverage_map nor render_detection_without_engagement_map checks site.dem for NaN before calling _hillshade. When NaN is present, _hillshade raises ValueError but the error message gives no context about which output map was being rendered."
     resolution: "Added np.issubdtype guard before np.isnan check in both functions with informative error message including output_path."
     status: resolved
-    commit: "TBD"
+    commit: "8bcdd6f"
 
   - id: D-207
     severity: medium
@@ -2284,7 +2284,7 @@ defects:
     description: "render_detection_without_engagement_map uses max(sensor_bool.sum(), 1) to avoid division by zero, but emits no warning when sensor_composite is all-False. A map with zero sensor coverage renders silently as blank with a '0.0% unengageable' title, which could mislead an operator."
     resolution: "Added warnings.warn(UserWarning) before figure allocation when sensor_bool.any() is False. Tests added for warning behaviour."
     status: resolved
-    commit: "TBD"
+    commit: "8bcdd6f"
 
   - id: D-208
     severity: high
@@ -2295,7 +2295,7 @@ defects:
     description: "np.isnan(site.dem) raises TypeError when site.dem has an integer dtype (e.g. int16/int32 from rasterio). The NaN pre-flight guard in render_effector_coverage_map crashes with an unrelated TypeError rather than cleanly passing or detecting NaN."
     resolution: "Changed to np.issubdtype(site.dem.dtype, np.floating) guard before np.isnan call. Integer DEMs cannot contain NaN so this is safe — they pass through cleanly."
     status: resolved
-    commit: "TBD"
+    commit: "8bcdd6f"
 
   - id: D-209
     severity: high
@@ -2306,7 +2306,7 @@ defects:
     description: "Same np.isnan() / integer-dtype crash as D-208, in render_detection_without_engagement_map."
     resolution: "Same fix as D-208 applied at line 1875."
     status: resolved
-    commit: "TBD"
+    commit: "8bcdd6f"
 
   - id: D-210
     severity: high
@@ -2317,7 +2317,7 @@ defects:
     description: "render_effector_coverage_map does not verify that effector_coverage.shape matches site.dem.shape. A mis-sized array renders silently with the overlay placed at the wrong geographic coordinates — the PNG looks valid but is geographically wrong."
     resolution: "Added shape guard: raises ValueError if effector_coverage.shape != site.dem.shape. Test test_shape_mismatch_vs_dem_raises added."
     status: resolved
-    commit: "TBD"
+    commit: "8bcdd6f"
 
   - id: D-211
     severity: medium
@@ -2328,7 +2328,7 @@ defects:
     description: "render_detection_without_engagement_map checks sensor_composite.shape == effector_coverage.shape but not either vs site.dem.shape. Mis-sized arrays that match each other but differ from the DEM render with silently wrong geographic registration."
     resolution: "Added shape guard after inter-array check: raises ValueError if sensor_composite.shape != site.dem.shape. Test test_shape_mismatch_vs_dem_raises added."
     status: resolved
-    commit: "TBD"
+    commit: "8bcdd6f"
 
   - id: D-212
     severity: medium
@@ -2339,7 +2339,7 @@ defects:
     description: "_EFFECTOR_COVERAGE_COLOUR is '#3498db', identical to _SENSOR_TYPE_COLOURS[SensorType.Radar]. On composite maps both layers render in the same blue, making effector zones and Radar sensor coverage visually indistinguishable."
     resolution: "Changed _EFFECTOR_COVERAGE_COLOUR to '#1abc9c' (teal) with explanatory comment noting the deliberate distinction from Radar blue."
     status: resolved
-    commit: "TBD"
+    commit: "8bcdd6f"
 
   - id: D-213
     severity: low
@@ -2350,4 +2350,4 @@ defects:
     description: "Local 'import warnings as _warnings' alias at line 466 is now redundant since S11-2 added 'import warnings' at module scope. Cosmetic inconsistency."
     resolution: "Removed local alias; replaced _warnings references with module-level warnings import."
     status: resolved
-    commit: "TBD"
+    commit: "8bcdd6f"
