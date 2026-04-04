@@ -2120,3 +2120,146 @@ defects:
     resolution: "Added `fired` boolean flag in loop; post-loop `if not fired: _log.warning(...)` emits WARNING with effector name, reaction_time, and window_s."
     status: resolved
     commit: "1a9b26b"
+
+  - id: D-193
+    severity: high
+    task: S10
+    found_by: silent_failure_hunter
+    file: src/salus/report/charts.py
+    line: 690
+    description: "render_coverage_comparison_chart: per_zone_coverage_pct_a.get(z, 0.0) silently substitutes 0.0 for a missing zone key. If a manually-constructed ComparisonResult has a zone in per_zone_delta_pct absent from per_zone_coverage_pct_a, the delta annotation on that bar is computed against 0.0 rather than the true A value — wrong output with no error."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-194
+    severity: high
+    task: S10
+    found_by: silent_failure_hunter
+    file: src/salus/cli.py
+    line: 1655
+    description: "_load_site_for_comparison has no exception handling. Failure in load_scenario or load_dem is swallowed by a catch-all at the render call site; the compare command exits 0 even though no delta map was produced, with only a one-line warning."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-195
+    severity: high
+    task: S10
+    found_by: silent_failure_hunter
+    file: src/salus/engine/comparison.py
+    line: 183
+    description: "compare_configs: no bounds/NaN check on total_coverage_pct before arithmetic. If upstream produces NaN or out-of-range coverage, coverage_delta_pct silently becomes NaN and flows into ComparisonResult and CLI output with no error raised."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-196
+    severity: medium
+    task: S10
+    found_by: silent_failure_hunter
+    file: src/salus/engine/comparison.py
+    line: 173
+    description: "compare_configs: NaN cells in a float composite cast silently to True by .astype(bool), causing those cells to appear covered in the delta grid. Wrong cell-level output with no warning."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-197
+    severity: medium
+    task: S10
+    found_by: silent_failure_hunter
+    file: src/salus/report/maps.py
+    line: 1607
+    description: "render_delta_map: _hillshade ValueError for NaN DEM surfaces only as a generic CLI warning; the diagnostic (DEM path, NaN count) is lost and the output directory is silently incomplete."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-198
+    severity: medium
+    task: S10
+    found_by: silent_failure_hunter
+    file: src/salus/engine/comparison.py
+    line: 52
+    description: "ConfigurationResult: no shape-consistency check between composite and stats.redundancy_map. A caller can pair a populated composite with the zero-shape default redundancy_map, producing shape mismatches that only surface as confusing index errors downstream."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-199
+    severity: medium
+    task: S10
+    found_by: spec_compliance
+    file: src/salus/report/maps.py
+    line: 1552
+    description: "render_delta_map is missing its '-> Path' return type annotation, violating the project-wide type-annotation rule (CLAUDE.md). mypy infers '-> None'."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-200
+    severity: medium
+    task: S10
+    found_by: type_design_analyzer
+    file: src/salus/engine/comparison.py
+    line: 74
+    description: "ConfigurationResult.composite has no runtime ndim guard. compare_configs checks .size == 0 but not .ndim == 2. A 1-D array of non-zero length would pass the guard and silently produce a malformed delta_grid."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-201
+    severity: high
+    task: S11-1
+    found_by: silent_failure_hunter
+    file: src/salus/engine/effector_coverage.py
+    line: 198
+    description: "Non-LOS path: if placement.position_x or position_y is non-finite (e.g. NaN), np.sqrt produces NaN, range_mask becomes all-False, and the engagement zone is silently all-False with no error raised."
+    resolution: "Added math.isfinite guard on position_x and position_y at top of compute_single_effector_coverage; raises ValueError with coordinates."
+    status: resolved
+    commit: ""
+
+  - id: D-202
+    severity: high
+    task: S11-1
+    found_by: silent_failure_hunter
+    file: src/salus/engine/effector_coverage.py
+    line: 191
+    description: "No site.resolution <= 0 guard in _clip_to_effector. If resolution=0, coordinate grids collapse to a single point (all cells mapped to origin), producing a silently wrong uniform-distance range_mask."
+    resolution: "Added resolution guard at top of _clip_to_effector: raises ValueError if not finite or <= 0, consistent with viewshed.clip_viewshed_to_sensor."
+    status: resolved
+    commit: ""
+
+  - id: D-203
+    severity: medium
+    task: S11-1
+    found_by: silent_failure_hunter
+    file: src/salus/engine/effector_coverage.py
+    line: 121
+    description: "compute_effector_layer_coverage loop has no per-effector exception handler. A GDAL RuntimeError from compute_viewshed aborts the entire layer with no log identifying which effector caused the failure."
+    resolution: "Wrapped per-effector call in try/except Exception; re-raises as RuntimeError naming the effector and its position."
+    status: resolved
+    commit: ""
+
+  - id: D-204
+    severity: medium
+    task: S11-1
+    found_by: silent_failure_hunter
+    file: src/salus/engine/effector_coverage.py
+    line: 119
+    description: "Empty effector_pairs list returns all-False array silently. A configuration error (effector list not populated) would not be distinguishable from a valid zero-effector scenario without a warning log."
+    resolution: "Added _log.warning call when effector_pairs is empty before the union loop."
+    status: resolved
+    commit: ""
+
+  - id: D-205
+    severity: medium
+    task: S11-1
+    found_by: type_design_analyzer
+    file: src/salus/engine/effector_coverage.py
+    line: 69
+    description: "Local variable effector_agl lacks explicit float annotation; intermediate arrays in _clip_to_effector (col_coords, row_coords, cell_x, cell_y, dx, dy, dist) lack annotations. Project rule: type-annotate everything."
+    resolution: "Added explicit type annotations for effector_agl and all intermediate NDArray variables in _clip_to_effector."
+    status: resolved
+    commit: ""

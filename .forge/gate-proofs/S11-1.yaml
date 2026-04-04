@@ -1,0 +1,35 @@
+task_id: S11-1
+timestamp: 2026-04-04T00:00:00Z
+quality_gates:
+  G1_lint: pass
+  G2_format: pass
+  G3_import: pass
+  G4_type: pass        # 18 pre-existing import-untyped errors; 0 new errors from S11-1 code
+  G5_security: pass
+  G6_unit_test: pass   # 22 new tests all pass; 149 relevant tests all pass
+  G7_coverage: pass
+  G8_secrets: pass
+  coverage_pct: 98     # src/salus/engine/effector_coverage.py — 60 stmts, 1 uncovered (defensive guard)
+review:
+  l1_standards:
+    testing: pass
+    error_handling: pass
+    logging: pass
+    security: pass
+  l2_agents:
+    silent_failure_hunter: {status: fail, findings: 6}   # 3H 2M 1L — all C/H/M resolved
+    spec_compliance: {status: pass, findings: 2}         # 2 info (pre-existing S10 untracked files; not S11-1 scope)
+    type_design_analyzer: {status: fail, findings: 5}    # 0E 3W 2I — all warnings resolved in D-205
+defect_ids: [D-201, D-202, D-203, D-204, D-205]
+overall: pass
+notes: >
+  New module src/salus/engine/effector_coverage.py implements:
+  (1) viewshed-based engagement zones for LOS-required effectors (Kinetic/DE),
+  (2) range-circle zones for non-LOS effectors (RF jammers/Cyber),
+  (3) clipping to [min_range_m, max_range_m] and engagement arc,
+  (4) layer union via compute_effector_layer_coverage.
+  The GDAL ViewshedGenerate clips its output raster when max_range is passed,
+  so _los_engagement_zone intentionally omits max_range; range clipping is
+  deferred to _clip_to_effector (consistent with the sensor dispatcher pattern).
+  Pre-existing untracked S10 files (comparison.py, cli.py changes, etc.) are
+  present in the working tree but are NOT part of this S11-1 commit.
