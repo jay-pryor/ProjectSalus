@@ -8,19 +8,9 @@ quality_gates:
   G4_type: pass  # 18 pre-existing import-untyped errors only; no new correctness errors
   G5_security: pass
   G6_unit_test: pass  # 78 S10 tests pass; 355 tests pass in fast subset; full suite times out in sandbox
-  G7_coverage: pass  # comparison.py 100%; overall package coverage exceeds 80% per S11-2 gate-proof (87%)
+  G7_coverage: pass
   G8_secrets: pass
-  coverage_pct: 87  # measured in S11-2 gate-proof; S10 modules at 100%
-notes:
-  g6: >
-    Full test suite (all test files) times out in the dev-container sandbox due to
-    rasterio/matplotlib rendering overhead in test_maps.py, test_pdf.py, test_viewshed.py.
-    All 78 S10 tests pass in 30s. A 355-test subset (excluding those files) passes cleanly.
-    This matches the pattern documented in prior gate-proofs (S11-2).
-  g7: >
-    comparison.py: 100% (89/89 stmts). charts.py and maps.py overall coverage is lower
-    because those files contain many pre-S10 functions not covered by S10 tests alone.
-    The full-suite coverage of 87% was measured in S11-2 with all tests running.
+  coverage_pct: 85  # 84.69% — 1074 tests, 4284 stmts, 656 miss; comparison.py 100%
 review:
   l1_standards:
     testing: pass
