@@ -2361,7 +2361,7 @@ defects:
     description: "cost_estimate subtraction has no finiteness guard. If either cost_estimate is inf/nan (valid Python float, passes the 'is not None' check), cost_delta will silently be NaN/inf, producing a nonsense procurement figure."
     resolution: "Added math.isfinite guard; if either cost is non-finite, logs warning and leaves cost_delta as None."
     status: resolved
-    commit: pending
+    commit: bbcfe9c
 
   - id: D-215
     severity: high
@@ -2372,7 +2372,7 @@ defects:
     description: "NaN guard only activates for np.floating dtypes. Non-float numeric dtypes (or object arrays) bypass the guard; np.nan_to_num is a no-op and NaN values would corrupt the delta grid silently."
     resolution: "Added explicit dtype check: non-numeric dtypes raise TypeError; bool arrays pass via dtype == np.bool_ guard."
     status: resolved
-    commit: pending
+    commit: bbcfe9c
 
   - id: D-216
     severity: high
@@ -2383,7 +2383,7 @@ defects:
     description: "Missing render_side_by_side_coverage_maps. S10-2 requires 'side-by-side coverage maps (A left, B right)' in maps.py. Only render_delta_map was implemented."
     resolution: "Implemented render_side_by_side_coverage_maps with A-left/B-right layout, sensor position markers, hillshade base, and boundary/zone overlays."
     status: resolved
-    commit: pending
+    commit: bbcfe9c
 
   - id: D-217
     severity: high
@@ -2394,7 +2394,7 @@ defects:
     description: "Missing render_comparison_statistics_table. S10-2 requires 'comparison statistics table' in charts.py. Only the grouped bar chart was implemented."
     resolution: "Implemented render_comparison_statistics_table with overall coverage, per-zone, cost, capacity, and saturation rows; delta colour-coded."
     status: resolved
-    commit: pending
+    commit: bbcfe9c
 
   - id: D-218
     severity: medium
@@ -2405,7 +2405,7 @@ defects:
     description: "_load_site_for_comparison annotated -> Any instead of -> SiteModel. The Any return silences mypy's type-checking on the render_delta_map(site=...) call site."
     resolution: "Changed return annotation to -> SiteModel with TYPE_CHECKING import."
     status: resolved
-    commit: pending
+    commit: bbcfe9c
 
   - id: D-219
     severity: medium
@@ -2416,7 +2416,7 @@ defects:
     description: "Boundary fallback failure is only emitted via click.echo to stderr, not via the module logger. Non-interactive use cases (CI pipelines with stderr redirected) will miss the event entirely."
     resolution: "Added _log.warning() call alongside click.echo for boundary load failures."
     status: resolved
-    commit: pending
+    commit: bbcfe9c
 
   - id: D-220
     severity: medium
@@ -2427,7 +2427,7 @@ defects:
     description: "render_delta_map and render_coverage_comparison_chart failures are swallowed with bare except+click.echo and no non-zero exit code, no logger traceback. The CLI exits 0 silently with missing output files."
     resolution: "Added _log.warning(..., exc_info=True) to all render failure except blocks."
     status: resolved
-    commit: pending
+    commit: bbcfe9c
 
   - id: D-221
     severity: medium
@@ -2438,7 +2438,7 @@ defects:
     description: "_load_site_for_comparison re-loads the DEM a second time (already loaded in _run_config_simulation). The except clause misses ValueError from rasterio, so a decode error propagates as an unhandled exception instead of the expected warning."
     resolution: "Added ValueError and RuntimeError to except clause in _load_site_for_comparison."
     status: resolved
-    commit: pending
+    commit: bbcfe9c
 
   - id: D-222
     severity: low
@@ -2449,7 +2449,7 @@ defects:
     description: "Delta annotation loop in render_coverage_comparison_chart doesn't guard against NaN coverage values. Annotation would silently render as '-nan%' text."
     resolution: "Added if not math.isfinite(delta): continue guard in annotation loop."
     status: resolved
-    commit: pending
+    commit: bbcfe9c
 
   - id: D-223
     severity: low
@@ -2460,7 +2460,7 @@ defects:
     description: "sensor_positions list built in _run_config_simulation but never used — dead code."
     resolution: "Removed dead sensor_positions list from _run_config_simulation."
     status: resolved
-    commit: pending
+    commit: bbcfe9c
 
   - id: D-224
     severity: high
@@ -2471,7 +2471,7 @@ defects:
     description: "render_side_by_side_coverage_maps calls _hillshade() with no inner try/except diagnostic wrapper. render_delta_map wraps _hillshade in a ValueError that attaches NaN count context; the side-by-side path omits this, so DEM NaN failures surface with no actionable diagnostic."
     resolution: "Added inner try/except ValueError around _hillshade call, attaching NaN count context before re-raising."
     status: resolved
-    commit: pending
+    commit: bbcfe9c
 
   - id: D-225
     severity: high
@@ -2482,7 +2482,7 @@ defects:
     description: "render_comparison_statistics_table calls _sign(cov_b - cov_a) with no finiteness guard on cov_a/cov_b. A hand-constructed ComparisonResult with NaN coverage silently renders '+nan' in the table and miscolours delta cells."
     resolution: "Added math.isfinite guard at function entry; raises ValueError if either coverage value is non-finite."
     status: resolved
-    commit: pending
+    commit: bbcfe9c
 
   - id: D-226
     severity: medium
@@ -2493,7 +2493,7 @@ defects:
     description: "render_side_by_side_coverage_maps overlay uses comp.astype(float) as imshow data. If comp is all-False (0% coverage), the entirely-masked overlay renders a blank panel with no operator warning. render_delta_map uses np.ones_like to decouple colour from data magnitude."
     resolution: "Changed to np.ones_like(comp, dtype=float) with explicit vmin=0, vmax=1, matching render_delta_map pattern."
     status: resolved
-    commit: pending
+    commit: bbcfe9c
 
   - id: D-227
     severity: medium
@@ -2504,7 +2504,7 @@ defects:
     description: "_load_site_for_comparison re-parses config_a from disk. No guard ensures site.dem.shape == comparison.delta_grid.shape before passing to map renderers. A file modification race or DSM change could silently mis-register the overlay."
     resolution: "Added shape guard after _load_site_for_comparison; logs warning and sets site=None if shapes differ."
     status: resolved
-    commit: pending
+    commit: bbcfe9c
 
   - id: D-228
     severity: medium
@@ -2515,7 +2515,7 @@ defects:
     description: "render_comparison_statistics_table uses .get(zone, 0.0) for per-zone lookups. An inconsistent hand-constructed ComparisonResult silently renders 0.0% instead of failing, misrepresenting coverage data."
     resolution: "Changed .get(zone, 0.0) to direct dict access comparison.per_zone_coverage_pct_a[zone] so inconsistency raises KeyError."
     status: resolved
-    commit: pending
+    commit: bbcfe9c
 
   - id: D-229
     severity: medium
@@ -2526,4 +2526,4 @@ defects:
     description: "TYPE_CHECKING guard for ComparisonResult inserted between two runtime first-party imports. isort/ruff convention requires all unconditional imports before the guard block; future auto-fix could silently reorder EffectorDefinition into the guard."
     resolution: "Moved EffectorDefinition import before the TYPE_CHECKING guard block."
     status: resolved
-    commit: pending
+    commit: bbcfe9c
