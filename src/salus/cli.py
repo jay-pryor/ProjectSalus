@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import re
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import click
 import numpy as np
 import yaml
 
+from salus.engine.comparison import ConfigurationResult, compare_configs
 from salus.engine.coverage import (
     boundary_mask,
     compute_composite_coverage,
@@ -40,6 +42,8 @@ from salus.ingest.terrain import load_dem
 from salus.models.scenario import SensorPlacement
 from salus.models.sensor import SensorDefinition, SensorType
 from salus.report.charts import (
+    render_comparison_statistics_table,
+    render_coverage_comparison_chart,
     render_effector_utilisation_chart,
     render_saturation_threshold_chart,
 )
@@ -49,11 +53,18 @@ from salus.report.maps import (
     render_corridor_overlay_map,
     render_corridor_polar_diagram,
     render_coverage_map,
+    render_delta_map,
     render_gap_map,
     render_layer_coverage_maps,
     render_redundancy_map,
+    render_side_by_side_coverage_maps,
     render_trajectory_map,
 )
+
+if TYPE_CHECKING:
+    from salus.models.site import SiteModel
+
+_log = logging.getLogger(__name__)
 
 # Bundled sensor definitions shipped with the package.
 _DEFAULT_SENSOR_DIR: Path = Path(__file__).parent / "data" / "sensors"
@@ -1367,3 +1378,355 @@ def optimise(
             sys.exit(1)
 
     click.echo(f"\nDone. Output written to {output_path.resolve()}")
+
+
+# ---------------------------------------------------------------------------
+# S10 helper — run a single config's coverage pipeline
+# ---------------------------------------------------------------------------
+
+
+def _run_config_simulation(
+    scenario_path: Path,
+    sensor_dir: Path,
+    label: str,
+    cost_estimate: float | None,
+) -> ConfigurationResult:
+    """Load a scenario and run the coverage pipeline, returning a ConfigurationResult.
+
+    Raises:
+        SystemExit: On any fatal error (sensor load failure, DEM failure, etc.)
+    """
+    try:
+        sc = load_scenario(scenario_path)
+    except (FileNotFoundError, ValueError, OSError) as exc:
+        click.echo(f"Error loading scenario '{label}': {exc}", err=True)
+        raise SystemExit(1) from exc
+
+    try:
+        sensor_defs = load_sensors(sensor_dir)
+    except (FileNotFoundError, PermissionError, ValueError, OSError) as exc:
+        click.echo(f"Error loading sensor definitions for '{label}': {exc}", err=True)
+        raise SystemExit(1) from exc
+
+    sensor_map: dict[str, SensorDefinition] = {s.name: s for s in sensor_defs}
+
+    try:
+        site = load_dem(sc.site_dem_path, dsm_path=sc.site_dsm_path)
+    except Exception as exc:
+        click.echo(f"Error loading DEM for '{label}': {exc}", err=True)
+        raise SystemExit(1) from exc
+
+    placements_by_type: dict[SensorType, list[tuple[SensorDefinition, SensorPlacement]]] = {}
+    for placement in sc.sensor_placements:
+        sensor = sensor_map.get(placement.sensor_name)
+        if sensor is None:
+            click.echo(
+                f"  [{label}] Warning: sensor '{placement.sensor_name}' not found — skipping.",
+                err=True,
+            )
+            continue
+        placements_by_type.setdefault(sensor.type, []).append((sensor, placement))
+
+    if not placements_by_type:
+        click.echo(f"  [{label}] No valid sensor placements — coverage will be 0%.", err=True)
+        from salus.engine.coverage import CoverageStats
+
+        empty = np.zeros((site.rows, site.cols), dtype=bool)
+        gap_m2 = float(site.rows * site.cols) * site.resolution**2
+        empty_stats = CoverageStats(
+            total_coverage_pct=0.0,
+            per_layer_coverage_pct={},
+            per_zone_coverage_pct={},
+            gap_area_m2=gap_m2,
+            redundancy_map=np.zeros((site.rows, site.cols), dtype=np.intp),
+            largest_contiguous_gap_m2=gap_m2,
+        )
+        return ConfigurationResult(
+            label=label, composite=empty, stats=empty_stats, cost_estimate=cost_estimate
+        )
+
+    try:
+        layer_coverages = compute_layer_coverage(site, placements_by_type)
+        composite = compute_composite_coverage(layer_coverages)
+        bitmask = np.ones((site.rows, site.cols), dtype=bool)
+        if sc.boundary_path is not None:
+            try:
+                loaded_boundary = load_boundary(sc.boundary_path, site_epsg=site.crs_epsg)
+                bitmask = boundary_mask(site, loaded_boundary)
+            except Exception as exc:
+                click.echo(
+                    f"  [{label}] Warning: boundary load failed ({exc}), using full DEM.",
+                    err=True,
+                )
+                # D-219: also log so non-interactive pipelines capture the event.
+                _log.warning(
+                    "[%s] Boundary load failed — reverting to full DEM mask: %s",
+                    label,
+                    exc,
+                )
+        gaps = compute_gaps(composite, bitmask)
+        stats = compute_coverage_stats(site, layer_coverages, composite, gaps, site.zones)
+    except Exception as exc:
+        click.echo(f"Error running coverage pipeline for '{label}': {exc}", err=True)
+        raise SystemExit(1) from exc
+
+    click.echo(
+        f"  [{label}] Coverage: {stats.total_coverage_pct:.1f}% "
+        f"({len(sc.sensor_placements)} sensor(s))"
+    )
+    return ConfigurationResult(
+        label=label,
+        composite=composite,
+        layer_coverages=layer_coverages,
+        stats=stats,
+        cost_estimate=cost_estimate,
+    )
+
+
+# ---------------------------------------------------------------------------
+# S10 — compare command
+# ---------------------------------------------------------------------------
+
+
+@main.command()
+@click.option(
+    "--config-a",
+    "config_a",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Scenario YAML for configuration A.",
+)
+@click.option(
+    "--config-b",
+    "config_b",
+    required=True,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Scenario YAML for configuration B.",
+)
+@click.option(
+    "--label-a",
+    default="Config A",
+    show_default=True,
+    help="Human-readable label for configuration A.",
+)
+@click.option(
+    "--label-b",
+    default="Config B",
+    show_default=True,
+    help="Human-readable label for configuration B.",
+)
+@click.option(
+    "--sensors",
+    "sensor_dir",
+    default=None,
+    type=click.Path(exists=True, file_okay=False),
+    help="Directory of sensor YAML definitions (shared by both configs). Defaults to bundled DB.",
+)
+@click.option(
+    "--output-dir",
+    default=".",
+    show_default=True,
+    type=click.Path(file_okay=False),
+    help="Directory for comparison outputs. Created automatically if absent.",
+)
+@click.option(
+    "--cost-a",
+    "cost_a",
+    default=None,
+    type=float,
+    help="Estimated cost of configuration A (any currency unit). Optional.",
+)
+@click.option(
+    "--cost-b",
+    "cost_b",
+    default=None,
+    type=float,
+    help="Estimated cost of configuration B (any currency unit). Optional.",
+)
+def compare(
+    config_a: str,
+    config_b: str,
+    label_a: str,
+    label_b: str,
+    sensor_dir: str | None,
+    output_dir: str,
+    cost_a: float | None,
+    cost_b: float | None,
+) -> None:
+    """Compare two sensor configurations against the same site.
+
+    Runs the coverage pipeline for both configurations, then generates:
+
+    \b
+    - delta.png           — delta map (green=B gain, red=A loss, grey=both)
+    - comparison.png      — grouped bar chart of per-zone coverage A vs B
+    - comparison stats    — printed to stdout
+
+    Both scenario files must reference a DEM with the same grid dimensions.
+
+    Example:
+
+        salus compare --config-a base.yaml --config-b enhanced.yaml \\
+            --label-a "Baseline" --label-b "Enhanced" --output-dir comparison/
+    """
+    output_path = Path(output_dir)
+    try:
+        output_path.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        click.echo(f"Error: cannot create output directory {output_path}: {exc}", err=True)
+        sys.exit(1)
+
+    effective_sensor_dir = Path(sensor_dir) if sensor_dir is not None else _DEFAULT_SENSOR_DIR
+
+    click.echo("Comparing configurations:")
+    click.echo(f"  A: {config_a}  ({label_a})")
+    click.echo(f"  B: {config_b}  ({label_b})")
+    click.echo(f"  Sensor DB: {effective_sensor_dir}")
+    click.echo("")
+
+    result_a = _run_config_simulation(Path(config_a), effective_sensor_dir, label_a, cost_a)
+    result_b = _run_config_simulation(Path(config_b), effective_sensor_dir, label_b, cost_b)
+
+    # Validate same grid shape.
+    if result_a.composite.shape != result_b.composite.shape:
+        click.echo(
+            f"Error: configuration grids have different shapes: "
+            f"{result_a.composite.shape} vs {result_b.composite.shape}. "
+            "Both scenarios must reference a DEM with the same dimensions.",
+            err=True,
+        )
+        sys.exit(1)
+
+    try:
+        comparison = compare_configs(result_a, result_b)
+    except ValueError as exc:
+        click.echo(f"Error computing comparison: {exc}", err=True)
+        sys.exit(1)
+
+    # Print key metrics.
+    sign = "+" if comparison.coverage_delta_pct >= 0 else ""
+    click.echo("\nComparison Summary")
+    click.echo("─" * 50)
+    click.echo(f"  {label_a} coverage:  {comparison.coverage_pct_a:.1f}%")
+    click.echo(
+        f"  {label_b} coverage:  {comparison.coverage_pct_b:.1f}%  "
+        f"({sign}{comparison.coverage_delta_pct:.1f}%)"
+    )
+    if comparison.cost_delta is not None:
+        cost_sign = "+" if comparison.cost_delta >= 0 else ""
+        click.echo(f"  Cost delta (B − A): {cost_sign}{comparison.cost_delta:,.0f}")
+    if comparison.per_zone_delta_pct:
+        click.echo("  Per-zone delta (B − A):")
+        for zone, delta in comparison.per_zone_delta_pct.items():
+            zs = "+" if delta >= 0 else ""
+            click.echo(f"    {zone}: {zs}{delta:.1f}%")
+
+    # Count delta cells.
+    from salus.engine.comparison import DELTA_A_ONLY, DELTA_B_ONLY, DELTA_BOTH, DELTA_NEITHER
+
+    n_cells = comparison.delta_grid.size
+    n_both = int((comparison.delta_grid == DELTA_BOTH).sum())
+    n_a_only = int((comparison.delta_grid == DELTA_A_ONLY).sum())
+    n_b_only = int((comparison.delta_grid == DELTA_B_ONLY).sum())
+    n_neither = int((comparison.delta_grid == DELTA_NEITHER).sum())
+    click.echo(f"\n  Cell breakdown ({n_cells} total):")
+    click.echo(f"    Both cover:    {n_both:>7}  ({n_both / n_cells * 100:.1f}%)")
+    click.echo(f"    {label_a} only: {n_a_only:>7}  ({n_a_only / n_cells * 100:.1f}%)")
+    click.echo(f"    {label_b} only: {n_b_only:>7}  ({n_b_only / n_cells * 100:.1f}%)")
+    click.echo(f"    Neither:       {n_neither:>7}  ({n_neither / n_cells * 100:.1f}%)")
+
+    # Render outputs.
+    click.echo("\nRendering comparison outputs…")
+
+    # Load site once for all map renders (D-221: avoid double-loading).
+    try:
+        site = _load_site_for_comparison(Path(config_a))
+    except Exception as exc:
+        _log.warning("Could not load DEM for map rendering: %s", exc, exc_info=True)
+        site = None
+
+    # D-227: guard against DEM/composite shape mismatch before passing to renderers.
+    if site is not None and site.dem.shape != comparison.delta_grid.shape:
+        _log.warning(
+            "DEM shape %s does not match delta grid shape %s — skipping map renders.",
+            site.dem.shape,
+            comparison.delta_grid.shape,
+        )
+        site = None
+
+    if site is not None:
+        delta_out = output_path / "delta.png"
+        try:
+            render_delta_map(
+                site,
+                comparison,
+                delta_out,
+                title=f"Coverage Delta — {label_a} vs {label_b}",
+            )
+            click.echo(f"  → {delta_out}")
+        except Exception as exc:
+            # D-220: log with traceback so non-interactive pipelines capture it.
+            _log.warning("Delta map rendering failed: %s", exc, exc_info=True)
+            click.echo(f"  Warning: delta map failed: {exc}", err=True)
+
+        side_by_side_out = output_path / "side_by_side.png"
+        try:
+            render_side_by_side_coverage_maps(
+                site,
+                comparison,
+                side_by_side_out,
+                title=f"Coverage Comparison — {label_a} vs {label_b}",
+            )
+            click.echo(f"  → {side_by_side_out}")
+        except Exception as exc:
+            _log.warning("Side-by-side map rendering failed: %s", exc, exc_info=True)
+            click.echo(f"  Warning: side-by-side map failed: {exc}", err=True)
+
+    comparison_out = output_path / "comparison.png"
+    try:
+        render_coverage_comparison_chart(
+            comparison,
+            comparison_out,
+            title=f"Coverage Comparison — {label_a} vs {label_b}",
+        )
+        click.echo(f"  → {comparison_out}")
+    except Exception as exc:
+        _log.warning("Comparison chart rendering failed: %s", exc, exc_info=True)
+        click.echo(f"  Warning: comparison chart failed: {exc}", err=True)
+
+    stats_out = output_path / "statistics.png"
+    try:
+        render_comparison_statistics_table(
+            comparison,
+            stats_out,
+            title=f"Statistics — {label_a} vs {label_b}",
+        )
+        click.echo(f"  → {stats_out}")
+    except Exception as exc:
+        _log.warning("Statistics table rendering failed: %s", exc, exc_info=True)
+        click.echo(f"  Warning: statistics table failed: {exc}", err=True)
+
+    click.echo(f"\nDone. Output written to {output_path.resolve()}")
+
+
+def _load_site_for_comparison(scenario_path: Path) -> "SiteModel":
+    """Load the DEM from a scenario file for map rendering.
+
+    Raises:
+        FileNotFoundError: If the scenario file or DEM path does not exist.
+        ValueError: If the scenario file cannot be parsed.
+        OSError: If the DEM file cannot be opened.
+    """
+    try:
+        sc = load_scenario(scenario_path)
+    except (FileNotFoundError, ValueError, OSError) as exc:
+        raise type(exc)(
+            f"Failed to load scenario '{scenario_path}' for delta map rendering: {exc}"
+        ) from exc
+    try:
+        return load_dem(sc.site_dem_path, dsm_path=sc.site_dsm_path)
+    except (FileNotFoundError, OSError, ValueError, RuntimeError) as exc:
+        # D-221: include ValueError/RuntimeError for rasterio decode failures.
+        raise type(exc)(
+            f"Failed to load DEM '{sc.site_dem_path}' for delta map rendering: {exc}"
+        ) from exc

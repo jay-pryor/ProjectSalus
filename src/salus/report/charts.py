@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 import math
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import matplotlib
 import matplotlib.patches as mpatches
@@ -31,6 +32,9 @@ from salus.engine.threat_corridor import CorridorResult
 from salus.models.saturation import ReengagementResult, SaturationResult
 from salus.models.scenario import KillChainConfig, KillChainResult
 from salus.models.sensor import EffectorDefinition
+
+if TYPE_CHECKING:
+    from salus.engine.comparison import ComparisonResult
 
 matplotlib.use("Agg")
 
@@ -603,4 +607,243 @@ def render_effector_utilisation_chart(
         plt.close(fig)
 
     _log.info("Effector utilisation chart written to %s", output_path)
+    return output_path.resolve()
+
+
+# ---------------------------------------------------------------------------
+# Configuration comparison chart (S10)
+# ---------------------------------------------------------------------------
+
+# Colour pair for grouped bar chart (Config A, Config B).
+_COMPARE_COLOUR_A: str = "#3498db"  # blue
+_COMPARE_COLOUR_B: str = "#e67e22"  # orange
+
+
+def render_coverage_comparison_chart(
+    comparison: "ComparisonResult",
+    output_path: str | Path,
+    title: str = "Coverage Comparison — Config A vs Config B",
+) -> Path:
+    """Render a grouped bar chart comparing per-zone coverage between two configs.
+
+    Each zone (plus an "Overall" bar) is shown as a pair of adjacent bars:
+    one for configuration A (blue) and one for configuration B (orange).
+    The x-axis shows coverage percentage [0–100].
+
+    Args:
+        comparison: Output of :func:`~salus.engine.comparison.compare_configs`.
+        output_path: Output PNG path.  Parent directories are created if absent.
+        title: Chart title.
+
+    Returns:
+        Resolved :class:`~pathlib.Path` to the written PNG file.
+
+    Raises:
+        TypeError: If ``comparison`` is not a :class:`ComparisonResult`.
+    """
+    from salus.engine.comparison import ComparisonResult
+
+    if not isinstance(comparison, ComparisonResult):
+        raise TypeError(f"comparison must be a ComparisonResult, got {type(comparison).__name__}")
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Build zone list — shared zones first (alphabetical), then "Overall".
+    shared_zones = sorted(comparison.per_zone_delta_pct.keys())
+    zone_labels = shared_zones + ["Overall"]
+    # D-193: use direct indexing — zones in per_zone_delta_pct are guaranteed to
+    # exist in both per_zone_coverage_pct_a and per_zone_coverage_pct_b by
+    # compare_configs. A KeyError here indicates a hand-constructed ComparisonResult
+    # with inconsistent fields, which should surface as a clear failure.
+    values_a = [comparison.per_zone_coverage_pct_a[z] for z in shared_zones]
+    values_b = [comparison.per_zone_coverage_pct_b[z] for z in shared_zones]
+    values_a.append(comparison.coverage_pct_a)
+    values_b.append(comparison.coverage_pct_b)
+
+    n = len(zone_labels)
+    bar_height = 0.35
+    y_positions = list(range(n))
+
+    fig_height = max(4.0, n * 0.9 + 2.0)
+    fig, ax = plt.subplots(figsize=(_DEFAULT_FIG_WIDTH, fig_height))
+
+    y_a = [y + bar_height / 2 for y in y_positions]
+    y_b = [y - bar_height / 2 for y in y_positions]
+
+    ax.barh(
+        y_a,
+        values_a,
+        height=bar_height,
+        color=_COMPARE_COLOUR_A,
+        label=comparison.label_a,
+        edgecolor="white",
+        linewidth=0.4,
+    )
+    ax.barh(
+        y_b,
+        values_b,
+        height=bar_height,
+        color=_COMPARE_COLOUR_B,
+        label=comparison.label_b,
+        edgecolor="white",
+        linewidth=0.4,
+    )
+
+    # Annotate with delta on the B bar.
+    for y, va, vb in zip(y_b, values_a, values_b):
+        delta = vb - va
+        # D-222: skip annotation if coverage values are non-finite.
+        if not math.isfinite(delta):
+            continue
+        sign = "+" if delta >= 0 else ""
+        colour = "#2ecc71" if delta >= 0 else "#e74c3c"
+        ax.text(
+            max(vb, 1.0) + 0.8,
+            y,
+            f"{sign}{delta:.1f}%",
+            va="center",
+            ha="left",
+            fontsize=8,
+            color=colour,
+            fontweight="bold",
+        )
+
+    ax.set_yticks(y_positions)
+    ax.set_yticklabels(zone_labels, fontsize=9)
+    ax.set_xlim(0.0, 110.0)
+    ax.set_xlabel("Coverage (%)", fontsize=10)
+    ax.set_title(title, fontsize=12, fontweight="bold")
+    ax.axvline(x=100.0, color="#888888", linewidth=0.8, linestyle=":", alpha=0.5)
+    ax.legend(loc="lower right", fontsize=9, framealpha=0.8)
+    ax.grid(axis="x", linestyle=":", alpha=0.4)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+
+    try:
+        plt.tight_layout()
+        fig.savefig(output_path, dpi=150, bbox_inches="tight")
+    finally:
+        plt.close(fig)
+
+    _log.info("Coverage comparison chart written to %s", output_path)
+    return output_path.resolve()
+
+
+def render_comparison_statistics_table(
+    comparison: "ComparisonResult",
+    output_path: str | Path,
+    title: str = "Configuration Comparison — Statistics",
+) -> Path:
+    """Render a tabular summary of scalar comparison metrics as a PNG.
+
+    The table includes overall coverage for A and B, the coverage delta,
+    and optional columns for cost, engagement capacity, and saturation
+    threshold when those values are present in *comparison*.
+
+    Args:
+        comparison: Output of :func:`~salus.engine.comparison.compare_configs`.
+        output_path: Output PNG path.  Parent directories are created if absent.
+        title: Table title.
+
+    Returns:
+        Resolved :class:`~pathlib.Path` to the written PNG file.
+
+    Raises:
+        TypeError: If ``comparison`` is not a :class:`ComparisonResult`.
+    """
+    from salus.engine.comparison import ComparisonResult
+
+    if not isinstance(comparison, ComparisonResult):
+        raise TypeError(f"comparison must be a ComparisonResult, got {type(comparison).__name__}")
+
+    # D-225: guard against non-finite coverage values in hand-constructed results.
+    cov_a = comparison.coverage_pct_a
+    cov_b = comparison.coverage_pct_b
+    if not (math.isfinite(cov_a) and math.isfinite(cov_b)):
+        raise ValueError(
+            f"render_comparison_statistics_table: coverage_pct_a={cov_a} and "
+            f"coverage_pct_b={cov_b} must both be finite"
+        )
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Build table rows: (Metric, Config A, Config B, Delta B−A)
+    rows: list[tuple[str, str, str, str]] = []
+
+    def _sign(v: float) -> str:
+        return f"+{v:.1f}" if v >= 0 else f"{v:.1f}"
+
+    rows.append(("Overall coverage (%)", f"{cov_a:.1f}", f"{cov_b:.1f}", _sign(cov_b - cov_a)))
+
+    for zone in sorted(comparison.per_zone_delta_pct.keys()):
+        # D-228: direct access so an inconsistent ComparisonResult raises KeyError immediately.
+        za = comparison.per_zone_coverage_pct_a[zone]
+        zb = comparison.per_zone_coverage_pct_b[zone]
+        rows.append((f"  Zone: {zone} (%)", f"{za:.1f}", f"{zb:.1f}", _sign(zb - za)))
+
+    if comparison.cost_delta is not None:
+        cost_str = (
+            f"+{comparison.cost_delta:,.0f}"
+            if comparison.cost_delta >= 0
+            else f"{comparison.cost_delta:,.0f}"
+        )
+        rows.append(("Cost delta", "—", "—", cost_str))
+
+    if comparison.engagement_capacity_delta is not None:
+        d = comparison.engagement_capacity_delta
+        rows.append(("Engagement capacity delta", "—", "—", f"+{d}" if d >= 0 else str(d)))
+
+    if comparison.saturation_threshold_delta is not None:
+        d = comparison.saturation_threshold_delta
+        rows.append(("Saturation threshold delta", "—", "—", f"+{d}" if d >= 0 else str(d)))
+
+    col_labels = ["Metric", comparison.label_a, comparison.label_b, "Delta (B−A)"]
+    cell_text = [list(row) for row in rows]
+
+    n_rows = len(rows)
+    fig_height = max(2.5, n_rows * 0.45 + 1.5)
+    fig, ax = plt.subplots(figsize=(_DEFAULT_FIG_WIDTH, fig_height))
+    ax.axis("off")
+
+    col_widths = [0.45, 0.18, 0.18, 0.19]
+    tbl = ax.table(
+        cellText=cell_text,
+        colLabels=col_labels,
+        colWidths=col_widths,
+        cellLoc="center",
+        loc="center",
+    )
+    tbl.auto_set_font_size(False)
+    tbl.set_fontsize(9)
+
+    # Style header row
+    for col_idx in range(len(col_labels)):
+        cell = tbl[(0, col_idx)]
+        cell.set_facecolor("#2c3e50")
+        cell.set_text_props(color="white", fontweight="bold")
+
+    # Colour-code delta column (positive = green, negative = red)
+    delta_col = len(col_labels) - 1
+    for row_idx in range(1, n_rows + 1):
+        delta_text = cell_text[row_idx - 1][delta_col]
+        if delta_text.startswith("+"):
+            tbl[(row_idx, delta_col)].set_facecolor("#d5f5e3")
+        elif delta_text.startswith("-"):
+            tbl[(row_idx, delta_col)].set_facecolor("#fadbd8")
+        # Alternate row shading
+        if row_idx % 2 == 0:
+            for col_idx in range(delta_col):
+                tbl[(row_idx, col_idx)].set_facecolor("#f2f3f4")
+
+    ax.set_title(title, fontsize=11, fontweight="bold", pad=12)
+
+    try:
+        fig.tight_layout()
+        fig.savefig(output_path, dpi=150, bbox_inches="tight")
+    finally:
+        plt.close(fig)
+
+    _log.info("Comparison statistics table written to %s", output_path)
     return output_path.resolve()

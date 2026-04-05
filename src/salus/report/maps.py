@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import warnings
 from pathlib import Path
@@ -24,6 +25,8 @@ from salus.models.zone import Zone, ZoneType
 
 if TYPE_CHECKING:
     from salus.engine.comparison import ComparisonResult
+
+_log = logging.getLogger(__name__)
 
 # Distinct colour per sensor type for per-layer and composite maps
 _SENSOR_TYPE_COLOURS: dict[SensorType, str] = {
@@ -1690,6 +1693,150 @@ def render_delta_map(
     finally:
         plt.close(fig)
 
+    return output_path.resolve()
+
+
+# ---------------------------------------------------------------------------
+# Side-by-side coverage maps (S10-2)
+# ---------------------------------------------------------------------------
+
+
+def render_side_by_side_coverage_maps(
+    site: SiteModel,
+    comparison: "ComparisonResult",
+    output_path: str | Path,
+    title: str = "Coverage Comparison — Side by Side",
+    sensor_positions_a: list[tuple[float, float]] | None = None,
+    sensor_positions_b: list[tuple[float, float]] | None = None,
+    boundary: Polygon | MultiPolygon | None = None,
+    zones: list[Zone] | None = None,
+) -> Path:
+    """Render configuration A (left) and B (right) coverage maps side by side.
+
+    Each panel shows the composite sensor coverage (green overlay) for one
+    configuration against a hillshade terrain background, with the coverage
+    percentage in the subplot title.
+
+    Args:
+        site: Site terrain model.
+        comparison: Output of :func:`~salus.engine.comparison.compare_configs`.
+        output_path: Where to write the PNG.  Parent directories are created
+            if absent.
+        title: Overall figure title.
+        sensor_positions_a: Optional ``(x, y)`` sensor positions for
+            configuration A, rendered as red triangles (▲) in the left panel.
+        sensor_positions_b: Optional ``(x, y)`` sensor positions for
+            configuration B, rendered as green triangles (▲) in the right
+            panel.
+        boundary: Optional site boundary polygon drawn as an outline in both
+            panels.
+        zones: Optional zone overlays shown in both panels.
+
+    Returns:
+        Resolved :class:`~pathlib.Path` to the written PNG file.
+
+    Raises:
+        TypeError: If ``comparison`` is not a :class:`ComparisonResult`.
+    """
+    from salus.engine.comparison import (
+        DELTA_A_ONLY,
+        DELTA_B_ONLY,
+        DELTA_BOTH,
+        ComparisonResult,
+    )
+
+    if not isinstance(comparison, ComparisonResult):
+        raise TypeError(f"comparison must be a ComparisonResult, got {type(comparison).__name__}")
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    min_x, max_x, min_y, max_y = site.extent
+    extent = (min_x, max_x, min_y, max_y)
+    delta = comparison.delta_grid
+
+    # Reconstruct composite bools from the delta grid.
+    comp_a: npt.NDArray[np.bool_] = (delta == DELTA_BOTH) | (delta == DELTA_A_ONLY)
+    comp_b: npt.NDArray[np.bool_] = (delta == DELTA_BOTH) | (delta == DELTA_B_ONLY)
+
+    _coverage_green: str = "#2ecc71"
+
+    fig, axes = plt.subplots(1, 2, figsize=(20, 9))
+    try:
+        # D-224: wrap _hillshade with the same diagnostic pattern used in render_delta_map.
+        try:
+            hs = _hillshade(site.dem)
+        except ValueError as exc:
+            _is_float = np.issubdtype(site.dem.dtype, np.floating)
+            nan_count = int(np.isnan(site.dem).sum()) if _is_float else 0
+            raise ValueError(
+                f"render_side_by_side_coverage_maps: hillshade failed "
+                f"({nan_count} NaN cell(s) in DEM)"
+            ) from exc
+
+        for ax, comp, label, cov_pct, positions, colour in (
+            (
+                axes[0],
+                comp_a,
+                comparison.label_a,
+                comparison.coverage_pct_a,
+                sensor_positions_a,
+                "#e74c3c",
+            ),
+            (
+                axes[1],
+                comp_b,
+                comparison.label_b,
+                comparison.coverage_pct_b,
+                sensor_positions_b,
+                _coverage_green,
+            ),
+        ):
+            ax.imshow(hs, cmap="gray", extent=extent, origin="upper", alpha=0.7, zorder=1)
+            _add_basemap(ax, site)
+
+            # D-226: use np.ones_like so the colourmap is always drawn correctly
+            # regardless of coverage value (avoids blank panel on 0% coverage).
+            overlay = np.ma.masked_where(~comp, np.ones_like(comp, dtype=float))
+            ax.imshow(
+                overlay,
+                cmap=ListedColormap([colour]),
+                vmin=0,
+                vmax=1,
+                extent=extent,
+                origin="upper",
+                alpha=0.50,
+                zorder=2,
+            )
+
+            _render_boundary(ax, boundary)
+            _render_zones(ax, zones)
+
+            if positions:
+                for x, y in positions:
+                    ax.plot(
+                        x,
+                        y,
+                        marker="^",
+                        color=colour,
+                        markersize=10,
+                        markeredgecolor="black",
+                        markeredgewidth=1,
+                        zorder=7,
+                    )
+
+            ax.set_title(f"{label}\n({cov_pct:.1f}% coverage)", fontsize=11, fontweight="bold")
+            ax.set_xlabel("Easting (m)")
+            ax.set_ylabel("Northing (m)")
+            _add_cartographic_elements(ax)
+
+        fig.suptitle(title, fontsize=14, fontweight="bold", y=1.01)
+        fig.tight_layout()
+        fig.savefig(output_path, dpi=200, bbox_inches="tight")
+    finally:
+        plt.close(fig)
+
+    _log.info("Side-by-side coverage map written to %s", output_path)
     return output_path.resolve()
 
 
