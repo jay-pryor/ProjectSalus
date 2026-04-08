@@ -163,6 +163,12 @@ class ScenarioConfig(BaseModel):
     saturation_scenarios: list[SaturationScenario] = Field(default_factory=list)
     """Multi-target saturation scenarios to analyse.  Empty = no saturation analysis."""
 
+    placement_bearing_step_deg: float = 10.0
+    """Angular step between boresight candidates when the greedy placement
+    optimiser sweeps bearings for directional sensors (degrees, must be in
+    (0, 360]).  Coarser values (e.g. 45.0) run faster; finer values (e.g. 5.0)
+    give more precise bearing selection.  Ignored for omnidirectional sensors."""
+
     @field_validator("site_dem_path", mode="before")
     @classmethod
     def _site_dem_path_non_empty(cls, v: object) -> object:
@@ -235,6 +241,15 @@ class ScenarioConfig(BaseModel):
     def _sweep_segment_length_positive(cls, v: float) -> float:
         if not math.isfinite(v) or v <= 0.0:
             raise ValueError(f"sweep_segment_length_m must be a finite value > 0, got {v}")
+        return v
+
+    @field_validator("placement_bearing_step_deg")
+    @classmethod
+    def _placement_bearing_step_valid(cls, v: float) -> float:
+        if not math.isfinite(v) or v <= 0.0 or v > 360.0:
+            raise ValueError(
+                f"placement_bearing_step_deg must be a finite value in (0, 360], got {v}"
+            )
         return v
 
 

@@ -1,0 +1,32 @@
+task_id: S11.5
+timestamp: 2026-04-08T12:00:00Z
+quality_gates:
+  G1_lint: pass
+  G2_format: pass
+  G3_import: pass
+  G4_type: pass   # 18 pre-existing import-untyped errors only; no new correctness errors introduced by S11.5
+  G5_security: pass
+  G6_unit_test: pass   # 1089 passed, 0 failed
+  G7_coverage: pass
+  G8_secrets: pass
+  coverage_pct: 84.60
+review:
+  l1_standards:
+    testing: pass      # 15 new tests covering bearing sweep, invalid inputs, caching identity, ScenarioConfig validation
+    error_handling: pass   # D-234 explicit None guard; D-230 partial-failure WARNING; ValueError on invalid bearing_step_deg
+    logging: pass      # placement log.info updated with bearing, weighted_pct; D-230 WARNING added
+    security: pass     # no user input, no file I/O, no shell calls in new code
+  l2_agents:
+    silent_failure_hunter: {status: pass, findings: 5}   # D-230..D-234 logged and resolved
+    spec_compliance: {status: pass, findings: 1}          # D-235 logged and resolved
+    type_design_analyzer: {status: pass, findings: 1}     # D-236 logged and resolved
+    regression_reviewer: {status: pass, findings: 0}
+defect_ids: [D-230, D-231, D-232, D-233, D-234, D-235, D-236]
+overall: pass
+notes: >
+  S11.5 adds bearing-aware placement optimisation to greedy_place_sensors.
+  Directional sensors (azimuth_coverage_deg < 360) sweep ceil(360/bearing_step_deg)
+  boresight candidates per position; viewshed computed once per position, arc masks
+  applied as cheap numpy ops. Omnidirectional sensors skip the sweep.
+  New fields: ScenarioConfig.placement_bearing_step_deg, CLI --bearing-step option.
+  All 7 defects found by L2 agents logged and resolved before commit.

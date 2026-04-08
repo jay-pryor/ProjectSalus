@@ -491,10 +491,277 @@ def test_greedy_place_sensors_custom_weights(
 def test_greedy_place_sensors_default_bearing_is_north(
     small_flat_site: SiteModel, acoustic_sensor: SensorDefinition
 ) -> None:
-    """All placed sensors receive bearing_deg = 0.0 (default north)."""
+    """Omnidirectional sensors receive bearing_deg = 0.0 (sweep skipped)."""
     candidates = generate_candidate_positions(
         site=small_flat_site, boundary=None, step_m=5.0, exclusion_zones=[]
     )
     result = greedy_place_sensors(small_flat_site, [acoustic_sensor, acoustic_sensor], candidates)
     for placement in result:
         assert placement.bearing_deg == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
+# Bearing-aware placement (S11.5)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def directional_radar() -> SensorDefinition:
+    """Radar sensor with 90° azimuth arc — triggers bearing sweep."""
+    return SensorDefinition(
+        name="TestRadar90",
+        type=SensorType.Radar,
+        max_range_m=15.0,
+        min_range_m=0.0,
+        azimuth_coverage_deg=90.0,
+        elevation_coverage_deg=90.0,
+        mounting_height_m=2.0,
+        requires_los=True,
+    )
+
+
+def test_greedy_place_sensors_bearing_sweep_selects_uncovered_direction(
+    small_flat_site: SiteModel, directional_radar: SensorDefinition
+) -> None:
+    """Directional sensor is oriented toward the uncovered half of the site.
+
+    Setup: north half of the 20×20 site is already covered.  A single
+    candidate is at (10, 10) — site centre.  With bearing_step_deg=90°,
+    bearing 180° (south) should score highest because it points the 90° arc
+    at the uncovered south half.
+    """
+    # Cover the north half: raster rows 0-9 (CRS y >= 11..20)
+    existing = np.zeros((small_flat_site.rows, small_flat_site.cols), dtype=bool)
+    existing[:10, :] = True
+
+    candidates = [Position(x=10.0, y=10.0)]
+
+    result = greedy_place_sensors(
+        small_flat_site,
+        [directional_radar],
+        candidates,
+        existing_coverage=existing,
+        bearing_step_deg=90.0,
+    )
+
+    assert len(result) == 1
+    # 180° points south — the only fully uncovered direction
+    assert result[0].bearing_deg == pytest.approx(180.0)
+
+
+def test_greedy_place_sensors_360_sensor_bearing_unchanged_with_sweep(
+    small_flat_site: SiteModel, acoustic_sensor: SensorDefinition
+) -> None:
+    """Omnidirectional sensors return bearing=0.0 regardless of bearing_step_deg."""
+    candidates = generate_candidate_positions(
+        site=small_flat_site, boundary=None, step_m=5.0, exclusion_zones=[]
+    )
+    result = greedy_place_sensors(
+        small_flat_site, [acoustic_sensor], candidates, bearing_step_deg=10.0
+    )
+    assert len(result) == 1
+    assert result[0].bearing_deg == pytest.approx(0.0)
+
+
+def test_greedy_place_sensors_bearing_step_90_produces_four_candidates(
+    small_flat_site: SiteModel, directional_radar: SensorDefinition
+) -> None:
+    """bearing_step_deg=90 evaluates exactly 4 bearings (0, 90, 180, 270).
+
+    Verified indirectly: placed bearing must be one of those four values.
+    """
+    candidates = generate_candidate_positions(
+        site=small_flat_site, boundary=None, step_m=5.0, exclusion_zones=[]
+    )
+    result = greedy_place_sensors(
+        small_flat_site, [directional_radar], candidates, bearing_step_deg=90.0
+    )
+    assert len(result) == 1
+    valid_bearings = [0.0, 90.0, 180.0, 270.0]
+    assert any(result[0].bearing_deg == pytest.approx(b) for b in valid_bearings)
+
+
+def test_greedy_place_sensors_directional_result_has_valid_bearing(
+    small_flat_site: SiteModel, directional_radar: SensorDefinition
+) -> None:
+    """Placed directional sensor bearing is in [0, 360)."""
+    candidates = generate_candidate_positions(
+        site=small_flat_site, boundary=None, step_m=5.0, exclusion_zones=[]
+    )
+    result = greedy_place_sensors(
+        small_flat_site, [directional_radar], candidates, bearing_step_deg=10.0
+    )
+    assert len(result) == 1
+    assert 0.0 <= result[0].bearing_deg < 360.0
+
+
+def test_greedy_place_sensors_invalid_bearing_step_zero(
+    small_flat_site: SiteModel, acoustic_sensor: SensorDefinition
+) -> None:
+    """bearing_step_deg=0 raises ValueError."""
+    with pytest.raises(ValueError, match="bearing_step_deg"):
+        greedy_place_sensors(
+            small_flat_site, [acoustic_sensor], [Position(x=5.0, y=5.0)], bearing_step_deg=0.0
+        )
+
+
+def test_greedy_place_sensors_invalid_bearing_step_negative(
+    small_flat_site: SiteModel, acoustic_sensor: SensorDefinition
+) -> None:
+    """Negative bearing_step_deg raises ValueError."""
+    with pytest.raises(ValueError, match="bearing_step_deg"):
+        greedy_place_sensors(
+            small_flat_site, [acoustic_sensor], [Position(x=5.0, y=5.0)], bearing_step_deg=-10.0
+        )
+
+
+def test_greedy_place_sensors_invalid_bearing_step_nan(
+    small_flat_site: SiteModel, acoustic_sensor: SensorDefinition
+) -> None:
+    """NaN bearing_step_deg raises ValueError."""
+    with pytest.raises(ValueError, match="bearing_step_deg"):
+        greedy_place_sensors(
+            small_flat_site,
+            [acoustic_sensor],
+            [Position(x=5.0, y=5.0)],
+            bearing_step_deg=float("nan"),
+        )
+
+
+def test_greedy_place_sensors_invalid_bearing_step_too_large(
+    small_flat_site: SiteModel, acoustic_sensor: SensorDefinition
+) -> None:
+    """bearing_step_deg > 360 raises ValueError."""
+    with pytest.raises(ValueError, match="bearing_step_deg"):
+        greedy_place_sensors(
+            small_flat_site,
+            [acoustic_sensor],
+            [Position(x=5.0, y=5.0)],
+            bearing_step_deg=361.0,
+        )
+
+
+def test_greedy_place_sensors_bearing_step_360_valid(
+    small_flat_site: SiteModel, directional_radar: SensorDefinition
+) -> None:
+    """bearing_step_deg=360 is the boundary maximum and produces one candidate."""
+    candidates = [Position(x=10.0, y=10.0)]
+    result = greedy_place_sensors(
+        small_flat_site, [directional_radar], candidates, bearing_step_deg=360.0
+    )
+    assert len(result) == 1
+    assert result[0].bearing_deg == pytest.approx(0.0)
+
+
+def test_bearing_sweep_cached_path_matches_direct_coverage(
+    small_flat_site: SiteModel, directional_radar: SensorDefinition
+) -> None:
+    """Cached two-phase path produces identical covered-cell count to direct compute.
+
+    Verifies S11.5-1: the (viewshed-once, arc-mask-per-bearing) approach gives the
+    same result as computing full coverage directly via compute_sensor_coverage.
+    """
+    from salus.engine.dispatcher import compute_sensor_coverage
+    from salus.engine.placement import (
+        _build_arc_mask,
+        _compute_raw_coverage_no_arc,
+        _precompute_bearing_grid,
+    )
+
+    candidates = [Position(x=10.0, y=10.0)]
+    result = greedy_place_sensors(
+        small_flat_site, [directional_radar], candidates, bearing_step_deg=90.0
+    )
+    assert len(result) == 1
+    winning = result[0]
+
+    # Reconstruct coverage via the two-phase cached path
+    pos = Position(x=winning.position_x, y=winning.position_y)
+    base_placement = SensorPlacement(
+        sensor_name=directional_radar.name,
+        position_x=pos.x,
+        position_y=pos.y,
+        bearing_deg=0.0,
+        height_override_m=None,
+    )
+    raw = _compute_raw_coverage_no_arc(small_flat_site, directional_radar, base_placement)
+    bg = _precompute_bearing_grid(small_flat_site, pos)
+    half_arc = directional_radar.azimuth_coverage_deg / 2.0
+    arc = _build_arc_mask(bg, half_arc, winning.bearing_deg)
+    cached_cov = (raw & arc).astype(bool)
+
+    # Reconstruct coverage via direct compute_sensor_coverage at the winning bearing
+    direct_placement = SensorPlacement(
+        sensor_name=directional_radar.name,
+        position_x=pos.x,
+        position_y=pos.y,
+        bearing_deg=winning.bearing_deg,
+        height_override_m=None,
+    )
+    direct_cov = compute_sensor_coverage(
+        small_flat_site, directional_radar, direct_placement
+    ).astype(bool)
+
+    assert cached_cov.sum() == direct_cov.sum()
+    assert (cached_cov == direct_cov).all()
+
+
+# ---------------------------------------------------------------------------
+# ScenarioConfig bearing step field
+# ---------------------------------------------------------------------------
+
+
+def test_scenario_config_placement_bearing_step_default() -> None:
+    """ScenarioConfig defaults placement_bearing_step_deg to 10.0."""
+    from pathlib import Path
+
+    from salus.models.scenario import ScenarioConfig
+
+    sc = ScenarioConfig(site_dem_path=Path("/tmp/fake.tif"))
+    assert sc.placement_bearing_step_deg == pytest.approx(10.0)
+
+
+def test_scenario_config_placement_bearing_step_custom() -> None:
+    """Custom placement_bearing_step_deg is accepted and stored."""
+    from pathlib import Path
+
+    from salus.models.scenario import ScenarioConfig
+
+    sc = ScenarioConfig(site_dem_path=Path("/tmp/fake.tif"), placement_bearing_step_deg=45.0)
+    assert sc.placement_bearing_step_deg == pytest.approx(45.0)
+
+
+def test_scenario_config_placement_bearing_step_invalid_zero() -> None:
+    """placement_bearing_step_deg=0 raises ValidationError."""
+    from pathlib import Path
+
+    from pydantic import ValidationError
+
+    from salus.models.scenario import ScenarioConfig
+
+    with pytest.raises(ValidationError):
+        ScenarioConfig(site_dem_path=Path("/tmp/fake.tif"), placement_bearing_step_deg=0.0)
+
+
+def test_scenario_config_placement_bearing_step_invalid_nan() -> None:
+    """placement_bearing_step_deg=NaN raises ValidationError."""
+    from pathlib import Path
+
+    from pydantic import ValidationError
+
+    from salus.models.scenario import ScenarioConfig
+
+    with pytest.raises(ValidationError):
+        ScenarioConfig(site_dem_path=Path("/tmp/fake.tif"), placement_bearing_step_deg=float("nan"))
+
+
+def test_scenario_config_placement_bearing_step_invalid_too_large() -> None:
+    """placement_bearing_step_deg > 360 raises ValidationError."""
+    from pathlib import Path
+
+    from pydantic import ValidationError
+
+    from salus.models.scenario import ScenarioConfig
+
+    with pytest.raises(ValidationError):
+        ScenarioConfig(site_dem_path=Path("/tmp/fake.tif"), placement_bearing_step_deg=361.0)

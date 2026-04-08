@@ -1,4 +1,4 @@
-"""Greedy sensor placement optimisation engine (S9).
+"""Greedy sensor placement optimisation engine (S9, S11.5).
 
 Generates candidate deployment positions on a site grid and greedily
 selects placements that maximise zone-weighted coverage.
@@ -21,6 +21,15 @@ covering high-value zones before lower-priority areas:
 - ``perimeter``: 1× (default)
 - ``exclusion``: 0 — cells in exclusion zones are not scored
 - ``unzoned``: 1× (default) — cells not covered by any named zone
+
+Bearing-aware placement (S11.5):
+
+For directional sensors (``azimuth_coverage_deg < 360``), each candidate
+position is evaluated at multiple boresight bearings.  The underlying
+viewshed (or propagation) is computed once per position; arc masks at each
+bearing are then applied as cheap numpy operations.  The (position, bearing)
+pair with the highest weighted score is selected.  Omnidirectional sensors
+skip the bearing sweep entirely and are placed with bearing 0° (north).
 """
 
 from __future__ import annotations
@@ -35,8 +44,9 @@ from pydantic import BaseModel, Field, field_validator
 from shapely.geometry import MultiPolygon, Point, Polygon
 
 from salus.engine.dispatcher import compute_sensor_coverage
+from salus.engine.viewshed import compute_viewshed
 from salus.models.scenario import SensorPlacement
-from salus.models.sensor import SensorDefinition
+from salus.models.sensor import SensorDefinition, SensorType
 from salus.models.site import SiteModel
 from salus.models.zone import Zone, ZoneType
 
@@ -47,10 +57,16 @@ _log = logging.getLogger(__name__)
 # sites.  tan(45°) = 1.0 — slopes steeper than 45° are filtered out.
 _STEEP_SLOPE_THRESHOLD: float = 1.0
 
-# Default bearing (degrees, compass) assigned to all placed sensors.
-# Omnidirectional sensors (azimuth_coverage_deg == 360) are unaffected.
-# For directional sensors the user should adjust bearing after optimisation.
+# Default bearing (degrees, compass) assigned to omnidirectional sensors where
+# the bearing sweep is skipped (azimuth_coverage_deg == 360).
 _DEFAULT_BEARING_DEG: float = 0.0
+
+# Full azimuth circle — sensors at or above this value are omnidirectional.
+_FULL_ARC_DEG: float = 360.0
+
+# Default bearing step for the bearing sweep in greedy_place_sensors.
+# 10° gives 36 candidates per position — good balance of quality and speed.
+_BEARING_STEP_DEG_DEFAULT: float = 10.0
 
 
 @dataclass(frozen=True)
@@ -244,6 +260,113 @@ def _build_weight_map(
     return weight_map
 
 
+def _precompute_bearing_grid(
+    site: SiteModel,
+    pos: Position,
+) -> npt.NDArray[np.float64]:
+    """Build compass-bearing-to-cell grid for *pos* (expensive; call once per candidate).
+
+    Returns a 2D float64 array of shape ``(site.rows, site.cols)`` where each
+    cell value is the compass bearing (degrees, [0, 360)) from *pos* to that
+    cell.  Used by :func:`_build_arc_mask` to cheaply evaluate many boresight
+    angles without recomputing the coordinate grids.
+    """
+    rows, cols = site.dem.shape
+    col_coords = site.origin_x + np.arange(cols, dtype=np.float64) * site.resolution
+    row_coords = site.origin_y - np.arange(rows, dtype=np.float64) * site.resolution
+    cell_x, cell_y = np.meshgrid(col_coords, row_coords)
+    dx: npt.NDArray[np.float64] = cell_x - pos.x
+    dy: npt.NDArray[np.float64] = cell_y - pos.y
+    return np.degrees(np.arctan2(dx, dy)) % _FULL_ARC_DEG
+
+
+def _build_arc_mask(
+    bearing_to_cell: npt.NDArray[np.float64],
+    half_arc: float,
+    bearing_deg: float,
+) -> npt.NDArray[np.bool_]:
+    """Apply an azimuth arc mask using a precomputed bearing grid.
+
+    Args:
+        bearing_to_cell: Per-cell compass bearing from the sensor position,
+            as returned by :func:`_precompute_bearing_grid`.
+        half_arc: Half-width of the sensor's azimuth arc in degrees
+            (``azimuth_coverage_deg / 2``).
+        bearing_deg: Boresight compass bearing for this candidate.
+
+    Returns:
+        Boolean array — True where the cell falls within the arc.
+    """
+    boresight = bearing_deg % _FULL_ARC_DEG
+    diff: npt.NDArray[np.float64] = (bearing_to_cell - boresight + 180.0) % _FULL_ARC_DEG - 180.0
+    return np.abs(diff) <= half_arc
+
+
+def _compute_raw_coverage_no_arc(
+    site: SiteModel,
+    sensor: SensorDefinition,
+    placement: SensorPlacement,
+) -> npt.NDArray[np.bool_]:
+    """Compute sensor coverage with range mask applied but no azimuth arc clipping.
+
+    For Radar and EO_IR sensors: runs the viewshed (bearing-independent LOS)
+    and applies range mask only.  The caller then sweeps arc masks for each
+    bearing candidate.
+
+    For all other sensor types (RF, Acoustic): delegates to the full
+    :func:`~salus.engine.dispatcher.compute_sensor_coverage` which includes
+    the arc mask.  This is correct because RF and Acoustic sensors in the
+    current database are omnidirectional (``azimuth_coverage_deg == 360``),
+    so the arc mask is a no-op.  Any future directional RF/Acoustic sensor
+    would follow this slower-but-correct path automatically.
+
+    Args:
+        site: Site terrain model.
+        sensor: Sensor capability definition.
+        placement: Sensor position.  ``placement.bearing_deg`` is ignored for
+            the arc-free path — the caller supplies bearings for the sweep.
+
+    Returns:
+        Boolean array of shape ``site.dem.shape``.
+
+    Raises:
+        ValueError: If the sensor height AGL is non-finite.
+    """
+    if sensor.type in (SensorType.Radar, SensorType.EO_IR):
+        sensor_agl = (
+            placement.height_override_m
+            if placement.height_override_m is not None
+            else sensor.mounting_height_m
+        )
+        # D-234: guard against mounting_height_m=None (not rejected by SensorDefinition
+        # validator in all configurations) before math.isfinite which raises TypeError on None.
+        if sensor_agl is None:
+            raise ValueError(
+                "sensor height AGL is None; set height_override_m on the placement or "
+                "mounting_height_m on the sensor definition"
+            )
+        if not math.isfinite(sensor_agl):
+            raise ValueError(
+                f"sensor height AGL is non-finite ({sensor_agl}); "
+                "check placement.height_override_m and sensor.mounting_height_m"
+            )
+        raw_vs = compute_viewshed(site, placement.position_x, placement.position_y, sensor_agl)
+        # Range mask — no azimuth arc applied here.
+        rows, cols = raw_vs.shape
+        col_coords = site.origin_x + np.arange(cols, dtype=np.float64) * site.resolution
+        row_coords = site.origin_y - np.arange(rows, dtype=np.float64) * site.resolution
+        cell_x, cell_y = np.meshgrid(col_coords, row_coords)
+        dx: npt.NDArray[np.float64] = cell_x - placement.position_x
+        dy: npt.NDArray[np.float64] = cell_y - placement.position_y
+        dist: npt.NDArray[np.float64] = np.sqrt(dx**2 + dy**2)
+        range_mask: npt.NDArray[np.bool_] = (dist >= sensor.min_range_m) & (
+            dist <= sensor.max_range_m
+        )
+        return raw_vs & range_mask
+    # RF and Acoustic: fall back to full coverage (arc included).
+    return compute_sensor_coverage(site, sensor, placement)
+
+
 def greedy_place_sensors(
     site: SiteModel,
     sensors_to_place: list[SensorDefinition],
@@ -251,6 +374,7 @@ def greedy_place_sensors(
     existing_coverage: npt.NDArray[np.bool_] | None = None,
     coverage_threshold_pct: float = 100.0,
     weights: PlacementWeights | None = None,
+    bearing_step_deg: float = _BEARING_STEP_DEG_DEFAULT,
 ) -> list[SensorPlacement]:
     """Greedily select sensor placements that maximise zone-weighted coverage.
 
@@ -263,9 +387,13 @@ def greedy_place_sensors(
     *coverage_threshold_pct* (computed as
     ``sum(weight_map[covered_cells]) / sum(weight_map) * 100``).
 
-    All placed sensors are assigned a bearing of :data:`_DEFAULT_BEARING_DEG`
-    (0° / north).  For sensors with ``azimuth_coverage_deg < 360`` the user
-    should manually adjust the bearing in the output scenario.
+    **Bearing-aware placement (S11.5):** for directional sensors
+    (``azimuth_coverage_deg < 360``), each candidate position is evaluated
+    at ``ceil(360 / bearing_step_deg)`` boresight angles.  The viewshed is
+    computed once per position; arc masks are applied cheaply per bearing.
+    The (position, bearing) pair with the highest weighted score is selected.
+    Omnidirectional sensors (``azimuth_coverage_deg >= 360``) skip the bearing
+    sweep and are placed with bearing :data:`_DEFAULT_BEARING_DEG` (0°/north).
 
     Args:
         site: Site terrain model.
@@ -284,6 +412,10 @@ def greedy_place_sensors(
         weights: Zone-type weighting factors.  ``None`` uses
             :class:`PlacementWeights` defaults (critical_asset=3×, inner=2×,
             perimeter=1×).
+        bearing_step_deg: Angular step between boresight candidates for
+            directional sensors (degrees, must be in (0, 360]).  Smaller
+            values give finer bearing resolution at higher compute cost.
+            Default :data:`_BEARING_STEP_DEG_DEFAULT` (10°, 36 candidates).
 
     Returns:
         List of :class:`~salus.models.scenario.SensorPlacement` objects in
@@ -295,10 +427,15 @@ def greedy_place_sensors(
         ValueError: If *coverage_threshold_pct* is outside [0.0, 100.0].
         ValueError: If *existing_coverage* shape does not match
             ``(site.rows, site.cols)``.
+        ValueError: If *bearing_step_deg* is not a finite value in (0, 360].
     """
     if not (0.0 <= coverage_threshold_pct <= 100.0):
         raise ValueError(
             f"coverage_threshold_pct must be in [0.0, 100.0], got {coverage_threshold_pct}"
+        )
+    if not math.isfinite(bearing_step_deg) or bearing_step_deg <= 0.0 or bearing_step_deg > 360.0:
+        raise ValueError(
+            f"bearing_step_deg must be a finite value in (0, 360], got {bearing_step_deg}"
         )
 
     expected_shape = (site.rows, site.cols)
@@ -356,19 +493,43 @@ def greedy_place_sensors(
 
         best_score: float = -1.0
         best_position: Position | None = None
+        best_bearing: float = _DEFAULT_BEARING_DEG
         best_coverage: npt.NDArray[np.bool_] | None = None
+
+        # Bearing sweep: directional sensors evaluate multiple boresight angles;
+        # omnidirectional sensors skip the sweep (single no-op bearing pass).
+        needs_sweep: bool = sensor.azimuth_coverage_deg < _FULL_ARC_DEG
+        # D-231/D-236: initialise unconditionally so mypy and future refactors
+        # cannot produce an unbound reference if the two guard sites diverge.
+        half_arc: float = sensor.azimuth_coverage_deg / 2.0
+        bearing_grid: npt.NDArray[np.float64] | None = None
+        if needs_sweep:
+            # D-232: use ceil so the full 360° arc is always covered even when
+            # bearing_step_deg does not divide 360 exactly.
+            n_steps = max(1, math.ceil(_FULL_ARC_DEG / bearing_step_deg))
+            bearing_candidates: list[float] = [i * bearing_step_deg for i in range(n_steps)]
+        else:
+            bearing_candidates = [_DEFAULT_BEARING_DEG]
 
         failed_candidates = 0
         for pos in candidates:
-            candidate_placement = SensorPlacement(
+            base_placement = SensorPlacement(
                 sensor_name=sensor.name,
                 position_x=pos.x,
                 position_y=pos.y,
                 bearing_deg=_DEFAULT_BEARING_DEG,
                 height_override_m=None,
             )
+            # Phase 1 — compute base coverage (viewshed + range, no arc).
+            # For omnidirectional sensors this IS the final coverage.
             try:
-                cov = compute_sensor_coverage(site, sensor, candidate_placement)
+                if needs_sweep:
+                    base_cov: npt.NDArray[np.bool_] = _compute_raw_coverage_no_arc(
+                        site, sensor, base_placement
+                    )
+                    bearing_grid = _precompute_bearing_grid(site, pos)
+                else:
+                    base_cov = compute_sensor_coverage(site, sensor, base_placement)
             except Exception as exc:  # noqa: BLE001
                 failed_candidates += 1
                 _log.debug(
@@ -380,13 +541,34 @@ def greedy_place_sensors(
                 )
                 continue
 
-            newly_covered: npt.NDArray[np.bool_] = cov.astype(bool) & ~composite
-            score = float(np.sum(weight_map[newly_covered]))
+            # Phase 2 — score over bearing candidates (cheap arc masks).
+            for b_deg in bearing_candidates:
+                if needs_sweep:
+                    assert bearing_grid is not None  # guaranteed by Phase 1 above
+                    arc: npt.NDArray[np.bool_] = _build_arc_mask(bearing_grid, half_arc, b_deg)
+                    cov: npt.NDArray[np.bool_] = base_cov & arc
+                else:
+                    cov = base_cov
 
-            if score > best_score:
-                best_score = score
-                best_position = pos
-                best_coverage = cov.astype(bool)
+                newly_covered: npt.NDArray[np.bool_] = cov & ~composite
+                score = float(np.sum(weight_map[newly_covered]))
+
+                if score > best_score:
+                    best_score = score
+                    best_position = pos
+                    best_bearing = b_deg
+                    best_coverage = cov.astype(bool)
+
+        # D-230: warn when some (but not all) candidates failed so the caller
+        # can distinguish a systematic error from rare positional failures.
+        if 0 < failed_candidates < len(candidates):
+            _log.warning(
+                "Coverage computation failed for %d of %d candidate(s) for sensor '%s'; "
+                "placement may be suboptimal.",
+                failed_candidates,
+                len(candidates),
+                sensor.name,
+            )
 
         if best_position is None or best_coverage is None:
             # D-178: emit at WARNING so production logs surface the failure.
@@ -404,7 +586,9 @@ def greedy_place_sensors(
                 )
             continue
 
-        # D-180: warn when best_score is zero — the sensor adds no weighted coverage.
+        # D-180/D-233: warn and skip composite update when best_score is zero.
+        # Updating composite with a no-op coverage array would prevent later
+        # sensors from detecting those cells as uncovered.
         if best_score <= 0.0:
             _log.warning(
                 "Sensor '%s' placed at (%.1f, %.1f) adds zero weighted coverage "
@@ -419,20 +603,25 @@ def greedy_place_sensors(
             sensor_name=sensor.name,
             position_x=best_position.x,
             position_y=best_position.y,
-            bearing_deg=_DEFAULT_BEARING_DEG,
+            bearing_deg=best_bearing,
             height_override_m=None,
         )
         placements.append(placed)
         composite |= best_coverage
 
-        composite_pct = float(composite.sum()) / float(composite.size) * 100.0
+        if total_weight > 0.0:
+            weighted_pct = float(np.sum(weight_map[composite])) / total_weight * 100.0
+        else:
+            weighted_pct = 0.0
         _log.info(
-            "Placed '%s' at (%.1f, %.1f) — weighted score %.0f, composite coverage %.1f%%",
+            "Placed '%s' at (%.1f, %.1f) bearing=%.1f° — weighted score %.0f, "
+            "weighted coverage %.1f%%",
             sensor.name,
             best_position.x,
             best_position.y,
+            best_bearing,
             best_score,
-            composite_pct,
+            weighted_pct,
         )
 
     return placements

@@ -2,37 +2,9 @@
 
 # Project Salus — MVP Backlog
 
-## Status Key
-- **Now** — the single task currently in progress
-- **Next Up** — ordered queue, work top-down
-- **Blocked / Waiting** — cannot proceed until dependency resolves
-- **Done** — completed tasks
-
----
-
-## Blocked / Waiting
-
-_(none)_
-
----
-
-## Done
-
-- **S0-1:** Initialise Python project (pyproject.toml, src/salus/ layout, Dockerfile, .gitignore, tests/)
-
----
-
-## Now
-
-### Slice 0 — Project Skeleton
-
-**S0-1: Initialise Python project with pyproject.toml, src layout, and Docker dev environment**
-- _What:_ Create the `salus/` project root with `pyproject.toml` (Python 3.11+, all MVP dependencies), `src/salus/__init__.py`, empty sub-package directories matching the architecture doc (`ingest/`, `models/`, `engine/`, `report/`, `viewer/`), a `Dockerfile` based on `condaforge/mambaforge` (easiest path to GDAL+PDAL binaries), a `.gitignore`, and a `tests/` directory with `conftest.py`.
-- _Why this is first:_ Every subsequent task needs an importable package, a reproducible environment, and the ability to run `pytest`. Nothing can be built without this scaffold. The Docker-first approach avoids GDAL installation pain from day one.
-
----
-
-## Next Up
+> **Current status: Slices 0 through 11 are complete.**
+> All new slices and tasks must be inserted after Slice 11.
+> Do not add work items above this line or within Slices 1–11.
 
 ---
 
@@ -414,6 +386,26 @@ _Goal: model effector engagement zones (where can effectors actually neutralise 
 
 ---
 
+### Slice 11.5 — Bearing-Aware Placement Optimisation
+
+_Goal: extend the greedy sensor and effector placement optimiser to jointly optimise position and boresight bearing, so that directional sensors and effectors are pointed in the direction that maximises coverage rather than defaulting to north._
+
+_Context: S9 implemented greedy placement but hardcodes `bearing_deg=0.0` for every placed unit. For 360° sensors (RF, acoustic) this is harmless. For directional radars and effectors with narrow engagement arcs it can produce significantly suboptimal configurations. The fix is architecturally straightforward: viewshed computation is bearing-independent, so bearings can be swept cheaply as arc masks applied to a single precomputed viewshed — no additional ray-marching required._
+
+**S11.5-1: Precompute and cache viewsheds per candidate position**
+- _What:_ Refactor `greedy_place_sensors` in `engine/placement.py` to separate viewshed computation from scoring. For each placement step, compute and cache a viewshed array for every candidate position before any bearing sweep begins. Replace the current inline `compute_sensor_coverage` call with a two-phase approach: (1) compute all M viewsheds, (2) score all M × B (position, bearing) pairs using arc masks applied to cached viewsheds. Apply the same refactor to effector placement if a symmetric function exists. Write tests confirming that caching produces identical scores to the non-cached path.
+- _Why:_ Viewshed ray-marching is O(rows × cols) per position and dominates runtime. Bearing sweep is just a cheap arc-mask operation. Separating the two ensures the bearing sweep adds only ~15–25% overhead rather than a full B× multiplication of the expensive step. This is the prerequisite structural change before adding bearing candidates.
+
+**S11.5-2: Add candidate bearing sweep to the scoring loop**
+- _What:_ Add `bearing_step_deg: float = 10.0` parameter to `greedy_place_sensors` (and any effector equivalent). For each candidate position, generate bearing candidates `[0, bearing_step_deg, 2×bearing_step_deg, …, 360 − bearing_step_deg]`. For each (position, bearing) pair, apply the azimuth arc mask to the cached viewshed and score. Skip the bearing sweep entirely for sensors where `azimuth_coverage_deg == 360` — their score is bearing-independent. Return the `SensorPlacement` / `EffectorPlacement` with the optimal bearing filled in rather than always `0.0`. Write tests: a 90° arc sensor on a flat site should point toward the largest uncovered area; a 360° sensor returns an arbitrary (but valid) bearing; `bearing_step_deg=90` produces 4 candidates.
+- _Why:_ This is the core capability gap. A directional radar placed at the optimal position but pointing the wrong direction provides far less coverage than the model currently assumes. The greedy choice of (position, bearing) jointly is still a valid greedy heuristic — it just evaluates B times as many candidates per step at negligible additional cost.
+
+**S11.5-3: Expose `bearing_step_deg` in CLI and `ScenarioConfig`**
+- _What:_ Add `placement_bearing_step_deg: float = 10.0` to `ScenarioConfig` in `models/scenario.py` with validation (must be in (0, 360], must divide evenly into 360 within float tolerance, or simply require it to be a positive finite value). Pass through to `greedy_place_sensors` in the `salus optimise` CLI command. Add `--bearing-step` CLI flag to `salus optimise` to override at runtime. Document that `--bearing-step 90` gives a fast 4-direction sweep and `--bearing-step 5` gives fine-grained optimisation.
+- _Why:_ `bearing_step_deg` is the precision knob — coarser steps run faster for planning passes, finer steps find the true optimum for final configurations. Exposing it at the CLI and scenario level gives users control without code changes.
+
+---
+
 ### Slice 12 — LiDAR Ingestion Pipeline
 
 _Goal: accept raw LiDAR point clouds and convert to DEM/DSM, completing the full ingestion pipeline._
@@ -433,6 +425,34 @@ _Goal: accept raw LiDAR point clouds and convert to DEM/DSM, completing the full
 **S12-4: Add LiDAR ingestion to CLI**
 - _What:_ Add `salus ingest --lidar path/to/cloud.laz --resolution 1.0 --output-dem dem.tif --output-dsm dsm.tif` subcommand. Runs the full LiDAR-to-raster pipeline.
 - _Why:_ Completes the LiDAR path through the system. Users can now go from raw survey data to coverage analysis in two commands: `salus ingest` then `salus simulate`.
+
+---
+
+### Slice 12.5 — Vegetation and Canopy Layer
+
+_Goal: model tree cover as a semi-permeable obstacle so that sensor coverage in forested terrain reflects the sensor's actual ability to see through vegetation, rather than treating all above-ground obstructions as opaque._
+
+_Context: S3-2 introduced DSM loading, which lumps buildings and vegetation into a single surface. S12 derives precise DEM and DSM from LiDAR. This slice uses those two surfaces to isolate the vegetation layer (CHM = DSM − DTM) and applies sensor-specific penetration factors during viewshed computation. The result is a probabilistic coverage model for cells where the LOS ray passes through canopy, rather than the current binary blocked/unblocked result._
+
+**S12.5-1: Derive and ingest Canopy Height Model (CHM)**
+- _What:_ Add `derive_canopy_height_model(dem_path, dsm_path, output_path) -> np.ndarray` to `src/salus/ingest/terrain.py`. Compute CHM = DSM − DTM, clamped to [0, ∞) (negative values mean DEM/DSM misregistration — clamp and warn). Add `canopy_height_m: np.ndarray | None = None` to `SiteModel`. Extend `load_dem` (or add a companion `load_canopy`) to accept an optional CHM GeoTIFF and attach it to the returned `SiteModel`. Write tests: zero CHM on flat open terrain, positive CHM where DSM > DEM, clamp-and-warn on negative cells.
+- _Why:_ The CHM is the vegetation-specific surface — it isolates tree canopy height from terrain and building height. It cannot be derived until both DEM and DSM are available, which S12 provides. Clamping rather than erroring on negative cells handles minor DSM/DEM registration offsets that appear in real LiDAR products.
+
+**S12.5-2: Add `vegetation_penetration` to `SensorDefinition` and sensor YAMLs**
+- _What:_ Add `vegetation_penetration: float = 0.0` (range 0.0–1.0) to `SensorDefinition` in `models/sensor.py`. This represents the fraction of signal that passes through a unit of canopy (0.0 = fully blocked, 1.0 = fully transparent). Add field validation (must be in [0, 1]). Update all existing sensor YAML files: RF sensors (~0.6), radar (0.2–0.4 depending on band), EO/IR (0.0), acoustic (0.9 — sound diffracts around/through foliage). Document the physical basis (Bouguer–Lambert attenuation) in the field docstring.
+- _Why:_ RF spectrum sensors detect drone control signals that partially penetrate light canopy. Radar attenuates significantly through dense foliage. EO/IR cannot see through leaves at all. Without this field the model either ignores vegetation (overestimates coverage) or treats it as a solid wall (underestimates coverage). Both are wrong for forested sites.
+
+**S12.5-3: Modify viewshed computation for canopy attenuation**
+- _What:_ In `engine/viewshed.py`, add `compute_viewshed_through_canopy(site, observer_x, observer_y, observer_height, max_range, vegetation_penetration) -> np.ndarray`. When `site.canopy_height_m` is present and `vegetation_penetration > 0`, ray-march each LOS ray and accumulate a per-cell transmission coefficient: `T *= vegetation_penetration ** (canopy_height_m[cell] / reference_height_m)` for each cell along the ray where canopy height > 0. Return a float32 array of transmission values (0.0–1.0) rather than a boolean array. When `site.canopy_height_m` is None or `vegetation_penetration == 0.0`, fall back to the existing binary viewshed computation unchanged. Write tests: open terrain returns identical output to binary viewshed; single canopy cell with penetration=0.0 blocks ray; with penetration=0.5 returns partial transmission; full canopy path gives exponentially decaying transmission.
+- _Why:_ The Bouguer–Lambert model (exponential attenuation proportional to path length through the medium) is the standard for signal propagation through vegetation. Accumulating `penetration^height` per cell approximates this using the CHM without requiring per-voxel density data. The fallback to binary viewshed ensures backward compatibility — sites without a CHM are unaffected.
+
+**S12.5-4: Update coverage computation and statistics for probabilistic coverage**
+- _What:_ In `engine/coverage.py`, add `VEGETATION_COVERAGE_THRESHOLD: float = 0.5` as a named module-level constant. When layer coverage arrays contain float values (from canopy-attenuated viewsheds), apply this threshold to produce the boolean coverage arrays that downstream gap analysis, composite coverage, and statistics computation already expect. Expose the threshold as an optional parameter on `compute_layer_coverage` and `compute_coverage_stats`. Write tests: a 0.6-transmission cell is covered at the default threshold; a 0.4-transmission cell is not; threshold override works correctly.
+- _Why:_ All downstream analysis (gap maps, zone stats, kill chain, saturation) is built on boolean coverage grids. Introducing a threshold at the coverage layer boundary keeps all downstream code unchanged while giving users a meaningful knob: "a cell counts as covered if at least 50% of the signal passes through". Defence customers may want to set this higher (e.g., 0.7) for critical asset zones in dense canopy.
+
+**S12.5-5: Render vegetation-aware coverage maps**
+- _What:_ Update `report/maps.py` to optionally overlay the CHM as a green-tinted semi-transparent layer when `site.canopy_height_m` is present, so maps clearly show where forested areas are relative to coverage gaps. Add a note to the map legend when canopy attenuation was applied ("Coverage shown at X% transmission threshold"). No new map function required — extend the existing `render_composite_coverage_map` and `render_gap_map` with an optional `show_canopy: bool = True` parameter.
+- _Why:_ Without visualising the canopy layer, users cannot distinguish coverage gaps caused by terrain shadowing from gaps caused by vegetation attenuation — two very different operational findings. Showing canopy on the map makes the relationship between forest cover and coverage gaps immediately legible.
 
 ---
 
@@ -472,19 +492,19 @@ _Goal: produce a professional PDF report suitable for inclusion in a defence pro
 
 ### Slice 14 — Interactive Standalone Viewer
 
-_Goal: produce a self-contained HTML/JS package that can be opened in a browser without a server._
+_Goal: produce a self-contained HTML/JS package that can be opened in a browser without a server. The viewer uses MapLibreGL for 3D terrain navigation — users can tilt, rotate, and pitch the camera to understand terrain relief and sensor line-of-sight in three dimensions._
 
 **S14-1: Design viewer data export format (JSON)**
-- _What:_ Create `src/salus/viewer/export.py` with `export_viewer_data(report_data, output_path)`. Export coverage layers as GeoJSON polygons (not rasters — too large), gap polygons, corridor paths with coverage stats, kill chain summaries, saturation stats, sensor placement points. All coordinates in WGS84 for Leaflet compatibility.
-- _Why:_ The viewer is a pre-computed data display tool — zero simulation capability by design. The JSON export format defines the viewer's capabilities and limitations.
+- _What:_ Create `src/salus/viewer/export.py` with `export_viewer_data(report_data, output_path)`. Export coverage layers as GeoJSON polygons (not rasters — too large), gap polygons, corridor paths with coverage stats, kill chain summaries, saturation stats, sensor placement points. All coordinates in WGS84 for MapLibreGL compatibility. Pre-process the site DEM into raster-dem tiles (via GDAL `gdal2tiles` or equivalent) at sufficient resolution for close-range terrain inspection; bundle tiles with the viewer package.
+- _Why:_ The viewer is a pre-computed data display tool — zero simulation capability by design. The JSON export format defines the viewer's capabilities and limitations. Raster-dem tiles are required for MapLibreGL's 3D terrain layer.
 
 **S14-2: Implement data sanitisation for export**
 - _What:_ Create `src/salus/viewer/sanitise.py` with `sanitise_for_export(viewer_data, config) -> ViewerData`. Strip exact sensor specifications (replace ranges with "band" categories), round coordinates to configurable precision, omit proprietary fields. Sanitisation level configurable (full/redacted/minimal).
 - _Why:_ The interactive viewer leaves your hands — it goes to the customer. Sanitisation prevents reverse-engineering exact sensor capabilities. This is a hard requirement for defence customers and for protecting vendor IP.
 
-**S14-3: Build Leaflet-based interactive map viewer**
-- _What:_ Create `src/salus/viewer/static/index.html` and `app.js`. Leaflet map with toggle-able coverage layers (radar, RF, EO/IR, acoustic, effector, composite), gap highlights, sensor/effector placement markers, threat corridor overlays. Layer control panel. Click-to-inspect for gaps (area, location). Basemap tile selector.
-- _Why:_ The interactive viewer lets customers explore coverage in a way PDFs cannot — zoom in on specific areas, toggle layers, understand overlap. It works offline (air-gapped networks) because all data is pre-computed.
+**S14-3: Build MapLibreGL-based interactive 3D map viewer**
+- _What:_ Create `src/salus/viewer/static/index.html` and `app.js`. MapLibreGL map with 3D terrain enabled (pitch up to 85°, full rotate/tilt navigation). Toggle-able coverage layers (radar, RF, EO/IR, acoustic, effector, composite) draped on the terrain surface, gap highlights, sensor/effector placement markers, threat corridor overlays. Layer control panel. Click-to-inspect for gaps (area, location). Basemap tile selector (offline-capable raster tiles as default; optional satellite if available).
+- _Why:_ MapLibreGL's 3D terrain mode lets reviewers tilt and fly around the site to understand how terrain relief creates coverage gaps and blocks line-of-sight — something a flat 2D map cannot convey. It works offline (air-gapped networks) because all terrain tiles and data are pre-computed and bundled.
 
 **S14-4: Add kill chain and saturation display to viewer**
 - _What:_ Add a sidebar panel to the viewer showing kill chain timeline (as an SVG Gantt chart) and saturation metrics (bar chart). Link corridors on the map to their kill chain results — click a corridor to see its engagement timeline.
@@ -492,7 +512,7 @@ _Goal: produce a self-contained HTML/JS package that can be opened in a browser 
 
 **S14-5: Implement viewer packaging**
 - _What:_ Add `package_viewer(viewer_data, output_dir)` to `export.py`. Copy static assets (HTML, JS, CSS) and write the JSON data file into a single directory. The result is a self-contained folder that works when opened directly in a browser (`file://` protocol). Optionally zip for distribution.
-- _Why:_ The package must be fully self-contained — no CDN dependencies, no server. All JS libraries (Leaflet) bundled locally. This enables air-gapped deployment.
+- _Why:_ The package must be fully self-contained — no CDN dependencies, no server. All JS libraries (MapLibreGL) and terrain tiles bundled locally. This enables air-gapped deployment.
 
 **S14-6: Add `salus viewer` CLI subcommand**
 - _What:_ Add `salus viewer --scenario scenario.yaml --output viewer/ --sanitise redacted` that runs simulation, exports data, sanitises, and packages the viewer.

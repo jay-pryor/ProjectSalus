@@ -1170,6 +1170,17 @@ def simulate(
         "appended to sensor_placements. The original scenario is not modified."
     ),
 )
+@click.option(
+    "--bearing-step",
+    default=10.0,
+    show_default=True,
+    type=float,
+    help=(
+        "Bearing sweep step in degrees for directional sensors (azimuth arc < 360°). "
+        "Smaller values give finer boresight resolution at higher compute cost. "
+        "Omnidirectional sensors ignore this option."
+    ),
+)
 def optimise(
     scenario: str,
     sensor_names: tuple[str, ...],
@@ -1178,12 +1189,15 @@ def optimise(
     coverage_threshold: float,
     output_dir: str,
     write_scenario: str | None,
+    bearing_step: float,
 ) -> None:
     """Suggest sensor placements that maximise zone-weighted coverage.
 
     Generates a candidate position grid across the site, then greedily places
-    each named sensor at the position that covers the most previously-uncovered
-    area (weighted by zone: critical_asset=3×, inner=2×, perimeter=1×).
+    each named sensor at the position and boresight bearing that covers the most
+    previously-uncovered area (weighted by zone: critical_asset=3×, inner=2×,
+    perimeter=1×).  Directional sensors (azimuth arc < 360°) are swept over
+    ``--bearing-step`` degree increments per candidate position.
 
     Example:
 
@@ -1280,8 +1294,19 @@ def optimise(
 
     click.echo(f"  {len(candidates)} candidate position(s) in search space.")
 
+    # Validate --bearing-step before running
+    if not (math.isfinite(bearing_step) and 0.0 < bearing_step <= 360.0):
+        click.echo(
+            f"Error: --bearing-step must be a finite value in (0, 360], got {bearing_step}",
+            err=True,
+        )
+        sys.exit(1)
+
     # Run greedy placement
-    click.echo(f"\nRunning greedy placement ({len(sensors_to_place)} sensor(s) to place)…")
+    click.echo(
+        f"\nRunning greedy placement ({len(sensors_to_place)} sensor(s) to place, "
+        f"bearing step={bearing_step:.1f}°)…"
+    )
     try:
         new_placements = greedy_place_sensors(
             site=site,
@@ -1289,6 +1314,7 @@ def optimise(
             candidates=candidates,
             coverage_threshold_pct=coverage_threshold,
             weights=PlacementWeights(),
+            bearing_step_deg=bearing_step,
         )
     except ValueError as exc:
         click.echo(f"Error during placement: {exc}", err=True)
@@ -1300,10 +1326,12 @@ def optimise(
 
     # Print placement summary
     click.echo(f"\nOptimised placements ({len(new_placements)}):")
-    click.echo("─" * 55)
+    click.echo("─" * 65)
     for i, p in enumerate(new_placements, start=1):
         click.echo(
-            f"  {i:>2}. {p.sensor_name:<30} x={p.position_x:>10.1f}  y={p.position_y:>10.1f}"
+            f"  {i:>2}. {p.sensor_name:<30} "
+            f"x={p.position_x:>10.1f}  y={p.position_y:>10.1f}  "
+            f"bearing={p.bearing_deg:>5.1f}°"
         )
 
     # Render composite coverage map of the placed sensors
