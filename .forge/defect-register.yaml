@@ -2537,7 +2537,7 @@ defects:
     description: "Partial candidate failure swallowed at DEBUG level. If some but not all candidates fail for a sensor, no WARNING is emitted and the caller receives a truncated placement list with no indication of the failure count. CLI caller only detects total failure (empty list)."
     resolution: "Added WARNING log when 0 < failed_candidates < len(candidates) after the candidate loop, reporting failure count and sensor name."
     status: resolved
-    commit: pending-S11.5
+    commit: 1012f92
 
   - id: D-231
     severity: high
@@ -2548,7 +2548,7 @@ defects:
     description: "`half_arc` is assigned only inside `if needs_sweep:` branch but has no unconditional initialisation. Formally unbound outside that branch — a future refactor separating the two guard sites would produce NameError or use stale value."
     resolution: "Added unconditional initialisation `half_arc: float = sensor.azimuth_coverage_deg / 2.0` before the needs_sweep branch."
     status: resolved
-    commit: pending-S11.5
+    commit: 1012f92
 
   - id: D-232
     severity: high
@@ -2559,7 +2559,7 @@ defects:
     description: "Bearing sweep candidate count uses int() truncation: n_steps = int(360 / bearing_step_deg). For non-divisor step sizes (e.g. 7°) the final partial arc (up to bearing_step_deg wide) is silently never evaluated. Best bearing may lie in the blind spot."
     resolution: "Changed to math.ceil so all 360° are covered: n_steps = max(1, math.ceil(_FULL_ARC_DEG / bearing_step_deg))."
     status: resolved
-    commit: pending-S11.5
+    commit: 1012f92
 
   - id: D-233
     severity: medium
@@ -2570,7 +2570,7 @@ defects:
     description: "Zero-score placement updates composite before D-180 warning fires. When every candidate scores 0.0, first candidate wins (0.0 > -1.0), composite is OR'd with its coverage, and only then the warning fires — too late to prevent the update."
     resolution: "Skipping the composite update for zero-score would break existing tests and operational intent (sensor is still placed). Added comment at warning site explaining that the composite update is intentionally not skipped — the placement is valid, the warning is advisory only."
     status: resolved
-    commit: pending-S11.5
+    commit: 1012f92
 
   - id: D-234
     severity: medium
@@ -2581,7 +2581,7 @@ defects:
     description: "`sensor.mounting_height_m` None fallback not explicitly guarded. If SensorDefinition has mounting_height_m=None, math.isfinite(None) raises TypeError which is caught by broad except Exception and silently fails every candidate for that sensor."
     resolution: "Added explicit `if sensor_agl is None: raise ValueError(...)` guard before math.isfinite() call in _compute_raw_coverage_no_arc."
     status: resolved
-    commit: pending-S11.5
+    commit: 1012f92
 
   - id: D-235
     severity: medium
@@ -2592,7 +2592,7 @@ defects:
     description: "S11.5-1 specifies 'Write tests confirming caching produces identical scores to non-cached path.' No such test exists. Only directional orientation and invalid-input tests were added."
     resolution: "Added test_bearing_sweep_cached_path_matches_direct_coverage: reconstructs coverage via two-phase path and compares to compute_sensor_coverage; asserts sum equality and element-wise equality."
     status: resolved
-    commit: pending-S11.5
+    commit: 1012f92
 
   - id: D-236
     severity: high
@@ -2603,4 +2603,4 @@ defects:
     description: "`bearing_grid` is only assigned inside `if needs_sweep:` branch but has no unconditional initialisation. mypy reports possibly-unbound. Same structural fragility as D-231 (half_arc)."
     resolution: "Added unconditional initialisation `bearing_grid: npt.NDArray[np.float64] | None = None` before the needs_sweep branch."
     status: resolved
-    commit: pending-S11.5
+    commit: 1012f92
