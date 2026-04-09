@@ -2770,7 +2770,7 @@ defects:
     description: "SensorType filter uses `__members__.values()` which yields enum objects, not string values. The `in` check against a JSON string key always False — entire per_layer_coverage_pct dict silently discarded on --results path."
     resolution: "Replaced dict-comprehension with try/except _SensorType(k) loop; unknown keys logged as warnings."
     status: resolved
-    commit: ""
+    commit: "2688044"
 
   - id: D-252
     severity: high
@@ -2781,7 +2781,7 @@ defects:
     description: "weasyprint.write_pdf() unchecked — if WeasyPrint fails or produces zero-byte file, output_path.stat().st_size raises/reports 0 while function returns a path caller treats as valid PDF."
     resolution: "Wrapped write_pdf in try/except OSError; added zero-byte guard raising OSError with diagnostic message."
     status: resolved
-    commit: ""
+    commit: "2688044"
 
   - id: D-253
     severity: high
@@ -2792,7 +2792,7 @@ defects:
     description: "redundancy_map stub is np.zeros((1,1)) regardless of site dimensions on --results path. Any consumer indexing with real site coordinates reads silent zeros or raises IndexError."
     resolution: "Moved DEM loading before if/else branch so site is always available; uses np.zeros((site.rows, site.cols), dtype=np.intp)."
     status: resolved
-    commit: ""
+    commit: "2688044"
 
   - id: D-254
     severity: medium
@@ -2803,7 +2803,7 @@ defects:
     description: "Section render loop catches bare Exception, silently drops required sections (cover, coverage_analysis) on template programming errors. Should catch jinja2.TemplateError only."
     resolution: "Narrowed except clause to jinja2.TemplateError; unexpected errors now propagate."
     status: resolved
-    commit: ""
+    commit: "2688044"
 
   - id: D-255
     severity: medium
@@ -2814,7 +2814,7 @@ defects:
     description: "executive_summary is always '' in saved results JSON (_save_simulation_results writes hardcoded empty string). --results path always produces blank executive summary section."
     resolution: "Added _gen_executive_summary helper in _save_simulation_results that calls generate_executive_summary(stats, [], None)."
     status: resolved
-    commit: ""
+    commit: "2688044"
 
   - id: D-256
     severity: medium
@@ -2825,7 +2825,7 @@ defects:
     description: "assumptions dict always {} on --results path. assumptions.html section renders as empty content in PDF with no indication to user."
     resolution: "Built stub SimulationResults with loaded site+scenario and called _build_assumptions on --results path."
     status: resolved
-    commit: ""
+    commit: "2688044"
 
   - id: D-257
     severity: medium
@@ -2836,7 +2836,7 @@ defects:
     description: "generate_executive_summary produces only 1 paragraph when per_layer_coverage_pct empty, no zones, no kill chain, no saturation. Spec requires minimum 3 paragraphs."
     resolution: "Added fallback Para 2 (sensor coverage capability) and Para 3 (report scope note) always generated."
     status: resolved
-    commit: ""
+    commit: "2688044"
 
   - id: D-258
     severity: high
@@ -2847,7 +2847,7 @@ defects:
     description: "_render_to_b64 has no type annotations on render_func, *args, **kwargs — all implicitly Any. Wrong render function or argument order is invisible to mypy."
     resolution: "Added Callable[..., Path] for render_func, Any for *args and **kwargs."
     status: resolved
-    commit: ""
+    commit: "2688044"
 
   - id: D-259
     severity: high
@@ -2858,7 +2858,7 @@ defects:
     description: "_render_gap_map_to_b64 has no type annotations on render_func, site, composite, gaps, **kwargs — all implicitly Any."
     resolution: "Added Callable[..., Path], SiteModel, NDArray[np.bool_], NDArray[np.bool_], Any annotations."
     status: resolved
-    commit: ""
+    commit: "2688044"
 
   - id: D-260
     severity: medium
@@ -2869,4 +2869,4 @@ defects:
     description: "_save_simulation_results annotates stats and layer_coverages as Any despite both having concrete importable types (CoverageStats, dict[SensorType, NDArray])."
     resolution: "Added CoverageStats and npt.NDArray[np.bool_] to TYPE_CHECKING imports; updated signature."
     status: resolved
-    commit: ""
+    commit: "2688044"
