@@ -1737,6 +1737,86 @@ def compare(
     click.echo(f"\nDone. Output written to {output_path.resolve()}")
 
 
+# ---------------------------------------------------------------------------
+# S12 — ingest command (LiDAR point cloud → DEM + DSM)
+# ---------------------------------------------------------------------------
+
+
+@main.command()
+@click.option(
+    "--lidar",
+    required=True,
+    type=click.Path(dir_okay=False),
+    help="Path to LAS or LAZ point cloud file.",
+)
+@click.option(
+    "--resolution",
+    default=1.0,
+    show_default=True,
+    type=float,
+    help="Output raster resolution in metres.",
+)
+@click.option(
+    "--output-dem",
+    "output_dem",
+    required=True,
+    type=click.Path(dir_okay=False),
+    help="Output DEM GeoTIFF path.",
+)
+@click.option(
+    "--output-dsm",
+    "output_dsm",
+    required=True,
+    type=click.Path(dir_okay=False),
+    help="Output DSM GeoTIFF path.",
+)
+def ingest(
+    lidar: str,
+    resolution: float,
+    output_dem: str,
+    output_dsm: str,
+) -> None:
+    """Ingest a LAS/LAZ LiDAR point cloud and produce DEM and DSM GeoTIFFs.
+
+    Runs ground classification (SMRF) to produce the DEM and first-return
+    rasterisation to produce the DSM.  Both outputs are GeoTIFFs compatible
+    with ``salus simulate`` and ``salus optimise``.
+    """
+    from salus.ingest.lidar import load_point_cloud, point_cloud_to_dem, point_cloud_to_dsm
+
+    if not (math.isfinite(resolution) and resolution > 0.0):
+        click.echo(
+            f"Error: --resolution must be a positive finite number, got {resolution}",
+            err=True,
+        )
+        sys.exit(1)
+
+    click.echo(f"Loading point cloud: {lidar}")
+    try:
+        pipeline = load_point_cloud(lidar)
+    except (FileNotFoundError, ValueError, RuntimeError, ImportError) as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+
+    click.echo(f"Generating DEM at {resolution} m resolution → {output_dem}")
+    try:
+        point_cloud_to_dem(pipeline, resolution, output_dem)
+    except (FileNotFoundError, ValueError, RuntimeError, ImportError) as exc:
+        click.echo(f"Error (DEM): {exc}", err=True)
+        sys.exit(1)
+
+    click.echo(f"Generating DSM at {resolution} m resolution → {output_dsm}")
+    try:
+        point_cloud_to_dsm(pipeline, resolution, output_dsm)
+    except (FileNotFoundError, ValueError, RuntimeError, ImportError) as exc:
+        click.echo(f"Error (DSM): {exc}", err=True)
+        sys.exit(1)
+
+    click.echo("\nDone.")
+    click.echo(f"  DEM: {Path(output_dem).resolve()}")
+    click.echo(f"  DSM: {Path(output_dsm).resolve()}")
+
+
 def _load_site_for_comparison(scenario_path: Path) -> "SiteModel":
     """Load the DEM from a scenario file for map rendering.
 

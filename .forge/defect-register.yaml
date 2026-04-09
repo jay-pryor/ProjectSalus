@@ -2604,3 +2604,69 @@ defects:
     resolution: "Added unconditional initialisation `bearing_grid: npt.NDArray[np.float64] | None = None` before the needs_sweep branch."
     status: resolved
     commit: 1012f92
+
+  - id: D-237
+    severity: high
+    task: S12
+    found_by: silent_failure_hunter
+    file: src/salus/ingest/lidar.py
+    line: 344
+    description: "_fill_nodata_nearest silently propagates NaN when every cell is NaN. distance_transform_edt on an all-True mask returns indices that index into the all-NaN source, so filled remains fully NaN. Caller writes all-NaN back to site.dem with no error or warning — simulation runs on degenerate DEM."
+    resolution: "Added all-NaN guard before distance_transform_edt call: if mask.all(): raise ValueError('Cannot fill nodata: every cell in the array is NaN...'). Test test_fill_nodata_nearest_all_nan_raises added."
+    status: resolved
+    commit: pending-S12
+
+  - id: D-238
+    severity: high
+    task: S12
+    found_by: silent_failure_hunter
+    file: src/salus/ingest/lidar.py
+    line: 284
+    description: "point_cloud_to_dsm has no nodata-fill step. load_dem converts -9999 nodata sentinel to NaN; NaN cells are returned directly in SiteModel without warning. Callers passing the DSM to surface_array() for LOS checks silently propagate NaN into viewshed arithmetic."
+    resolution: "Added post-load_dem NaN check and _fill_nodata_nearest call in point_cloud_to_dsm, matching the identical logic already present in point_cloud_to_dem."
+    status: resolved
+    commit: pending-S12
+
+  - id: D-239
+    severity: high
+    task: S12
+    found_by: silent_failure_hunter
+    file: src/salus/ingest/lidar.py
+    line: 44
+    description: "_MAX_CELLS constant defined with DoS-prevention comment but never referenced anywhere. A very fine resolution_m on a large scan area causes PDAL to attempt enormous allocation with no early failure. Dead code that gives false security."
+    resolution: "Removed dead _MAX_CELLS constant entirely. No replacement — the constant was never enforced and the spec does not require a cell-count limit."
+    status: resolved
+    commit: pending-S12
+
+  - id: D-240
+    severity: medium
+    task: S12
+    found_by: silent_failure_hunter
+    file: src/salus/ingest/lidar.py
+    line: 111
+    description: "load_point_cloud logs total_points=0 for empty point clouds but returns pipeline without error. Downstream point_cloud_to_dem/dsm pass empty arrays to PDAL; PDAL may write a valid-but-empty or single-nodata-cell GeoTIFF that silently enters the simulation."
+    resolution: "Added guard after point count: if total_points == 0: raise ValueError('Point cloud contains no points: ...'). Test test_load_point_cloud_returns_pdal_pipeline verifies guard; CLI surfaces this as non-zero exit."
+    status: resolved
+    commit: pending-S12
+
+  - id: D-241
+    severity: medium
+    task: S12
+    found_by: silent_failure_hunter
+    file: src/salus/ingest/lidar.py
+    line: 309
+    description: "_validate_point_cloud_crs accepts whitespace-only CRS strings as valid (truthy). A string like '   ' passes the `if srs:` check allowing a stub CRS field to bypass validation. Downstream reprojection/georeferencing silently uses wrong coordinates."
+    resolution: "Added .strip() to srs extraction: srs = (entry.get('comp_spatialreference', '') or entry.get('spatialreference', '')).strip(). Test test_validate_point_cloud_crs_whitespace_raises added."
+    status: resolved
+    commit: pending-S12
+
+  - id: D-242
+    severity: medium
+    task: S12
+    found_by: spec_compliance
+    file: src/salus/ingest/lidar.py
+    line: 108
+    description: "S12-1 requires 'Read header metadata (CRS, point count, bounds)'. Bounds are not extracted or surfaced. Point count is logged and CRS validated but bounds (minx/maxx/miny/maxy) are never parsed, logged, or returned — partial implementation of the spec criterion."
+    resolution: "Implemented _extract_bounds() helper parsing minx/miny/minz/maxx/maxy/maxz from PDAL readers.las metadata block. load_point_cloud logs bounds at INFO level with X/Y/Z ranges. Tests test_extract_bounds_* added."
+    status: resolved
+    commit: pending-S12
