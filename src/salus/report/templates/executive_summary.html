@@ -1,0 +1,30 @@
+<div class="section">
+  <h2>Executive Summary</h2>
+
+  {% for para in report.executive_summary.split('\n\n') %}
+  <p>{{ para }}</p>
+  {% endfor %}
+
+  <div class="metrics-row mt-16 no-break">
+    <div class="metric-card {% if report.stats.total_coverage_pct >= 80 %}good{% elif report.stats.total_coverage_pct >= 60 %}warn{% else %}danger{% endif %}">
+      <div class="metric-value">{{ "%.1f" | format(report.stats.total_coverage_pct) }}%</div>
+      <div class="metric-label">Total Coverage</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-value">{{ "%.0f" | format(report.stats.gap_area_m2 / 10000) }} ha</div>
+      <div class="metric-label">Gap Area</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-value">{{ "%.0f" | format(report.stats.largest_contiguous_gap_m2 / 10000) }} ha</div>
+      <div class="metric-label">Largest Gap</div>
+    </div>
+    {% if report.kill_chain_results %}
+    <div class="metric-card {% if report.kill_chain_results | selectattr('engagement_feasible') | list | length == report.kill_chain_results | length %}good{% else %}warn{% endif %}">
+      <div class="metric-value">
+        {{ report.kill_chain_results | selectattr('engagement_feasible') | list | length }}/{{ report.kill_chain_results | length }}
+      </div>
+      <div class="metric-label">Corridors Feasible</div>
+    </div>
+    {% endif %}
+  </div>
+</div>

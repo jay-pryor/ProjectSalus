@@ -1,0 +1,61 @@
+<div class="cover-page">
+  <div class="cover-header">
+    <div class="product-name">Project Salus</div>
+    <h1>Counter-UAS Site Coverage Report</h1>
+  </div>
+  <div class="cover-body">
+    <table class="cover-meta-table">
+      <tr>
+        <td>Scenario</td>
+        <td><strong>{{ report.scenario_name }}</strong></td>
+      </tr>
+      <tr>
+        <td>Generated</td>
+        <td>{{ report.generated_at }}</td>
+      </tr>
+      <tr>
+        <td>Sensors deployed</td>
+        <td>{{ report.sensor_placements | length }}</td>
+      </tr>
+      <tr>
+        <td>Composite coverage</td>
+        <td><strong>{{ "%.1f" | format(report.stats.total_coverage_pct) }}%</strong></td>
+      </tr>
+      {% if report.saturation_result %}
+      <tr>
+        <td>Saturation threshold</td>
+        <td>{{ report.saturation_result.saturation_threshold_n }} simultaneous targets</td>
+      </tr>
+      {% endif %}
+    </table>
+
+    <div class="metrics-row mt-16">
+      <div class="metric-card {% if report.stats.total_coverage_pct >= 80 %}good{% elif report.stats.total_coverage_pct >= 60 %}warn{% else %}danger{% endif %}">
+        <div class="metric-value">{{ "%.0f" | format(report.stats.total_coverage_pct) }}%</div>
+        <div class="metric-label">Composite Coverage</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-value">{{ report.sensor_placements | length }}</div>
+        <div class="metric-label">Sensors Deployed</div>
+      </div>
+      {% if report.kill_chain_results %}
+      <div class="metric-card {% if report.kill_chain_results | selectattr('engagement_feasible') | list | length == report.kill_chain_results | length %}good{% else %}warn{% endif %}">
+        <div class="metric-value">{{ report.kill_chain_results | selectattr('engagement_feasible') | list | length }}/{{ report.kill_chain_results | length }}</div>
+        <div class="metric-label">Kill-Chain Feasible</div>
+      </div>
+      {% endif %}
+      {% if report.saturation_result %}
+      <div class="metric-card">
+        <div class="metric-value">{{ report.saturation_result.saturation_threshold_n }}</div>
+        <div class="metric-label">Saturation Threshold</div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+  <div class="cover-footer">
+    This report was generated automatically by Project Salus. Results are based on modelled
+    sensor capabilities and terrain data. See the Assumptions and Limitations section for
+    constraints and caveats applicable to this analysis.
+    <br>OFFICIAL USE ONLY — not for public release.
+  </div>
+</div>

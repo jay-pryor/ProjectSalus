@@ -1,0 +1,30 @@
+<div class="landscape-section">
+  <h2>Coverage Gap Analysis</h2>
+
+  {% if report.gap_map_b64 %}
+  <img class="map-image" src="data:image/png;base64,{{ report.gap_map_b64 }}" alt="Coverage Gap Map">
+  <p class="map-caption">
+    Figure. Coverage gap map. Red areas are inside the site boundary but not detected by any sensor.
+    Grey-green areas are covered by at least one sensor modality.
+  </p>
+  {% else %}
+  <p class="text-muted">Gap map could not be rendered.</p>
+  {% endif %}
+
+  <table class="data-table mt-8 no-break">
+    <tr>
+      <th>Gap Metric</th>
+      <th class="text-right">Value</th>
+    </tr>
+    <tr>
+      <td>Total gap area</td>
+      <td class="text-right">{{ "{:,.0f}".format(report.stats.gap_area_m2) }} m²
+        ({{ "%.1f" | format(100.0 - report.stats.total_coverage_pct) }}%)</td>
+    </tr>
+    <tr>
+      <td>Largest contiguous gap</td>
+      <td class="text-right">{{ "{:,.0f}".format(report.stats.largest_contiguous_gap_m2) }} m²
+        ({{ "%.2f" | format(report.stats.largest_contiguous_gap_m2 / 10000) }} ha)</td>
+    </tr>
+  </table>
+</div>

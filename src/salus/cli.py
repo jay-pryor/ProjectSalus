@@ -62,6 +62,9 @@ from salus.report.maps import (
 )
 
 if TYPE_CHECKING:
+    import numpy.typing as npt
+
+    from salus.engine.coverage import CoverageStats
     from salus.models.site import SiteModel
 
 _log = logging.getLogger(__name__)
@@ -296,6 +299,16 @@ def viewshed(
         "If omitted, origin is inferred from the worst-approach corridor."
     ),
 )
+@click.option(
+    "--save-results",
+    "save_results",
+    default=None,
+    type=click.Path(dir_okay=False),
+    help=(
+        "Save simulation results to a JSON file for use with 'salus report --results'. "
+        "Includes coverage statistics and base64-encoded map images."
+    ),
+)
 def simulate(
     scenario: str,
     sensor_dir: str | None,
@@ -305,6 +318,7 @@ def simulate(
     adversarial: bool,
     origin: tuple[float, float] | None,
     saturation: bool,
+    save_results: str | None,
 ) -> None:
     """Compute sensor-clipped coverage maps from a scenario YAML file.
 
@@ -1117,6 +1131,16 @@ def simulate(
         click.echo(f"\nCompleted with {', '.join(msg_parts)}.", err=True)
         sys.exit(1)
 
+    # --save-results: persist stats + rendered map images as JSON for 'salus report --results'
+    if save_results is not None:
+        _save_simulation_results(
+            save_results_path=Path(save_results),
+            scenario_path=scenario_path,
+            stats=stats,
+            output_path=output_path,
+            layer_coverages=layer_coverages,
+        )
+
     click.echo(f"\nDone. Output written to {output_path.resolve()}")
 
 
@@ -1838,3 +1862,331 @@ def _load_site_for_comparison(scenario_path: Path) -> "SiteModel":
         raise type(exc)(
             f"Failed to load DEM '{sc.site_dem_path}' for delta map rendering: {exc}"
         ) from exc
+
+
+# ---------------------------------------------------------------------------
+# S13 — report command helpers
+# ---------------------------------------------------------------------------
+
+
+def _save_simulation_results(
+    save_results_path: Path,
+    scenario_path: Path,
+    stats: CoverageStats,
+    output_path: Path,
+    layer_coverages: dict[SensorType, npt.NDArray[np.bool_]],
+) -> None:
+    """Save simulation stats and rendered map images as JSON for 'salus report --results'.
+
+    Reads the already-written PNG files from output_path, base64-encodes them,
+    and persists stats + images to save_results_path.  Failures are logged as
+    warnings and do not abort the simulate command.
+    """
+    import base64 as _b64
+    import json as _json
+    from datetime import datetime as _dt
+    from datetime import timezone as _tz
+
+    from salus.report.pdf import generate_executive_summary as _gen_exec_summary
+
+    def _gen_executive_summary(s: CoverageStats) -> str:
+        try:
+            return _gen_exec_summary(s, [], None)
+        except Exception:  # noqa: BLE001 — non-critical; degrade gracefully
+            return ""
+
+    def _read_b64(p: Path) -> str | None:
+        if p.exists():
+            try:
+                return _b64.b64encode(p.read_bytes()).decode()
+            except OSError:
+                return None
+        return None
+
+    per_layer: dict[str, float] = {
+        st.value: float(pct) for st, pct in stats.per_layer_coverage_pct.items()
+    }
+    layer_maps: dict[str, str | None] = {}
+    for st in layer_coverages:
+        layer_file = output_path / "layers" / f"coverage_{st.value.lower()}.png"
+        layer_maps[st.value] = _read_b64(layer_file)
+
+    payload = {
+        "schema_version": 1,
+        "scenario_path": str(scenario_path.resolve()),
+        "generated_at": _dt.now(_tz.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "stats": {
+            "total_coverage_pct": float(stats.total_coverage_pct),
+            "per_layer_coverage_pct": per_layer,
+            "per_zone_coverage_pct": {k: float(v) for k, v in stats.per_zone_coverage_pct.items()},
+            "gap_area_m2": float(stats.gap_area_m2),
+            "largest_contiguous_gap_m2": float(stats.largest_contiguous_gap_m2),
+        },
+        "maps_b64": {
+            "composite": _read_b64(output_path / "composite.png"),
+            "gap": _read_b64(output_path / "gaps.png"),
+            "layers": layer_maps,
+        },
+        "kill_chain_chart_b64": None,
+        "saturation_chart_b64": _read_b64(output_path / "saturation_threshold.png"),
+        "executive_summary": _gen_executive_summary(stats),
+    }
+
+    try:
+        save_results_path = Path(save_results_path)
+        save_results_path.parent.mkdir(parents=True, exist_ok=True)
+        save_results_path.write_text(_json.dumps(payload, indent=2), encoding="utf-8")
+        click.echo(f"\n  Results saved → {save_results_path.resolve()}")
+    except OSError as exc:
+        click.echo(f"\n  Warning: could not save results JSON: {exc}", err=True)
+
+
+# ---------------------------------------------------------------------------
+# S13-7 — salus report command
+# ---------------------------------------------------------------------------
+
+
+@main.command()
+@click.argument("scenario", type=click.Path(exists=True, dir_okay=False))
+@click.option(
+    "--output",
+    "output_pdf",
+    required=True,
+    type=click.Path(dir_okay=False),
+    help="Destination path for the output PDF report.",
+)
+@click.option(
+    "--sensors",
+    "sensor_dir",
+    default=None,
+    type=click.Path(exists=True, file_okay=False),
+    help="Directory of sensor YAML definitions. Defaults to the bundled sensor database.",
+)
+@click.option(
+    "--results",
+    "results_json",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False),
+    help=(
+        "Path to pre-computed results JSON (from 'salus simulate --save-results'). "
+        "When provided, the coverage simulation is skipped and pre-computed maps are "
+        "used directly. The scenario file is still required for metadata."
+    ),
+)
+def report(
+    scenario: str,
+    output_pdf: str,
+    sensor_dir: str | None,
+    results_json: str | None,
+) -> None:
+    """Generate a PDF coverage report from a scenario.
+
+    Runs the full simulation pipeline (ingest, viewshed, coverage) and renders
+    a multi-section PDF report including composite coverage maps, gap analysis,
+    and (when configured) kill-chain and saturation analysis.
+
+    Use --results to skip re-simulation when iterating on report templates:
+
+    \b
+        salus simulate scenario.yaml --save-results results.json
+        salus report scenario.yaml --output report.pdf --results results.json
+
+    Example (full pipeline):
+
+        salus report scenario.yaml --output report.pdf
+    """
+    import json as _json
+
+    from salus.engine.coverage import CoverageStats
+    from salus.models.sensor import SensorType as _SensorType
+    from salus.report.pdf import (
+        ReportData,
+        SimulationResults,
+        _build_assumptions,
+        assemble_report_data,
+        render_pdf,
+    )
+
+    scenario_path = Path(scenario)
+    output_path = Path(output_pdf)
+    effective_sensor_dir = Path(sensor_dir) if sensor_dir is not None else _DEFAULT_SENSOR_DIR
+
+    click.echo(f"Loading scenario: {scenario_path}")
+    try:
+        sc = load_scenario(scenario_path)
+    except (FileNotFoundError, ValueError, OSError) as exc:
+        click.echo(f"Error loading scenario: {exc}", err=True)
+        sys.exit(1)
+
+    click.echo(f"Loading sensor definitions: {effective_sensor_dir}")
+    try:
+        sensor_defs = load_sensors(effective_sensor_dir)
+    except (FileNotFoundError, PermissionError, ValueError, OSError) as exc:
+        click.echo(f"Error loading sensor definitions: {exc}", err=True)
+        sys.exit(1)
+
+    # Always load the DEM: required for redundancy_map dimensions and assumptions text
+    # even on the --results path where simulation is skipped.
+    click.echo(f"Loading DEM: {sc.site_dem_path}")
+    try:
+        site = load_dem(sc.site_dem_path, dsm_path=sc.site_dsm_path)
+    except FileNotFoundError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+    except Exception as exc:
+        click.echo(f"Error loading DEM: {exc}", err=True)
+        sys.exit(1)
+    crs_info = f", EPSG:{site.crs_epsg}" if site.crs_epsg else ""
+    click.echo(f"DEM loaded: {site.rows}×{site.cols} cells at {site.resolution:.1f} m{crs_info}")
+
+    if results_json is not None:
+        # --results path: load pre-computed data, skip simulation
+        click.echo(f"Loading pre-computed results: {results_json}")
+        try:
+            payload = _json.loads(Path(results_json).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            click.echo(f"Error loading results JSON: {exc}", err=True)
+            sys.exit(1)
+
+        raw_stats = payload.get("stats", {})
+        per_layer_pct: dict[SensorType, float] = {}
+        for k, v in raw_stats.get("per_layer_coverage_pct", {}).items():
+            try:
+                per_layer_pct[_SensorType(k)] = float(v)
+            except ValueError:
+                _log.warning("Ignoring unknown sensor type in results JSON: %r", k)
+        pre_stats = CoverageStats(
+            total_coverage_pct=float(raw_stats.get("total_coverage_pct", 0.0)),
+            per_layer_coverage_pct=per_layer_pct,
+            per_zone_coverage_pct=raw_stats.get("per_zone_coverage_pct", {}),
+            gap_area_m2=float(raw_stats.get("gap_area_m2", 0.0)),
+            redundancy_map=np.zeros((site.rows, site.cols), dtype=np.intp),
+            largest_contiguous_gap_m2=float(raw_stats.get("largest_contiguous_gap_m2", 0.0)),
+        )
+        maps_b64 = payload.get("maps_b64", {})
+
+        def _b64_to_str(val: object) -> str | None:
+            return str(val) if isinstance(val, str) else None
+
+        # Build assumptions from a stub SimulationResults so the assumptions section
+        # reflects the actual terrain/sensor model even when simulation was pre-computed.
+        _stub_sim = SimulationResults(
+            site=site,
+            scenario=sc,
+            composite=np.zeros((site.rows, site.cols), dtype=bool),
+            layer_coverages={},
+            stats=pre_stats,
+            sensor_defs=sensor_defs,
+        )
+        assumptions = _build_assumptions(_stub_sim)
+
+        executive_summary = payload.get("executive_summary", "")
+        if not executive_summary:
+            from salus.report.pdf import generate_executive_summary as _gen_es
+
+            executive_summary = _gen_es(pre_stats, [], None)
+
+        report_data = ReportData(
+            scenario_name=Path(sc.site_dem_path).stem,
+            generated_at=payload.get("generated_at", ""),
+            stats=pre_stats,
+            executive_summary=executive_summary,
+            assumptions=assumptions,
+            sensor_defs=sensor_defs,
+            effector_defs=[],
+            sensor_placements=sc.sensor_placements,
+            scenario=sc,
+            composite_map_b64=_b64_to_str(maps_b64.get("composite")),
+            gap_map_b64=_b64_to_str(maps_b64.get("gap")),
+            layer_maps_b64={
+                k: v for k, v in (maps_b64.get("layers") or {}).items() if isinstance(v, str)
+            },
+            kill_chain_chart_b64=_b64_to_str(payload.get("kill_chain_chart_b64")),
+            saturation_chart_b64=_b64_to_str(payload.get("saturation_chart_b64")),
+            corridor_results=[],
+            kill_chain_results=[],
+            saturation_result=None,
+            kill_chain_config=None,
+        )
+    else:
+        # Full simulation path (DEM already loaded above)
+        sensor_map: dict[str, "SensorDefinition"] = {s.name: s for s in sensor_defs}
+        placements_by_type: dict[
+            "SensorType", list[tuple["SensorDefinition", "SensorPlacement"]]
+        ] = {}
+        for placement in sc.sensor_placements:
+            sensor = sensor_map.get(placement.sensor_name)
+            if sensor is None:
+                click.echo(
+                    f"  Warning: sensor '{placement.sensor_name}' not found — skipping.",
+                    err=True,
+                )
+                continue
+            placements_by_type.setdefault(sensor.type, []).append((sensor, placement))
+
+        if not placements_by_type:
+            click.echo("No valid sensor placements — coverage will be 0%.", err=True)
+            layer_coverages = {}
+            composite = np.zeros((site.rows, site.cols), dtype=bool)
+            gap_m2 = float(site.rows * site.cols) * site.resolution**2
+            report_stats = CoverageStats(
+                total_coverage_pct=0.0,
+                per_layer_coverage_pct={},
+                per_zone_coverage_pct={},
+                gap_area_m2=gap_m2,
+                redundancy_map=np.zeros((site.rows, site.cols), dtype=np.intp),
+                largest_contiguous_gap_m2=gap_m2,
+            )
+            gaps = np.ones((site.rows, site.cols), dtype=bool)
+        else:
+            try:
+                layer_coverages = compute_layer_coverage(site, placements_by_type)
+                composite = compute_composite_coverage(layer_coverages)
+                bitmask = np.ones((site.rows, site.cols), dtype=bool)
+                if sc.boundary_path is not None:
+                    try:
+                        loaded_boundary = load_boundary(sc.boundary_path, site_epsg=site.crs_epsg)
+                        bitmask = boundary_mask(site, loaded_boundary)
+                    except Exception as exc:
+                        click.echo(
+                            f"  Warning: boundary load failed ({exc}), using full DEM.",
+                            err=True,
+                        )
+                gaps = compute_gaps(composite, bitmask)
+                report_stats = compute_coverage_stats(
+                    site, layer_coverages, composite, gaps, site.zones
+                )
+            except Exception as exc:
+                click.echo(f"Error running coverage pipeline: {exc}", err=True)
+                sys.exit(1)
+
+        click.echo(f"  Coverage: {report_stats.total_coverage_pct:.1f}%")
+
+        sim = SimulationResults(
+            site=site,
+            scenario=sc,
+            composite=composite,
+            layer_coverages=layer_coverages,
+            stats=report_stats,
+            sensor_defs=sensor_defs,
+            gaps=gaps,
+        )
+
+        click.echo("Assembling report data…")
+        try:
+            report_data = assemble_report_data(sc, sim)
+        except Exception as exc:
+            click.echo(f"Error assembling report data: {exc}", err=True)
+            sys.exit(1)
+
+    click.echo(f"Rendering PDF → {output_path}")
+    try:
+        result_path = render_pdf(report_data, output_path)
+    except FileNotFoundError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+    except Exception as exc:
+        click.echo(f"Error rendering PDF: {exc}", err=True)
+        sys.exit(1)
+
+    click.echo(f"\nReport written: {result_path}")

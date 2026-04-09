@@ -1,0 +1,48 @@
+<div class="section">
+  <h2>Threat Corridor Analysis</h2>
+
+  <p>
+    Threat corridor analysis evaluates the probability of detection along the most dangerous
+    drone approach routes to the protected asset.  Each corridor is analysed at the threat's
+    typical altitude and speed.
+  </p>
+
+  {% if report.corridor_results %}
+  <table class="data-table">
+    <tr>
+      <th>Bearing (°)</th>
+      <th>Threat</th>
+      <th class="text-right">Coverage (%)</th>
+      <th class="text-right">First Detection (m)</th>
+      <th class="text-right">Gap Before Asset (m)</th>
+      <th class="text-right">Time in Coverage (s)</th>
+      <th>Assessment</th>
+    </tr>
+    {% for r in report.corridor_results %}
+    <tr>
+      <td>{{ "%.0f" | format(r.corridor.bearing_deg) }}</td>
+      <td>{{ r.threat_name }}</td>
+      <td class="text-right">{{ "%.1f" | format(r.coverage_pct) }}%</td>
+      <td class="text-right">
+        {% if r.first_detection_distance_m is not none %}
+        {{ "{:,.0f}".format(r.first_detection_distance_m) }}
+        {% else %}—{% endif %}
+      </td>
+      <td class="text-right">{{ "{:,.0f}".format(r.last_gap_before_target_m) }}</td>
+      <td class="text-right">{{ "%.1f" | format(r.time_in_coverage_s) }}</td>
+      <td>
+        {% if r.coverage_pct >= 80 %}
+        <span class="badge badge-ok">Good</span>
+        {% elif r.coverage_pct >= 50 %}
+        <span class="badge badge-warn">Partial</span>
+        {% else %}
+        <span class="badge badge-danger">Poor</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="text-muted">No corridor analysis results available.</p>
+  {% endif %}
+</div>

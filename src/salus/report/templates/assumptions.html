@@ -1,0 +1,35 @@
+<div class="section">
+  <h2>Assumptions and Limitations</h2>
+
+  <p>
+    This analysis is based on modelled sensor capabilities and terrain data.  The following
+    assumptions and limitations apply to all results presented in this report.  Consumers of
+    this report should review these caveats before drawing operational conclusions.
+  </p>
+
+  {% for section_title, items in report.assumptions.items() %}
+  <div class="assumption-group no-break">
+    <h3>{{ section_title }}</h3>
+    <ul>
+      {% for item in items %}
+      <li>{{ item }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endfor %}
+
+  <div class="assumption-group no-break">
+    <h3>General Caveats</h3>
+    <ul>
+      <li>This report does not constitute an operational risk assessment and should not be
+          used as the sole basis for procurement or deployment decisions.</li>
+      <li>Results are valid only for the specific terrain model, sensor placement, and threat
+          profiles specified in the scenario.  Changes to any of these inputs require a new
+          analysis.</li>
+      <li>This analysis does not account for electromagnetic interference (EMI), jamming,
+          spoofing, or electronic warfare effects on sensor performance.</li>
+      <li>Sensor degradation due to weather, maintenance state, or operator fatigue is not
+          modelled.</li>
+    </ul>
+  </div>
+</div>

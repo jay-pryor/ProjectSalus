@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Salus cUAS Coverage Report</title>
+<style>
+  /* ── Page layout ──────────────────────────────────────── */
+  @page {
+    size: A4 portrait;
+    margin: 20mm 18mm 20mm 18mm;
+    @bottom-center {
+      content: "SALUS cUAS Coverage Report  |  " string(scenario-name) "  |  Page " counter(page) " of " counter(pages);
+      font-size: 8pt;
+      color: #666;
+    }
+  }
+  @page landscape {
+    size: A4 landscape;
+    margin: 12mm 12mm 15mm 12mm;
+    @bottom-center {
+      content: "SALUS cUAS Coverage Report  |  Page " counter(page) " of " counter(pages);
+      font-size: 8pt;
+      color: #666;
+    }
+  }
+
+  /* ── Typography ───────────────────────────────────────── */
+  body {
+    font-family: Helvetica, Arial, sans-serif;
+    font-size: 10pt;
+    line-height: 1.5;
+    color: #1a1a2e;
+    margin: 0;
+    padding: 0;
+  }
+  h1 { font-size: 22pt; font-weight: 700; color: #1a1a2e; margin: 0 0 6pt 0; }
+  h2 { font-size: 14pt; font-weight: 700; color: #1a1a2e; margin: 0 0 8pt 0;
+       border-bottom: 2px solid #2c3e7a; padding-bottom: 4pt; }
+  h3 { font-size: 11pt; font-weight: 600; color: #2c3e7a; margin: 10pt 0 4pt 0; }
+  p  { margin: 0 0 8pt 0; }
+
+  /* ── Colour palette ───────────────────────────────────── */
+  :root {
+    --brand-dark:  #1a1a2e;
+    --brand-mid:   #2c3e7a;
+    --brand-light: #4a6fa5;
+    --accent:      #e74c3c;
+    --ok:          #27ae60;
+    --warn:        #e67e22;
+    --bg-light:    #f4f6fb;
+    --border:      #d0d7e8;
+  }
+
+  /* ── Section containers ───────────────────────────────── */
+  .section {
+    page-break-before: always;
+  }
+  .section:first-child {
+    page-break-before: avoid;
+  }
+  .landscape-section {
+    page: landscape;
+    page-break-before: always;
+  }
+  .no-break {
+    page-break-inside: avoid;
+  }
+
+  /* ── Cover page ───────────────────────────────────────── */
+  .cover-page {
+    display: flex;
+    flex-direction: column;
+    height: 245mm;
+    page-break-after: always;
+  }
+  .cover-header {
+    background: var(--brand-dark);
+    color: white;
+    padding: 20pt 24pt;
+    flex-shrink: 0;
+  }
+  .cover-header .product-name {
+    font-size: 11pt;
+    letter-spacing: 3pt;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.7);
+    margin-bottom: 6pt;
+  }
+  .cover-header h1 {
+    color: white;
+    font-size: 28pt;
+    margin: 0;
+    line-height: 1.1;
+  }
+  .cover-body {
+    padding: 24pt;
+    flex-grow: 1;
+  }
+  .cover-meta-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 20pt;
+  }
+  .cover-meta-table td {
+    padding: 6pt 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 10pt;
+  }
+  .cover-meta-table td:first-child {
+    color: #666;
+    width: 40%;
+  }
+  .cover-footer {
+    background: var(--bg-light);
+    padding: 12pt 24pt;
+    font-size: 8pt;
+    color: #888;
+    flex-shrink: 0;
+    border-top: 1px solid var(--border);
+  }
+
+  /* ── Key metrics banner ───────────────────────────────── */
+  .metrics-row {
+    display: flex;
+    gap: 12pt;
+    margin: 12pt 0;
+  }
+  .metric-card {
+    flex: 1;
+    background: var(--bg-light);
+    border: 1px solid var(--border);
+    border-radius: 4pt;
+    padding: 10pt 12pt;
+    text-align: center;
+  }
+  .metric-card .metric-value {
+    font-size: 22pt;
+    font-weight: 700;
+    color: var(--brand-mid);
+    line-height: 1.1;
+  }
+  .metric-card .metric-label {
+    font-size: 8pt;
+    color: #666;
+    margin-top: 2pt;
+  }
+  .metric-card.good   .metric-value { color: var(--ok); }
+  .metric-card.warn   .metric-value { color: var(--warn); }
+  .metric-card.danger .metric-value { color: var(--accent); }
+
+  /* ── Data tables ──────────────────────────────────────── */
+  table.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 9pt;
+    margin: 8pt 0;
+  }
+  table.data-table th {
+    background: var(--brand-dark);
+    color: white;
+    padding: 5pt 8pt;
+    text-align: left;
+    font-weight: 600;
+    font-size: 8.5pt;
+  }
+  table.data-table td {
+    padding: 4pt 8pt;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  table.data-table tr:nth-child(even) td {
+    background: var(--bg-light);
+  }
+
+  /* ── Status badges ────────────────────────────────────── */
+  .badge {
+    display: inline-block;
+    padding: 1pt 6pt;
+    border-radius: 3pt;
+    font-size: 8pt;
+    font-weight: 600;
+  }
+  .badge-ok     { background: #d4edda; color: #155724; }
+  .badge-warn   { background: #fff3cd; color: #856404; }
+  .badge-danger { background: #f8d7da; color: #721c24; }
+
+  /* ── Full-width map images ────────────────────────────── */
+  .map-image {
+    width: 100%;
+    height: auto;
+    display: block;
+    margin: 8pt 0;
+  }
+  .map-caption {
+    font-size: 8pt;
+    color: #666;
+    text-align: center;
+    margin-top: 4pt;
+  }
+
+  /* ── Assumptions list ─────────────────────────────────── */
+  .assumption-group {
+    margin-bottom: 12pt;
+  }
+  .assumption-group ul {
+    margin: 4pt 0 0 0;
+    padding-left: 16pt;
+  }
+  .assumption-group li {
+    margin-bottom: 3pt;
+    font-size: 9.5pt;
+  }
+
+  /* ── Misc ─────────────────────────────────────────────── */
+  .text-muted   { color: #888; font-size: 8.5pt; }
+  .text-right   { text-align: right; }
+  .text-center  { text-align: center; }
+  .mt-8  { margin-top: 8pt; }
+  .mt-16 { margin-top: 16pt; }
+</style>
+</head>
+<body>
+{{ content | safe }}
+</body>
+</html>

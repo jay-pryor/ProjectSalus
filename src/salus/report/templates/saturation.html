@@ -1,0 +1,47 @@
+<div class="section">
+  <h2>Saturation Analysis</h2>
+
+  <p>
+    Saturation analysis determines the simultaneous threat count at which the effector
+    network becomes overwhelmed and at least one target reaches the protected asset
+    unengaged.  The saturation threshold is the critical capacity boundary.
+  </p>
+
+  {% if report.saturation_chart_b64 %}
+  <img class="map-image" src="data:image/png;base64,{{ report.saturation_chart_b64 }}" alt="Saturation Threshold Chart">
+  <p class="map-caption">Figure. Saturation threshold analysis — unengaged targets vs simultaneous threat count.</p>
+  {% endif %}
+
+  {% if report.saturation_result %}
+  <table class="data-table no-break" style="width: 70%">
+    <tr><th>Metric</th><th class="text-right">Value</th></tr>
+    <tr>
+      <td>Simultaneous engagement capacity</td>
+      <td class="text-right"><strong>{{ report.saturation_result.simultaneous_engagement_capacity }}</strong></td>
+    </tr>
+    <tr>
+      <td>Saturation threshold</td>
+      <td class="text-right">
+        <strong>{{ report.saturation_result.saturation_threshold_n }}</strong> simultaneous targets
+      </td>
+    </tr>
+    <tr>
+      <td>Unengaged at threshold</td>
+      <td class="text-right">{{ report.saturation_result.unengaged_count_at_threshold }}</td>
+    </tr>
+  </table>
+
+  {% if report.saturation_result.per_effector_utilisation %}
+  <h3>Effector Utilisation at Capacity</h3>
+  <table class="data-table no-break">
+    <tr><th>Effector</th><th class="text-right">Utilisation (%)</th></tr>
+    {% for name, util in report.saturation_result.per_effector_utilisation.items() %}
+    <tr>
+      <td>{{ name }}</td>
+      <td class="text-right">{{ "%.0f" | format(util * 100) }}%</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+  {% endif %}
+</div>

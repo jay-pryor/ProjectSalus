@@ -1,0 +1,63 @@
+<div class="landscape-section">
+  <h2>Kill-Chain Timeline Analysis</h2>
+
+  <p>
+    The D-T-I-D-E-A (Detect–Track–Identify–Decide–Engage–Assess) kill-chain model determines
+    whether the defender can complete the engagement sequence before the drone reaches the
+    protected asset.  A positive margin indicates the kill chain is feasible; negative
+    margin means the drone arrives before the chain completes.
+  </p>
+
+  {% if report.kill_chain_chart_b64 %}
+  <img class="map-image" src="data:image/png;base64,{{ report.kill_chain_chart_b64 }}" alt="Kill-Chain Timeline Chart">
+  <p class="map-caption">Figure. Kill-chain Gantt chart. Green = margin available; red = deficit.</p>
+  {% endif %}
+
+  {% if report.kill_chain_results %}
+  <table class="data-table no-break">
+    <tr>
+      <th>Corridor (°)</th>
+      <th class="text-right">Available Time (s)</th>
+      <th class="text-right">Required Time (s)</th>
+      <th class="text-right">Margin (s)</th>
+      <th>Feasible</th>
+      <th>2nd Engagement</th>
+    </tr>
+    {% for r in report.kill_chain_results %}
+    <tr>
+      <td>{{ "%.0f" | format(report.corridor_results[loop.index0].corridor.bearing_deg) if report.corridor_results else "—" }}</td>
+      <td class="text-right">{{ "%.1f" | format(r.available_time_s) }}</td>
+      <td class="text-right">{{ "%.1f" | format(r.required_time_s) }}</td>
+      <td class="text-right" style="{% if r.margin_s >= 0 %}color: #27ae60;{% else %}color: #e74c3c;{% endif %}font-weight:600">
+        {{ "%+.1f" | format(r.margin_s) }}
+      </td>
+      <td>
+        {% if r.engagement_feasible %}
+        <span class="badge badge-ok">Yes</span>
+        {% else %}
+        <span class="badge badge-danger">No</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if r.second_engagement_possible %}
+        <span class="badge badge-ok">Yes</span>
+        {% else %}
+        <span class="badge badge-warn">No</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+
+  {% if report.kill_chain_config %}
+  <h3>Kill-Chain Phase Configuration</h3>
+  <table class="data-table no-break" style="width: 60%">
+    <tr><th>Phase</th><th class="text-right">Duration (s)</th></tr>
+    <tr><td>Track (T)</td><td class="text-right">{{ "%.1f" | format(report.kill_chain_config.track_time_s) }}</td></tr>
+    <tr><td>Identify (I)</td><td class="text-right">{{ "%.1f" | format(report.kill_chain_config.identify_time_s) }}</td></tr>
+    <tr><td>Decide (D)</td><td class="text-right">{{ "%.1f" | format(report.kill_chain_config.decide_time_s) }}</td></tr>
+    <tr><td>Assess (A)</td><td class="text-right">{{ "%.1f" | format(report.kill_chain_config.assess_time_s) }}</td></tr>
+  </table>
+  {% endif %}
+</div>

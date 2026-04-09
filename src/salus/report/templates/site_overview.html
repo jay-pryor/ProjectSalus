@@ -1,0 +1,27 @@
+<div class="landscape-section">
+  <h2>Site Overview — Composite Coverage Map</h2>
+
+  {% if report.composite_map_b64 %}
+  <img class="map-image" src="data:image/png;base64,{{ report.composite_map_b64 }}" alt="Composite Coverage Map">
+  <p class="map-caption">
+    Figure 1. Composite sensor coverage map for scenario <em>{{ report.scenario_name }}</em>.
+    Each sensor modality is shown in its designated colour; overlapping layers are additive.
+    {% if report.scenario.boundary_path %}A site boundary is shown as a black outline.{% endif %}
+  </p>
+  {% else %}
+  <p class="text-muted">Composite coverage map could not be rendered.</p>
+  {% endif %}
+
+  <table class="data-table mt-8 no-break">
+    <tr>
+      <th>Metric</th>
+      <th>Value</th>
+    </tr>
+    <tr><td>Total composite coverage</td><td>{{ "%.1f" | format(report.stats.total_coverage_pct) }}%</td></tr>
+    <tr><td>Gap area</td><td>{{ "{:,.0f}".format(report.stats.gap_area_m2) }} m²</td></tr>
+    <tr><td>Largest contiguous gap</td><td>{{ "{:,.0f}".format(report.stats.largest_contiguous_gap_m2) }} m²</td></tr>
+    <tr><td>Sensors deployed</td><td>{{ report.sensor_placements | length }}</td></tr>
+    <tr><td>Sensor modalities</td><td>{{ report.layer_maps_b64.keys() | list | join(", ") or "—" }}</td></tr>
+    <tr><td>Report generated</td><td>{{ report.generated_at }}</td></tr>
+  </table>
+</div>

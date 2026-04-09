@@ -1,0 +1,90 @@
+<div class="section">
+  <h2>Appendix A — Sensor Specifications</h2>
+
+  <p>
+    The following table lists all sensor definitions used in this analysis.
+    All values are as-configured in the sensor database.
+    Fields marked † are manufacturer-supplied values; fields marked ‡ are conservative
+    defaults used where vendor data was unavailable.
+  </p>
+
+  {% if report.sensor_defs %}
+  <table class="data-table">
+    <tr>
+      <th>Sensor Name</th>
+      <th>Type</th>
+      <th class="text-right">Max Range (m)</th>
+      <th class="text-right">Az. Coverage (°)</th>
+      <th class="text-right">El. Coverage (°)</th>
+      <th class="text-right">Mount Ht (m)</th>
+      <th>LOS Required</th>
+      <th class="text-right">Veg. Penetration</th>
+    </tr>
+    {% for s in report.sensor_defs | sort(attribute='name') %}
+    <tr>
+      <td><strong>{{ s.name }}</strong></td>
+      <td>{{ s.type.value }}</td>
+      <td class="text-right">{{ "{:,.0f}".format(s.max_range_m) }}</td>
+      <td class="text-right">{{ "%.0f" | format(s.azimuth_coverage_deg) }}</td>
+      <td class="text-right">{{ "%.0f" | format(s.elevation_coverage_deg) }}</td>
+      <td class="text-right">{{ "%.1f" | format(s.mounting_height_m) }}</td>
+      <td>{{ "Yes" if s.requires_los else "No" }}</td>
+      <td class="text-right">{{ "%.1f" | format(s.vegetation_penetration) }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="text-muted">No sensor definitions available.</p>
+  {% endif %}
+
+  {% if report.effector_defs %}
+  <h2 class="mt-16">Appendix B — Effector Specifications</h2>
+
+  <table class="data-table">
+    <tr>
+      <th>Effector Name</th>
+      <th>Type</th>
+      <th class="text-right">Max Range (m)</th>
+      <th class="text-right">Eng. Arc (°)</th>
+      <th class="text-right">Reaction Time (s)</th>
+      <th class="text-right">Reload Time (s)</th>
+      <th class="text-right">Defeat Prob.</th>
+      <th class="text-right">Simultaneous</th>
+    </tr>
+    {% for e in report.effector_defs | sort(attribute='name') %}
+    <tr>
+      <td><strong>{{ e.name }}</strong></td>
+      <td>{{ e.type.value }}</td>
+      <td class="text-right">{{ "{:,.0f}".format(e.max_range_m) }}</td>
+      <td class="text-right">{{ "%.0f" | format(e.engagement_arc_deg) }}</td>
+      <td class="text-right">{{ "%.1f" | format(e.reaction_time_s) }}</td>
+      <td class="text-right">{{ "%.1f" | format(e.reload_time_s) }}</td>
+      <td class="text-right">{{ "%.0f" | format(e.defeat_probability * 100) }}%</td>
+      <td class="text-right">{{ e.simultaneous_engagements }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+
+  <h2 class="mt-16">Appendix C — Sensor Deployment</h2>
+  <table class="data-table">
+    <tr>
+      <th>Sensor Name</th>
+      <th class="text-right">Easting (m)</th>
+      <th class="text-right">Northing (m)</th>
+      <th class="text-right">Bearing (°)</th>
+      <th class="text-right">Height Override (m)</th>
+    </tr>
+    {% for p in report.sensor_placements %}
+    <tr>
+      <td>{{ p.sensor_name }}</td>
+      <td class="text-right">{{ "{:,.0f}".format(p.position_x) }}</td>
+      <td class="text-right">{{ "{:,.0f}".format(p.position_y) }}</td>
+      <td class="text-right">{{ "%.0f" | format(p.bearing_deg) }}</td>
+      <td class="text-right">{{ "%.1f" | format(p.height_override_m) if p.height_override_m is not none else "—" }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="text-muted">No sensor placements in scenario.</td></tr>
+    {% endfor %}
+  </table>
+</div>
