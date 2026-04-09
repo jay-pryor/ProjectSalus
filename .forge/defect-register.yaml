@@ -2670,3 +2670,91 @@ defects:
     resolution: "Implemented _extract_bounds() helper parsing minx/miny/minz/maxx/maxy/maxz from PDAL readers.las metadata block. load_point_cloud logs bounds at INFO level with X/Y/Z ranges. Tests test_extract_bounds_* added."
     status: resolved
     commit: efffb79
+
+  - id: D-243
+    severity: high
+    task: S12.5
+    found_by: silent_failure_hunter
+    file: src/salus/ingest/terrain.py
+    line: 232
+    description: "derive_canopy_height_model() opens DEM and DSM independently but never compares their CRS. If they differ, dsm_arr - dem_arr subtracts physically-misaligned grids, writing a nonsensical CHM to disk with no error or warning."
+    resolution: "Added CRS extraction from both DEM and DSM before subtraction; raises ValueError if CRS differ."
+    status: resolved
+    commit: "5ada930"
+
+  - id: D-244
+    severity: high
+    task: S12.5
+    found_by: silent_failure_hunter
+    file: src/salus/ingest/terrain.py
+    line: 160
+    description: "load_dem canopy_path block checks existence and shape but not CRS against the DEM. The DSM path directly above it has full detect-warn-reproject logic; the canopy path was added without the equivalent protection."
+    resolution: "Added CRS comparison against dem_crs using EPSG codes; emits UserWarning on mismatch."
+    status: resolved
+    commit: "5ada930"
+
+  - id: D-245
+    severity: high
+    task: S12.5
+    found_by: silent_failure_hunter
+    file: src/salus/engine/viewshed.py
+    line: 250
+    description: "compute_viewshed_through_canopy: NaN cells in site.canopy_height_m are silently treated as no-canopy (full transmission). This produces optimistically-wrong results for any raster with nodata canopy cells. Policy is undocumented."
+    resolution: "Documented conservative-open policy in docstrings; separated NaN handling with explicit isnan guard in ray-march loop."
+    status: resolved
+    commit: "5ada930"
+
+  - id: D-246
+    severity: medium
+    task: S12.5
+    found_by: silent_failure_hunter
+    file: src/salus/ingest/terrain.py
+    line: 246
+    description: "derive_canopy_height_model docstring and SiteModel.canopy_height_m docstring promise 'all values >= 0' but NaN cells from nodata pass through np.where(chm < 0, 0.0, chm) unchanged. Contract violation misleads callers into omitting NaN guards."
+    resolution: "Updated docstrings to clarify 'All finite values are >= 0; NaN cells (nodata) are allowed'."
+    status: resolved
+    commit: "5ada930"
+
+  - id: D-247
+    severity: medium
+    task: S12.5
+    found_by: silent_failure_hunter
+    file: src/salus/models/site.py
+    line: 69
+    description: "_validate_canopy does not enforce the >= 0 invariant. Negative finite canopy values accepted silently cause penetration^(negative_ch/10) > 1.0 in compute_viewshed_through_canopy, pushing t_ray above 1.0 (transmission > 100%)."
+    resolution: "Added finite-value extraction and >= 0 check in _validate_canopy; raises ValueError with min value reported."
+    status: resolved
+    commit: "5ada930"
+
+  - id: D-248
+    severity: high
+    task: S12.5
+    found_by: spec_compliance
+    file: tests/test_canopy.py
+    line: null
+    description: "S12.5-3 acceptance criteria require a test for 'full path exponential decay' — transmission decreasing cumulatively across multiple consecutive canopy cells along a ray. No such test exists; only a single-cell partial-penetration test is present."
+    resolution: "Added test_viewshed_through_canopy_exponential_decay_along_ray verifying strictly decreasing transmission along ray through consecutive canopy cells."
+    status: resolved
+    commit: "5ada930"
+
+  - id: D-249
+    severity: high
+    task: S12.5
+    found_by: type_design_analyzer
+    file: src/salus/engine/viewshed.py
+    line: 163
+    description: "compute_viewshed_through_canopy annotated -> np.ndarray but returns npt.NDArray[np.float32]. compute_viewshed also annotated -> np.ndarray but returns bool array. The dtype distinction is invisible to mypy and callers."
+    resolution: "Changed compute_viewshed() -> npt.NDArray[np.bool_] and compute_viewshed_through_canopy() -> npt.NDArray[np.float32]."
+    status: resolved
+    commit: "5ada930"
+
+  - id: D-250
+    severity: medium
+    task: S12.5
+    found_by: type_design_analyzer
+    file: src/salus/engine/coverage.py
+    line: 82
+    description: "coverage_threshold: float parameter in compute_layer_coverage and compute_coverage_stats has no runtime bounds check. Values outside [0.0, 1.0] silently produce nonsensical results (e.g. threshold 1.5 means no cell ever covered)."
+    resolution: "Added bounds guard in both functions: raises ValueError if not 0.0 <= coverage_threshold <= 1.0."
+    status: resolved
+    commit: "5ada930"
