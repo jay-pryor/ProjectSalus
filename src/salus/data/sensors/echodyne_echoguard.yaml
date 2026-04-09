@@ -15,4 +15,5 @@ frequency_bands:             # confidence: high — published frequency
   - "24.55 GHz"
 requires_los: true           # confidence: high — radar requires direct LOS to target
 mounting_height_m: 5.0       # confidence: medium — typical tripod/mast; not specified in datasheet
+vegetation_penetration: 0.4  # confidence: medium — K-band (24 GHz) attenuates through vegetation; 0.4 estimated for moderate canopy density
 cost_aud: null               # confidence: N/A — not publicly disclosed

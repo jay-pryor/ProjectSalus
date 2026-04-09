@@ -16,4 +16,5 @@ frequency_bands:             # confidence: medium — X-band stated; centre freq
   - "9.5 GHz"
 requires_los: true           # confidence: high — radar requires direct LOS to target
 mounting_height_m: 5.0       # confidence: medium — typical mast/pedestal mount; not specified in datasheet
+vegetation_penetration: 0.2  # confidence: medium — X-band (9.5 GHz) heavily attenuated by dense foliage; 0.2 for dense canopy
 cost_aud: null               # confidence: N/A — not publicly disclosed

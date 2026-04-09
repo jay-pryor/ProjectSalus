@@ -17,4 +17,5 @@ frequency_bands:             # confidence: medium — ISM bands stated; specific
   - "5.8 GHz"
 requires_los: false          # confidence: high — passive RF, signal propagates around terrain
 mounting_height_m: 3.0       # confidence: medium — vehicle roof rack or tripod; not specified in datasheet
+vegetation_penetration: 0.6  # confidence: medium — RF control signals (2.4/5.8 GHz) partially penetrate light canopy; Bouguer-Lambert estimate
 cost_aud: null               # confidence: N/A — not publicly disclosed

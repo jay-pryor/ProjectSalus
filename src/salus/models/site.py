@@ -26,6 +26,12 @@ class SiteModel(BaseModel):
     """Digital Surface Model — surface elevation including structures/vegetation.
     If None, DEM is used for occlusion checks (no above-ground features)."""
 
+    canopy_height_m: np.ndarray | None = None
+    """Canopy Height Model — vegetation height above ground in metres (CHM = DSM − DEM).
+    None when no LiDAR-derived CHM is available.  All finite values are >= 0 (negative
+    DSM/DEM offsets are clamped to zero during derivation).  NaN cells represent nodata
+    and are treated as canopy-free during viewshed attenuation."""
+
     resolution: float
     """Metres per grid cell."""
 
@@ -61,11 +67,34 @@ class SiteModel(BaseModel):
             raise ValueError(f"dsm must be 2D, got {v.ndim}D")
         return v
 
+    @field_validator("canopy_height_m", mode="before")
+    @classmethod
+    def _validate_canopy(cls, v: np.ndarray | None) -> np.ndarray | None:
+        if v is None:
+            return None
+        if not isinstance(v, np.ndarray):
+            raise ValueError("canopy_height_m must be a numpy ndarray")
+        if v.ndim != 2:
+            raise ValueError(f"canopy_height_m must be 2D, got {v.ndim}D")
+        # Enforce >= 0 on finite values — NaN cells (nodata) are allowed.
+        finite = v[np.isfinite(v)]
+        if finite.size > 0 and float(finite.min()) < 0.0:
+            raise ValueError(
+                "canopy_height_m must have no negative finite values — "
+                f"minimum finite value found: {float(finite.min()):.4f}"
+            )
+        return v
+
     @model_validator(mode="after")
     def _validate_dsm_shape(self) -> Self:
         if self.dsm is not None and self.dsm.shape != self.dem.shape:
             raise ValueError(
                 f"dsm shape {self.dsm.shape} does not match dem shape {self.dem.shape}"
+            )
+        if self.canopy_height_m is not None and self.canopy_height_m.shape != self.dem.shape:
+            raise ValueError(
+                f"canopy_height_m shape {self.canopy_height_m.shape} does not match "
+                f"dem shape {self.dem.shape}"
             )
         return self
 

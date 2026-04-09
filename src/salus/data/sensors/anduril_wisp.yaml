@@ -15,4 +15,5 @@ elevation_boresight_deg: 0.0  # confidence: medium — panoramic staring sensor;
 frequency_bands: []          # confidence: high — passive IR only, no RF transmission
 requires_los: true           # confidence: high — optical/IR sensor requires direct line-of-sight
 mounting_height_m: 5.0       # confidence: medium — tower/mast mounted; height not specified in datasheet
+vegetation_penetration: 0.0  # confidence: high — EO/IR cannot see through foliage; canopy is fully opaque
 cost_aud: null               # confidence: N/A — not publicly disclosed

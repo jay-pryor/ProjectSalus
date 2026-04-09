@@ -59,6 +59,19 @@ class GapAnalysis:
 _DEFAULT_SENSITIVITY_DBM: float = -70.0
 _DEFAULT_AMBIENT_NOISE_DB: float = 0.0
 
+VEGETATION_COVERAGE_THRESHOLD: float = 0.5
+"""Minimum transmission coefficient for a cell to be considered covered.
+
+When layer coverage arrays contain float values from
+:func:`~salus.engine.viewshed.compute_viewshed_through_canopy`, this threshold
+is applied to convert the continuous transmission array to a boolean coverage
+array.  A cell is covered when its transmission coefficient >= this value.
+
+A threshold of 0.5 means "at least 50% of the signal passes through canopy".
+Override via the ``coverage_threshold`` parameter on :func:`compute_layer_coverage`
+and :func:`compute_coverage_stats` for site-specific requirements.
+"""
+
 
 def compute_layer_coverage(
     site: SiteModel,
@@ -66,6 +79,7 @@ def compute_layer_coverage(
     *,
     sensitivity_dbm: float = _DEFAULT_SENSITIVITY_DBM,
     ambient_noise_db: float = _DEFAULT_AMBIENT_NOISE_DB,
+    coverage_threshold: float = VEGETATION_COVERAGE_THRESHOLD,
 ) -> dict[SensorType, npt.NDArray[np.bool_]]:
     """Compute per-layer coverage by unioning all sensors of each type.
 
@@ -83,6 +97,11 @@ def compute_layer_coverage(
             to a list of ``(sensor_definition, placement)`` pairs.
         sensitivity_dbm: Detection threshold for RF sensors (dBm).
         ambient_noise_db: Ambient noise level for acoustic sensors (dB).
+        coverage_threshold: Minimum value for a float coverage array cell to be
+            considered covered.  Applied when coverage arrays contain float
+            values from canopy-attenuated viewsheds (see
+            :data:`VEGETATION_COVERAGE_THRESHOLD`).  Has no effect on boolean
+            arrays (any non-zero value is True).
 
     Returns:
         Mapping from each :class:`~salus.models.sensor.SensorType` present in
@@ -93,7 +112,11 @@ def compute_layer_coverage(
     Raises:
         ValueError: If any individual sensor coverage array has a shape that
             does not match ``(site.rows, site.cols)``.
+        ValueError: If ``coverage_threshold`` is not in [0.0, 1.0].
     """
+    if not (0.0 <= coverage_threshold <= 1.0):
+        raise ValueError(f"coverage_threshold must be in [0.0, 1.0], got {coverage_threshold}")
+
     from salus.engine.dispatcher import compute_sensor_coverage
 
     result: dict[SensorType, npt.NDArray[np.bool_]] = {}
@@ -118,7 +141,7 @@ def compute_layer_coverage(
                     f"Coverage array shape {cov.shape} does not match site shape "
                     f"({site.rows}, {site.cols}) for sensor '{sensor_def.name}'"
                 )
-            union |= cov.astype(bool)  # D-098: explicit cast guards non-bool dtypes
+            union |= cov >= coverage_threshold  # threshold handles both bool and float arrays
 
         result[sensor_type] = union
 
@@ -305,6 +328,8 @@ def compute_coverage_stats(
     composite: npt.NDArray[np.bool_],
     gaps: npt.NDArray[np.bool_],
     zones: list,
+    *,
+    coverage_threshold: float = VEGETATION_COVERAGE_THRESHOLD,
 ) -> CoverageStats:
     """Compute aggregate coverage statistics for a multi-sensor site analysis.
 
@@ -317,6 +342,9 @@ def compute_coverage_stats(
         gaps: Uncovered cell mask (output of :func:`compute_gaps`).
         zones: List of :class:`~salus.models.zone.Zone` objects defining named
             regions.  Empty list = no per-zone statistics computed.
+        coverage_threshold: Minimum value for a float layer array cell to count
+            as covered when computing per-layer percentages.  See
+            :data:`VEGETATION_COVERAGE_THRESHOLD`.
 
     Returns:
         :class:`CoverageStats` with total/per-layer/per-zone coverage percentages,
@@ -326,12 +354,16 @@ def compute_coverage_stats(
         ValueError: If any layer array, *composite*, or *gaps* has a shape
             different from ``(site.rows, site.cols)``.
         ValueError: If *site.resolution* is not finite or not positive.
+        ValueError: If ``coverage_threshold`` is not in [0.0, 1.0].
     """
     import math
 
     import scipy.ndimage
 
     from salus.models.zone import Zone
+
+    if not (0.0 <= coverage_threshold <= 1.0):
+        raise ValueError(f"coverage_threshold must be in [0.0, 1.0], got {coverage_threshold}")
 
     expected_shape = (site.rows, site.cols)
 
@@ -364,9 +396,10 @@ def compute_coverage_stats(
     # Total coverage %
     total_coverage_pct = float(composite.astype(bool).sum()) / float(total_cells) * 100.0
 
-    # Per-layer coverage %
+    # Per-layer coverage % — threshold applied so float arrays from canopy-attenuated
+    # viewsheds are treated consistently with boolean arrays.
     per_layer_coverage_pct: dict[SensorType, float] = {
-        sensor_type: float(arr.astype(bool).sum()) / float(total_cells) * 100.0
+        sensor_type: float((arr >= coverage_threshold).sum()) / float(total_cells) * 100.0
         for sensor_type, arr in layer_coverages.items()
     }
 
@@ -384,10 +417,10 @@ def compute_coverage_stats(
     # Gap area
     gap_area_m2 = float(gaps.astype(bool).sum()) * cell_area_m2
 
-    # Redundancy map — count sensor layers covering each cell
+    # Redundancy map — count sensor layers covering each cell (threshold applied)
     redundancy_map: npt.NDArray[np.intp] = np.zeros(expected_shape, dtype=np.intp)
     for arr in layer_coverages.values():
-        redundancy_map += arr.astype(np.intp)
+        redundancy_map += (arr >= coverage_threshold).astype(np.intp)
 
     # Largest contiguous gap (connected components, 4-connectivity)
     gap_bool = gaps.astype(bool)

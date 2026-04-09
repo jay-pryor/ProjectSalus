@@ -391,21 +391,29 @@ def render_composite_coverage_map(
     sensor_positions: list[tuple[float, float]] | None = None,
     boundary: Polygon | MultiPolygon | None = None,
     zones: list[Zone] | None = None,
+    show_canopy: bool = True,
+    coverage_threshold: float = 0.5,
 ) -> Path:
     """Render all sensor-type layers overlaid on a single composite map.
 
     Each sensor type is shown in its distinct colour.  Cells covered by
-    multiple layers show overlapping transparent patches.  A basemap is
-    added for geographic context when the site CRS is known.
+    multiple layers show overlapping transparent patches.  When
+    ``site.canopy_height_m`` is present and ``show_canopy`` is True, a
+    green-tinted semi-transparent overlay is added to show forested areas
+    and the map legend includes a note about canopy attenuation.
 
     Args:
         site: The site terrain model.
-        layer_coverages: Per-sensor-type boolean coverage arrays.
+        layer_coverages: Per-sensor-type boolean or float coverage arrays.
         output_path: Where to save the PNG.
         title: Map title.
         sensor_positions: Optional list of ``(x, y)`` sensor positions to mark.
         boundary: Optional boundary polygon to draw as an outline.
         zones: Optional zone overlays.
+        show_canopy: When True and ``site.canopy_height_m`` is present, overlay
+            the CHM as a green-tinted semi-transparent layer.
+        coverage_threshold: Threshold applied to float coverage arrays to
+            determine covered cells for display.
 
     Returns:
         Path to the saved PNG.
@@ -422,10 +430,27 @@ def render_composite_coverage_map(
 
         _add_basemap(ax, site)
 
+        # Canopy overlay (below coverage layers, above hillshade)
+        canopy_shown = False
+        if show_canopy and site.canopy_height_m is not None:
+            canopy_mask = site.canopy_height_m > 0
+            if canopy_mask.any():
+                canopy_display = np.ma.masked_where(~canopy_mask, canopy_mask.astype(float))
+                ax.imshow(
+                    canopy_display,
+                    cmap=ListedColormap(["#27ae60"]),
+                    extent=extent,
+                    origin="upper",
+                    alpha=0.3,
+                    zorder=2,
+                )
+                canopy_shown = True
+
         legend_handles: list[mpatches.Patch] = []
         for sensor_type, coverage in layer_coverages.items():
             colour = _SENSOR_TYPE_COLOURS.get(sensor_type, "#95a5a6")
-            cov_display = np.ma.masked_where(~coverage.astype(bool), coverage.astype(float))
+            cov_bool = coverage >= coverage_threshold
+            cov_display = np.ma.masked_where(~cov_bool, cov_bool.astype(float))
             cov_cmap = ListedColormap([colour])
             ax.imshow(
                 cov_display,
@@ -433,10 +458,19 @@ def render_composite_coverage_map(
                 extent=extent,
                 origin="upper",
                 alpha=0.45,
-                zorder=2,
+                zorder=3,
             )
             legend_handles.append(
                 mpatches.Patch(facecolor=colour, alpha=0.6, label=sensor_type.value)
+            )
+
+        if canopy_shown:
+            legend_handles.append(
+                mpatches.Patch(
+                    facecolor="#27ae60",
+                    alpha=0.4,
+                    label=f"Canopy (threshold {coverage_threshold:.0%})",
+                )
             )
 
         _render_boundary(ax, boundary)
@@ -479,12 +513,15 @@ def render_gap_map(
     sensor_positions: list[tuple[float, float]] | None = None,
     boundary: Polygon | MultiPolygon | None = None,
     zones: list[Zone] | None = None,
+    show_canopy: bool = True,
+    coverage_threshold: float = 0.5,
 ) -> Path:
     """Render a gap map with gaps highlighted in red against greyed-out coverage.
 
     Covered cells are shown in muted grey-green.  Gap cells (inside boundary
-    but uncovered) are shown in red.  A basemap is added for geographic context
-    when the site CRS is known.
+    but uncovered) are shown in red.  When ``site.canopy_height_m`` is present
+    and ``show_canopy`` is True, a green-tinted overlay shows forested areas so
+    users can distinguish terrain-shadow gaps from canopy-attenuation gaps.
 
     Args:
         site: The site terrain model.
@@ -496,6 +533,10 @@ def render_gap_map(
         sensor_positions: Optional list of ``(x, y)`` sensor positions to mark.
         boundary: Optional boundary polygon to draw as an outline.
         zones: Optional zone overlays.
+        show_canopy: When True and ``site.canopy_height_m`` is present, overlay
+            the CHM as a green-tinted semi-transparent layer.
+        coverage_threshold: Transmission threshold used when computing the gap
+            map title percentage label (informational only).
 
     Returns:
         Path to the saved PNG.
@@ -518,6 +559,23 @@ def render_gap_map(
 
         _add_basemap(ax, site)
 
+        # Canopy overlay (below coverage, above hillshade) — distinguishes terrain
+        # shadow gaps from canopy-attenuation gaps.
+        canopy_shown = False
+        if show_canopy and site.canopy_height_m is not None:
+            canopy_mask = site.canopy_height_m > 0
+            if canopy_mask.any():
+                canopy_display = np.ma.masked_where(~canopy_mask, canopy_mask.astype(float))
+                ax.imshow(
+                    canopy_display,
+                    cmap=ListedColormap(["#27ae60"]),
+                    extent=extent,
+                    origin="upper",
+                    alpha=0.25,
+                    zorder=2,
+                )
+                canopy_shown = True
+
         # Covered cells in muted grey-green
         covered = composite.astype(bool) & ~gaps.astype(bool)
         cov_display = np.ma.masked_where(~covered, covered.astype(float))
@@ -527,7 +585,7 @@ def render_gap_map(
             extent=extent,
             origin="upper",
             alpha=0.5,
-            zorder=2,
+            zorder=3,
         )
 
         # Gap cells in red
@@ -538,7 +596,7 @@ def render_gap_map(
             extent=extent,
             origin="upper",
             alpha=0.65,
-            zorder=3,
+            zorder=4,
         )
 
         _render_boundary(ax, boundary)
@@ -562,10 +620,18 @@ def render_gap_map(
         ax.set_ylabel("Northing (m)")
         _add_cartographic_elements(ax)
 
-        legend_handles = [
+        legend_handles: list[mpatches.Patch] = [
             mpatches.Patch(facecolor="#7fb3a0", alpha=0.6, label="Covered"),
             mpatches.Patch(facecolor="#e74c3c", alpha=0.7, label="Gap (uncovered)"),
         ]
+        if canopy_shown:
+            legend_handles.append(
+                mpatches.Patch(
+                    facecolor="#27ae60",
+                    alpha=0.35,
+                    label=f"Canopy (threshold {coverage_threshold:.0%})",
+                )
+            )
         ax.legend(handles=legend_handles, loc="lower left", fontsize=9, framealpha=0.8)
 
         fig.tight_layout()

@@ -19,6 +19,12 @@ from salus.models.site import SiteModel
 # Azimuth coverage at or above this value means no wedge masking is needed.
 _FULL_ARC_DEG: float = 360.0
 
+# Reference canopy height used in Bouguer-Lambert attenuation:
+# transmission per step = penetration ** (canopy_height_m / _CANOPY_REFERENCE_HEIGHT_M).
+# A value of 10 m represents a typical tree height; it controls the steepness of
+# attenuation for cells shorter or taller than this reference.
+_CANOPY_REFERENCE_HEIGHT_M: float = 10.0
+
 
 def compute_viewshed(
     site: SiteModel,
@@ -26,7 +32,7 @@ def compute_viewshed(
     observer_y: float,
     observer_height: float,
     max_range: float | None = None,
-) -> np.ndarray:
+) -> npt.NDArray[np.bool_]:
     """Compute a binary viewshed from an observer position.
 
     Args:
@@ -145,6 +151,126 @@ def clip_viewshed_to_sensor(
         azimuth_mask = np.abs(diff) <= half_arc
 
     return viewshed_bool & range_mask & azimuth_mask
+
+
+def compute_viewshed_through_canopy(
+    site: SiteModel,
+    observer_x: float,
+    observer_y: float,
+    observer_height: float,
+    max_range: float | None = None,
+    vegetation_penetration: float = 0.0,
+) -> npt.NDArray[np.float32]:
+    """Compute a viewshed with optional Bouguer–Lambert canopy attenuation.
+
+    When ``site.canopy_height_m`` is present **and** ``vegetation_penetration``
+    is greater than zero, each visible cell's transmission coefficient is
+    calculated by ray-marching and accumulating per-cell attenuation:
+
+    .. code-block:: text
+
+        T_cell *= penetration ** (canopy_height_m[cell] / _CANOPY_REFERENCE_HEIGHT_M)
+
+    for every cell along the ray where ``canopy_height_m > 0``.
+
+    The returned array contains float32 transmission values in [0.0, 1.0]:
+    - 1.0 = fully visible, no canopy attenuation on the LOS path
+    - 0.0 = fully blocked (either terrain occlusion or total canopy extinction)
+    - intermediate = partial signal penetration through canopy
+
+    **NaN canopy cells** (nodata from rasterio load) are treated as canopy-free
+    (no attenuation applied to that cell).  This is the conservative-open policy:
+    nodata means "no CHM measurement available" rather than "confirmed dense
+    canopy", so the signal is not penalised.  NaN cells in the CHM do not affect
+    the >= 0 guarantee on finite values.
+
+    When ``site.canopy_height_m`` is ``None`` **or** ``vegetation_penetration``
+    is 0.0, falls back to the binary viewshed (same result as
+    :func:`compute_viewshed`, cast to float32).
+
+    Args:
+        site: The site terrain model.
+        observer_x: Observer easting in CRS units (metres).
+        observer_y: Observer northing in CRS units (metres).
+        observer_height: Observer height above ground in metres.
+        max_range: Maximum analysis range in metres.  ``None`` = full extent.
+        vegetation_penetration: Fraction of signal passing through a unit of
+            canopy (0.0–1.0).  0.0 = fully opaque canopy; 1.0 = transparent.
+
+    Returns:
+        Float32 2D array matching ``site.dem`` shape.  Values in [0.0, 1.0].
+
+    Raises:
+        ValueError: If ``vegetation_penetration`` is not in [0.0, 1.0], or if
+            the observer position is outside the raster extent.
+    """
+    if not (0.0 <= vegetation_penetration <= 1.0):
+        raise ValueError(f"vegetation_penetration must be in [0, 1], got {vegetation_penetration}")
+
+    binary = compute_viewshed(site, observer_x, observer_y, observer_height, max_range)
+
+    if site.canopy_height_m is None or vegetation_penetration == 0.0:
+        return binary.astype(np.float32)
+
+    # Canopy attenuation path: ray-march over the binary viewshed and accumulate
+    # transmission for each visible cell.
+    canopy = site.canopy_height_m
+    obs_row, obs_col = _xy_to_rc(site, observer_x, observer_y)
+    rows, cols = site.dem.shape
+
+    transmission = np.zeros((rows, cols), dtype=np.float32)
+
+    if max_range is not None and max_range <= 0.0:
+        max_range = None
+
+    max_cells: int
+    if max_range is not None:
+        max_cells = int(max_range / site.resolution) + 1
+    else:
+        max_cells = int(np.sqrt(rows**2 + cols**2)) + 1
+
+    num_rays = max(360, 4 * max(rows, cols))
+    angles = np.linspace(0, 2 * np.pi, num_rays, endpoint=False)
+
+    for angle in angles:
+        dx = np.cos(angle)
+        dy = np.sin(angle)
+        t_ray: float = 1.0
+
+        for step in range(1, max_cells + 1):
+            c = obs_col + dx * step
+            r = obs_row - dy * step
+
+            ci, ri = int(round(c)), int(round(r))
+            if ri < 0 or ri >= rows or ci < 0 or ci >= cols:
+                break
+
+            dist = step * site.resolution
+            if max_range is not None and dist > max_range:
+                break
+
+            if not binary[ri, ci]:
+                continue  # Terrain-blocked cell: leave transmission at 0.
+
+            ch = float(canopy[ri, ci])
+            # NaN → treat as canopy-free (D-245 policy: no measurement = no penalty).
+            # Clamp negative finite values to 0 to prevent t_ray exceeding 1.0 (D-247).
+            if math.isnan(ch):
+                ch = 0.0
+            elif ch < 0.0:
+                ch = 0.0
+            if ch > 0.0:
+                t_ray *= vegetation_penetration ** (ch / _CANOPY_REFERENCE_HEIGHT_M)
+
+            # Take the maximum transmission seen so far for this cell so that
+            # cells visible from multiple ray paths get the least-attenuated value.
+            if t_ray > transmission[ri, ci]:
+                transmission[ri, ci] = t_ray
+
+    # Observer cell is always fully visible.
+    transmission[obs_row, obs_col] = 1.0
+
+    return transmission
 
 
 def line_of_sight_3d(

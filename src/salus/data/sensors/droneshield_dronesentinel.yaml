@@ -19,4 +19,5 @@ elevation_boresight_deg: 45.0 # confidence: low — centre of estimated 0° to +
 frequency_bands: []          # confidence: high — passive acoustic, no RF transmission
 requires_los: false          # confidence: high — sound propagates around terrain obstacles
 mounting_height_m: 2.0       # confidence: low — low mounting typical for acoustic; not published
+vegetation_penetration: 0.9  # confidence: medium — sound diffracts around/through foliage; high penetration typical for acoustic cUAS
 cost_aud: null               # confidence: N/A — not publicly disclosed

@@ -70,6 +70,20 @@ class SensorDefinition(BaseModel):
     mounting_height_m: float = 0.0
     """Default mounting height above ground in metres."""
 
+    vegetation_penetration: float = 0.0
+    """Fraction of signal that passes through a unit of canopy (0.0–1.0).
+
+    Models Bouguer–Lambert attenuation through vegetation:
+    - 0.0 = fully blocked by canopy (EO/IR sensors)
+    - 0.2–0.4 = high attenuation (radar through dense foliage)
+    - 0.6 = partial penetration (RF — drone control signals through light canopy)
+    - 0.9 = near-transparent (acoustic — sound diffracts around/through foliage)
+    - 1.0 = fully transparent (hypothetical — no attenuation)
+
+    When ``site.canopy_height_m`` is present and this value is > 0, the
+    viewshed engine applies per-cell attenuation proportional to canopy height.
+    """
+
     cost_aud: float | None = None
     """Approximate unit cost in AUD. None if not disclosed."""
 
@@ -120,6 +134,13 @@ class SensorDefinition(BaseModel):
     def _mounting_height_non_negative(cls, v: float) -> float:
         if v < 0.0:
             raise ValueError(f"mounting_height_m must be >= 0, got {v}")
+        return v
+
+    @field_validator("vegetation_penetration")
+    @classmethod
+    def _veg_penetration_valid(cls, v: float) -> float:
+        if not (0.0 <= v <= 1.0):
+            raise ValueError(f"vegetation_penetration must be in [0, 1], got {v}")
         return v
 
     @field_validator("cost_aud")
