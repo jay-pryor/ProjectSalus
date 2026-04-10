@@ -2190,3 +2190,187 @@ def report(
         sys.exit(1)
 
     click.echo(f"\nReport written: {result_path}")
+
+
+# ---------------------------------------------------------------------------
+# S14-6 — salus viewer command
+# ---------------------------------------------------------------------------
+
+
+@main.command()
+@click.argument("scenario", type=click.Path(exists=True, dir_okay=False))
+@click.option(
+    "--output",
+    "output_dir",
+    required=True,
+    type=click.Path(file_okay=False),
+    help="Destination directory for the self-contained viewer package.",
+)
+@click.option(
+    "--sensors",
+    "sensor_dir",
+    default=None,
+    type=click.Path(exists=True, file_okay=False),
+    help="Directory of sensor YAML definitions. Defaults to the bundled database.",
+)
+@click.option(
+    "--sanitise",
+    "sanitise_level",
+    default="none",
+    type=click.Choice(["none", "minimal", "redacted", "full"], case_sensitive=False),
+    show_default=True,
+    help=(
+        "Sanitisation level applied before packaging. "
+        "'none' preserves all data; 'redacted' anonymises sensor names and rounds "
+        "coordinates (recommended for customer delivery)."
+    ),
+)
+@click.option(
+    "--zip/--no-zip",
+    "zip_output",
+    default=False,
+    show_default=True,
+    help="Also write a .zip archive of the viewer directory.",
+)
+def viewer(
+    scenario: str,
+    output_dir: str,
+    sensor_dir: str | None,
+    sanitise_level: str,
+    zip_output: bool,
+) -> None:
+    """Generate a self-contained interactive 3D coverage viewer.
+
+    Runs the full simulation pipeline (ingest, viewshed, coverage), exports
+    data as GeoJSON + Terrarium terrain tiles, optionally sanitises sensitive
+    fields, and packages everything into a directory that opens directly in
+    a browser via the file:// protocol.
+
+    Example:
+
+        salus viewer scenario.yaml --output ./viewer --sanitise redacted
+
+    To also produce a distributable zip:
+
+        salus viewer scenario.yaml --output ./viewer --sanitise redacted --zip
+    """
+    from salus.viewer.export import ViewerData, export_viewer_data, package_viewer
+    from salus.viewer.sanitise import SanitiseConfig, SanitiseLevel, sanitise_for_export
+
+    scenario_path = Path(scenario)
+    out_dir = Path(output_dir)
+    effective_sensor_dir = Path(sensor_dir) if sensor_dir is not None else _DEFAULT_SENSOR_DIR
+
+    click.echo(f"Loading scenario: {scenario_path}")
+    try:
+        sc = load_scenario(scenario_path)
+    except (FileNotFoundError, ValueError, OSError) as exc:
+        click.echo(f"Error loading scenario: {exc}", err=True)
+        sys.exit(1)
+
+    click.echo(f"Loading sensor definitions: {effective_sensor_dir}")
+    try:
+        sensor_defs = load_sensors(effective_sensor_dir)
+    except (FileNotFoundError, PermissionError, ValueError, OSError) as exc:
+        click.echo(f"Error loading sensor definitions: {exc}", err=True)
+        sys.exit(1)
+
+    click.echo(f"Loading DEM: {sc.site_dem_path}")
+    try:
+        site = load_dem(sc.site_dem_path, dsm_path=sc.site_dsm_path)
+    except FileNotFoundError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        sys.exit(1)
+    except Exception as exc:
+        click.echo(f"Error loading DEM: {exc}", err=True)
+        sys.exit(1)
+
+    crs_info = f", EPSG:{site.crs_epsg}" if site.crs_epsg else ""
+    click.echo(f"DEM loaded: {site.rows}×{site.cols} cells at {site.resolution:.1f} m{crs_info}")
+
+    sensor_map: dict[str, "SensorDefinition"] = {s.name: s for s in sensor_defs}
+    placements_by_type: dict["SensorType", list[tuple["SensorDefinition", "SensorPlacement"]]] = {}
+    for placement in sc.sensor_placements:
+        sensor = sensor_map.get(placement.sensor_name)
+        if sensor is None:
+            click.echo(
+                f"  Warning: sensor '{placement.sensor_name}' not found — skipping.", err=True
+            )
+            continue
+        placements_by_type.setdefault(sensor.type, []).append((sensor, placement))
+
+    if not placements_by_type:
+        click.echo("No valid sensor placements — coverage will be 0%.", err=True)
+        from salus.engine.coverage import CoverageStats
+
+        composite = np.zeros((site.rows, site.cols), dtype=bool)
+        gaps = np.ones((site.rows, site.cols), dtype=bool)
+        gap_m2 = float(site.rows * site.cols) * site.resolution**2
+        report_stats = CoverageStats(
+            total_coverage_pct=0.0,
+            per_layer_coverage_pct={},
+            per_zone_coverage_pct={},
+            gap_area_m2=gap_m2,
+            redundancy_map=np.zeros((site.rows, site.cols), dtype=np.intp),
+            largest_contiguous_gap_m2=gap_m2,
+        )
+        layer_coverages: dict = {}
+    else:
+        click.echo("\nRunning coverage pipeline…")
+        try:
+            layer_coverages = compute_layer_coverage(site, placements_by_type)
+            composite = compute_composite_coverage(layer_coverages)
+            bitmask = np.ones((site.rows, site.cols), dtype=bool)
+            if sc.boundary_path is not None:
+                try:
+                    loaded_boundary = load_boundary(sc.boundary_path, site_epsg=site.crs_epsg)
+                    bitmask = boundary_mask(site, loaded_boundary)
+                except Exception as exc:
+                    click.echo(f"  Warning: boundary load failed ({exc})", err=True)
+            gaps = compute_gaps(composite, bitmask)
+            report_stats = compute_coverage_stats(
+                site, layer_coverages, composite, gaps, site.zones
+            )
+        except Exception as exc:
+            click.echo(f"Error running coverage pipeline: {exc}", err=True)
+            sys.exit(1)
+
+    click.echo(f"  Coverage: {report_stats.total_coverage_pct:.1f}%")
+
+    from salus.report.pdf import SimulationResults
+
+    sim = SimulationResults(
+        site=site,
+        scenario=sc,
+        composite=composite,
+        layer_coverages=layer_coverages,
+        stats=report_stats,
+        sensor_defs=sensor_defs,
+        gaps=gaps,
+    )
+
+    click.echo("\nExporting viewer data…")
+    try:
+        viewer_data: ViewerData = export_viewer_data(sim)
+    except Exception as exc:
+        click.echo(f"Error exporting viewer data: {exc}", err=True)
+        sys.exit(1)
+
+    if sanitise_level != "none":
+        click.echo(f"Sanitising at level '{sanitise_level}'…")
+        try:
+            config = SanitiseConfig(level=SanitiseLevel(sanitise_level))
+            viewer_data = sanitise_for_export(viewer_data, config)
+        except Exception as exc:
+            click.echo(f"Error sanitising data: {exc}", err=True)
+            sys.exit(1)
+
+    click.echo(f"Packaging viewer → {out_dir}")
+    try:
+        result = package_viewer(viewer_data, out_dir, zip_output=zip_output)
+    except Exception as exc:
+        click.echo(f"Error packaging viewer: {exc}", err=True)
+        sys.exit(1)
+
+    click.echo(f"\nViewer ready: {result}")
+    click.echo("Open index.html in a browser to explore the coverage data.")

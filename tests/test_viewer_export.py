@@ -1,0 +1,818 @@
+"""Tests for salus.viewer.export and salus.viewer.sanitise (S14)."""
+
+from __future__ import annotations
+
+import base64
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+from salus.engine.coverage import CoverageStats
+from salus.models.scenario import ScenarioConfig, SensorPlacement
+from salus.models.sensor import SensorType
+from salus.models.site import SiteModel
+from salus.viewer.export import (
+    ViewerData,
+    _encode_terrarium,
+    _rgb_to_png,
+    export_viewer_data,
+    package_viewer,
+)
+from salus.viewer.sanitise import SanitiseConfig, SanitiseLevel, sanitise_for_export
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+def _make_site(rows: int = 20, cols: int = 20, epsg: int = 28354) -> SiteModel:
+    dem = np.full((rows, cols), 100.0, dtype=np.float32)
+    dem[5:15, 5:15] = 150.0  # small hill in centre
+    return SiteModel(
+        dem=dem,
+        resolution=5.0,
+        origin_x=500000.0,
+        origin_y=6100100.0,  # top-left (north edge)
+        crs_epsg=epsg,
+    )
+
+
+def _make_sim_results(site: SiteModel):
+    """Build a minimal SimulationResults-like object for testing."""
+    from salus.report.pdf import SimulationResults
+
+    composite = np.zeros((site.rows, site.cols), dtype=bool)
+    composite[8:12, 8:12] = True  # small covered area
+
+    layer_cov = {SensorType.EO_IR: composite.copy()}
+
+    rmap = np.zeros((site.rows, site.cols), dtype=np.intp)
+    stats = CoverageStats(
+        total_coverage_pct=25.0,
+        per_layer_coverage_pct={SensorType.EO_IR: 25.0},
+        per_zone_coverage_pct={},
+        gap_area_m2=750.0,
+        redundancy_map=rmap,
+        largest_contiguous_gap_m2=750.0,
+    )
+
+    placement = SensorPlacement(
+        sensor_name="TestSensor",
+        position_x=500050.0,
+        position_y=6100050.0,
+        bearing_deg=0.0,
+    )
+    sc = ScenarioConfig(
+        site_dem_path="demo_terrain.tif",
+        sensor_placements=[placement],
+    )
+
+    from salus.models.sensor import SensorDefinition
+
+    sensor_def = SensorDefinition(
+        name="TestSensor",
+        type=SensorType.EO_IR,
+        max_range_m=500.0,
+        azimuth_coverage_deg=120.0,
+        elevation_coverage_deg=30.0,
+        mounting_height_m=3.0,
+        requires_los=True,
+    )
+
+    return SimulationResults(
+        site=site,
+        scenario=sc,
+        composite=composite,
+        layer_coverages=layer_cov,
+        stats=stats,
+        sensor_defs=[sensor_def],
+        gaps=~composite,
+    )
+
+
+# ---------------------------------------------------------------------------
+# TestEncodeTerrarium
+# ---------------------------------------------------------------------------
+
+
+class TestEncodeTerrarium:
+    def test_zero_elevation_gives_known_rgb(self):
+        """Elevation 0 m → val = 32768 → R=128, G=0, B=0."""
+        arr = np.array([[0.0]], dtype=np.float32)
+        rgb = _encode_terrarium(arr)
+        assert rgb[0, 0, 0] == 128  # R = 32768 >> 8
+        assert rgb[0, 0, 1] == 0  # G = 32768 & 0xFF
+        assert rgb[0, 0, 2] == 0  # B = 0 (no fractional part)
+
+    def test_roundtrip_integer_elevation(self):
+        """Decode Terrarium encoding and verify it round-trips cleanly."""
+        elevation = np.array([[180.0]], dtype=np.float32)
+        rgb = _encode_terrarium(elevation)
+        r, g, b = int(rgb[0, 0, 0]), int(rgb[0, 0, 1]), int(rgb[0, 0, 2])
+        decoded = (r * 256 + g + b / 256) - 32768
+        assert abs(decoded - 180.0) < 0.01
+
+    def test_roundtrip_fractional_elevation(self):
+        elevation = np.array([[180.5]], dtype=np.float32)
+        rgb = _encode_terrarium(elevation)
+        r, g, b = int(rgb[0, 0, 0]), int(rgb[0, 0, 1]), int(rgb[0, 0, 2])
+        decoded = (r * 256 + g + b / 256) - 32768
+        assert abs(decoded - 180.5) < 0.01
+
+    def test_output_shape(self):
+        arr = np.ones((10, 10), dtype=np.float32) * 50.0
+        rgb = _encode_terrarium(arr)
+        assert rgb.shape == (10, 10, 3)
+        assert rgb.dtype == np.uint8
+
+    def test_negative_elevation_clamped(self):
+        """Elevation below −32768 clamps to 0."""
+        arr = np.array([[-40000.0]], dtype=np.float32)
+        rgb = _encode_terrarium(arr)
+        assert rgb[0, 0, 0] == 0
+        assert rgb[0, 0, 1] == 0
+
+    def test_high_elevation_clamped(self):
+        """Elevation above 32767 clamps to max representable value."""
+        arr = np.array([[32768.0]], dtype=np.float32)
+        rgb = _encode_terrarium(arr)
+        # val = 65536 → clipped to 65535.999
+        assert rgb[0, 0, 0] == 255
+
+
+class TestRgbToPng:
+    def test_returns_bytes(self):
+        rgb = np.zeros((256, 256, 3), dtype=np.uint8)
+        result = _rgb_to_png(rgb)
+        assert isinstance(result, bytes)
+        assert len(result) > 0
+
+    def test_valid_png_header(self):
+        rgb = np.zeros((256, 256, 3), dtype=np.uint8)
+        result = _rgb_to_png(rgb)
+        assert result[:8] == b"\x89PNG\r\n\x1a\n"
+
+    def test_small_tile(self):
+        """Works for non-256 tile sizes."""
+        rgb = np.full((64, 64, 3), 128, dtype=np.uint8)
+        result = _rgb_to_png(rgb)
+        assert len(result) > 100
+
+
+# ---------------------------------------------------------------------------
+# TestExportViewerData
+# ---------------------------------------------------------------------------
+
+
+class TestExportViewerData:
+    def test_returns_viewer_data_instance(self, flat_dem_path):
+        from salus.ingest.terrain import load_dem
+
+        site = load_dem(flat_dem_path)
+        sim = _make_sim_results(site)
+        result = export_viewer_data(sim)
+        assert isinstance(result, ViewerData)
+
+    def test_scenario_name_from_dem_stem(self, flat_dem_path):
+        from salus.ingest.terrain import load_dem
+
+        site = load_dem(flat_dem_path)
+        sim = _make_sim_results(site)
+        # Override scenario to use actual flat_dem_path so stem == "flat"
+        from salus.models.scenario import ScenarioConfig
+
+        sim.scenario = ScenarioConfig(
+            site_dem_path=str(flat_dem_path),
+            sensor_placements=sim.scenario.sensor_placements,
+        )
+        result = export_viewer_data(sim)
+        assert result.scenario_name == "flat"
+
+    def test_bounds_wgs84_is_tuple_of_four_floats(self, flat_dem_path):
+        from salus.ingest.terrain import load_dem
+
+        site = load_dem(flat_dem_path)
+        sim = _make_sim_results(site)
+        result = export_viewer_data(sim)
+        assert len(result.bounds_wgs84) == 4
+        west, south, east, north = result.bounds_wgs84
+        assert west < east
+        assert south < north
+
+    def test_centre_wgs84_within_bounds(self, flat_dem_path):
+        from salus.ingest.terrain import load_dem
+
+        site = load_dem(flat_dem_path)
+        sim = _make_sim_results(site)
+        result = export_viewer_data(sim)
+        w, s, e, n = result.bounds_wgs84
+        lon, lat = result.centre_wgs84
+        assert w <= lon <= e
+        assert s <= lat <= n
+
+    def test_layers_contains_composite_and_gaps(self, flat_dem_path):
+        from salus.ingest.terrain import load_dem
+
+        site = load_dem(flat_dem_path)
+        sim = _make_sim_results(site)
+        result = export_viewer_data(sim)
+        assert "composite" in result.layers
+        assert "gaps" in result.layers
+
+    def test_layers_are_geojson_feature_collections(self, flat_dem_path):
+        from salus.ingest.terrain import load_dem
+
+        site = load_dem(flat_dem_path)
+        sim = _make_sim_results(site)
+        result = export_viewer_data(sim)
+        for key, fc in result.layers.items():
+            assert fc["type"] == "FeatureCollection", f"layer '{key}' is not FeatureCollection"
+            assert "features" in fc
+
+    def test_per_layer_exported(self, flat_dem_path):
+        from salus.ingest.terrain import load_dem
+
+        site = load_dem(flat_dem_path)
+        sim = _make_sim_results(site)
+        result = export_viewer_data(sim)
+        assert SensorType.EO_IR.value in result.layers
+
+    def test_sensor_placements_geojson(self, flat_dem_path):
+        from salus.ingest.terrain import load_dem
+
+        site = load_dem(flat_dem_path)
+        sim = _make_sim_results(site)
+        result = export_viewer_data(sim)
+        assert result.sensor_placements["type"] == "FeatureCollection"
+        assert len(result.sensor_placements["features"]) == 1
+        feat = result.sensor_placements["features"][0]
+        assert feat["geometry"]["type"] == "Point"
+
+    def test_stats_dict_contains_coverage_pct(self, flat_dem_path):
+        from salus.ingest.terrain import load_dem
+
+        site = load_dem(flat_dem_path)
+        sim = _make_sim_results(site)
+        result = export_viewer_data(sim)
+        assert "total_coverage_pct" in result.stats
+        assert "gap_area_m2" in result.stats
+
+    def test_terrain_tiles_non_empty(self, flat_dem_path):
+        from salus.ingest.terrain import load_dem
+
+        site = load_dem(flat_dem_path)
+        sim = _make_sim_results(site)
+        result = export_viewer_data(sim)
+        assert len(result.terrain_tiles) > 0
+
+    def test_terrain_tiles_are_valid_base64(self, flat_dem_path):
+        from salus.ingest.terrain import load_dem
+
+        site = load_dem(flat_dem_path)
+        sim = _make_sim_results(site)
+        result = export_viewer_data(sim)
+        for key, b64 in result.terrain_tiles.items():
+            data = base64.b64decode(b64)
+            assert data[:8] == b"\x89PNG\r\n\x1a\n", f"tile {key} is not PNG"
+
+    def test_terrain_tile_keys_are_z_x_y(self, flat_dem_path):
+        from salus.ingest.terrain import load_dem
+
+        site = load_dem(flat_dem_path)
+        sim = _make_sim_results(site)
+        result = export_viewer_data(sim)
+        for key in result.terrain_tiles:
+            parts = key.split("/")
+            assert len(parts) == 3, f"tile key '{key}' not in z/x/y format"
+            assert all(p.isdigit() for p in parts)
+
+    def test_not_sanitised_by_default(self, flat_dem_path):
+        from salus.ingest.terrain import load_dem
+
+        site = load_dem(flat_dem_path)
+        sim = _make_sim_results(site)
+        result = export_viewer_data(sim)
+        assert result.sanitised is False
+
+    def test_no_kill_chain_when_empty(self, flat_dem_path):
+        from salus.ingest.terrain import load_dem
+
+        site = load_dem(flat_dem_path)
+        sim = _make_sim_results(site)
+        result = export_viewer_data(sim)
+        assert result.kill_chain_results == []
+
+    def test_no_saturation_when_none(self, flat_dem_path):
+        from salus.ingest.terrain import load_dem
+
+        site = load_dem(flat_dem_path)
+        sim = _make_sim_results(site)
+        result = export_viewer_data(sim)
+        assert result.saturation_result is None
+
+
+# ---------------------------------------------------------------------------
+# TestPackageViewer
+# ---------------------------------------------------------------------------
+
+
+class TestPackageViewer:
+    def _make_minimal_viewer_data(self) -> ViewerData:
+        return ViewerData(
+            scenario_name="test_site",
+            generated_at="2026-04-10T00:00:00Z",
+            bounds_wgs84=(150.0, -34.0, 151.0, -33.0),
+            centre_wgs84=(150.5, -33.5),
+            layers={
+                "composite": {"type": "FeatureCollection", "features": []},
+                "gaps": {"type": "FeatureCollection", "features": []},
+            },
+            sensor_placements={"type": "FeatureCollection", "features": []},
+            stats={
+                "total_coverage_pct": 50.0,
+                "gap_area_m2": 100.0,
+                "per_layer_coverage_pct": {},
+                "per_zone_coverage_pct": {},
+                "largest_contiguous_gap_m2": 100.0,
+            },
+            corridor_results=[],
+            kill_chain_results=[],
+            saturation_result=None,
+            terrain_tiles={
+                "12/3689/2493": base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100).decode()
+            },
+            terrain_min_zoom=12,
+            terrain_max_zoom=12,
+        )
+
+    def test_creates_output_directory(self, tmp_path):
+        vd = self._make_minimal_viewer_data()
+        out = tmp_path / "viewer_out"
+        result = package_viewer(vd, out)
+        assert out.exists()
+        assert result == out
+
+    def test_writes_index_html(self, tmp_path):
+        vd = self._make_minimal_viewer_data()
+        out = tmp_path / "viewer_out"
+        package_viewer(vd, out)
+        assert (out / "index.html").exists()
+
+    def test_writes_app_js(self, tmp_path):
+        vd = self._make_minimal_viewer_data()
+        out = tmp_path / "viewer_out"
+        package_viewer(vd, out)
+        assert (out / "app.js").exists()
+
+    def test_writes_style_css(self, tmp_path):
+        vd = self._make_minimal_viewer_data()
+        out = tmp_path / "viewer_out"
+        package_viewer(vd, out)
+        assert (out / "style.css").exists()
+
+    def test_writes_viewer_data_js(self, tmp_path):
+        vd = self._make_minimal_viewer_data()
+        out = tmp_path / "viewer_out"
+        package_viewer(vd, out)
+        data_js = out / "viewer_data.js"
+        assert data_js.exists()
+        content = data_js.read_text()
+        assert "window.SALUS_DATA" in content
+        assert "window.SALUS_TILES" in content
+
+    def test_viewer_data_js_contains_scenario_name(self, tmp_path):
+        vd = self._make_minimal_viewer_data()
+        out = tmp_path / "viewer_out"
+        package_viewer(vd, out)
+        content = (out / "viewer_data.js").read_text()
+        assert "test_site" in content
+
+    def test_viewer_data_js_contains_tile_data(self, tmp_path):
+        vd = self._make_minimal_viewer_data()
+        out = tmp_path / "viewer_out"
+        package_viewer(vd, out)
+        content = (out / "viewer_data.js").read_text()
+        assert "12/3689/2493" in content
+
+    def test_vendor_directory_created(self, tmp_path):
+        vd = self._make_minimal_viewer_data()
+        out = tmp_path / "viewer_out"
+        package_viewer(vd, out)
+        assert (out / "vendor").is_dir()
+
+    def test_zip_output_creates_zip_file(self, tmp_path):
+        vd = self._make_minimal_viewer_data()
+        out = tmp_path / "viewer_out"
+        package_viewer(vd, out, zip_output=True)
+        zip_path = Path(str(out) + ".zip")
+        assert zip_path.exists()
+
+    def test_returns_resolved_path(self, tmp_path):
+        vd = self._make_minimal_viewer_data()
+        out = tmp_path / "viewer_out"
+        result = package_viewer(vd, out)
+        assert result.is_absolute()
+
+
+# ---------------------------------------------------------------------------
+# TestSanitiseForExport
+# ---------------------------------------------------------------------------
+
+
+class TestSanitiseForExport:
+    def _make_viewer_data_with_sensors(self) -> ViewerData:
+        return ViewerData(
+            scenario_name="compound_defence",
+            generated_at="2026-04-10T00:00:00Z",
+            bounds_wgs84=(150.0001, -34.0001, 151.0001, -33.0001),
+            centre_wgs84=(150.50012, -33.50012),
+            layers={
+                "composite": {
+                    "type": "FeatureCollection",
+                    "features": [
+                        {
+                            "type": "Feature",
+                            "geometry": {
+                                "type": "Point",
+                                "coordinates": [150.123456789, -33.987654321],
+                            },
+                            "properties": {},
+                        }
+                    ],
+                },
+                "gaps": {"type": "FeatureCollection", "features": []},
+            },
+            sensor_placements={
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "geometry": {"type": "Point", "coordinates": [150.12345678, -33.98765432]},
+                        "properties": {
+                            "sensor_name": "Anduril WISP",
+                            "bearing_deg": 45.0,
+                            "height_override_m": 6.0,
+                        },
+                    }
+                ],
+            },
+            stats={
+                "total_coverage_pct": 47.5,
+                "gap_area_m2": 100.0,
+                "per_layer_coverage_pct": {"EO_IR": 43.2, "Radar": 4.7},
+                "per_zone_coverage_pct": {},
+                "largest_contiguous_gap_m2": 100.0,
+            },
+            corridor_results=[
+                {
+                    "threat_name": "DJI Mavic 3",
+                    "path_wgs84": [[150.123456, -33.987654], [150.234567, -33.876543]],
+                    "coverage_fraction": 0.75,
+                }
+            ],
+            kill_chain_results=[
+                {
+                    "available_time_s": 23.0,
+                    "required_time_s": 17.7,
+                    "margin_s": 5.3,
+                    "first_detection_range_m": 850.0,
+                    "engagement_feasible": True,
+                    "second_engagement_possible": False,
+                }
+            ],
+            saturation_result={
+                "simultaneous_engagement_capacity": 3,
+                "saturation_threshold_n": 4,
+                "unengaged_count_at_threshold": 1,
+                "per_effector_utilisation": {"EffectorA": 0.8, "EffectorB": 0.6},
+            },
+            terrain_tiles={},
+            terrain_min_zoom=12,
+            terrain_max_zoom=16,
+        )
+
+    def test_returns_new_instance(self):
+        vd = self._make_viewer_data_with_sensors()
+        config = SanitiseConfig(level=SanitiseLevel.MINIMAL)
+        result = sanitise_for_export(vd, config)
+        assert result is not vd
+
+    def test_does_not_mutate_original(self):
+        vd = self._make_viewer_data_with_sensors()
+        original_name = vd.sensor_placements["features"][0]["properties"]["sensor_name"]
+        config = SanitiseConfig(level=SanitiseLevel.REDACTED)
+        sanitise_for_export(vd, config)
+        assert vd.sensor_placements["features"][0]["properties"]["sensor_name"] == original_name
+
+    def test_minimal_rounds_coordinates(self):
+        vd = self._make_viewer_data_with_sensors()
+        config = SanitiseConfig(level=SanitiseLevel.MINIMAL, coordinate_precision=4)
+        result = sanitise_for_export(vd, config)
+        sensor_coord = result.sensor_placements["features"][0]["geometry"]["coordinates"]
+        assert all(len(str(c).split(".")[-1]) <= 4 for c in sensor_coord)
+
+    def test_minimal_preserves_sensor_name(self):
+        vd = self._make_viewer_data_with_sensors()
+        result = sanitise_for_export(vd, SanitiseConfig(level=SanitiseLevel.MINIMAL))
+        name = result.sensor_placements["features"][0]["properties"]["sensor_name"]
+        assert name == "Anduril WISP"
+
+    def test_redacted_anonymises_sensor_name(self):
+        vd = self._make_viewer_data_with_sensors()
+        result = sanitise_for_export(vd, SanitiseConfig(level=SanitiseLevel.REDACTED))
+        name = result.sensor_placements["features"][0]["properties"]["sensor_name"]
+        assert name != "Anduril WISP"
+        assert name.startswith("Sensor-")
+
+    def test_redacted_strips_bearing_and_height(self):
+        vd = self._make_viewer_data_with_sensors()
+        result = sanitise_for_export(vd, SanitiseConfig(level=SanitiseLevel.REDACTED))
+        props = result.sensor_placements["features"][0]["properties"]
+        assert "bearing_deg" not in props
+        assert "height_override_m" not in props
+
+    def test_redacted_relabels_per_layer_keys(self):
+        vd = self._make_viewer_data_with_sensors()
+        result = sanitise_for_export(vd, SanitiseConfig(level=SanitiseLevel.REDACTED))
+        keys = list(result.stats["per_layer_coverage_pct"].keys())
+        assert all(k.startswith("Layer-") for k in keys)
+
+    def test_full_removes_corridor_paths(self):
+        vd = self._make_viewer_data_with_sensors()
+        result = sanitise_for_export(vd, SanitiseConfig(level=SanitiseLevel.FULL))
+        for corridor in result.corridor_results:
+            assert "path_wgs84" not in corridor
+
+    def test_full_removes_kill_chain_timing(self):
+        vd = self._make_viewer_data_with_sensors()
+        result = sanitise_for_export(vd, SanitiseConfig(level=SanitiseLevel.FULL))
+        for kc in result.kill_chain_results:
+            assert "available_time_s" not in kc
+            assert "required_time_s" not in kc
+            assert "first_detection_range_m" not in kc
+            assert "margin_s" not in kc
+            assert "engagement_feasible" in kc
+
+    def test_full_removes_saturation_utilisation(self):
+        vd = self._make_viewer_data_with_sensors()
+        result = sanitise_for_export(vd, SanitiseConfig(level=SanitiseLevel.FULL))
+        assert "per_effector_utilisation" not in (result.saturation_result or {})
+
+    def test_marks_as_sanitised(self):
+        vd = self._make_viewer_data_with_sensors()
+        result = sanitise_for_export(vd, SanitiseConfig(level=SanitiseLevel.REDACTED))
+        assert result.sanitised is True
+
+    def test_preserves_coverage_stats(self):
+        vd = self._make_viewer_data_with_sensors()
+        result = sanitise_for_export(vd, SanitiseConfig(level=SanitiseLevel.FULL))
+        assert result.stats["total_coverage_pct"] == 47.5
+        assert result.stats["gap_area_m2"] == 100.0
+
+
+# ---------------------------------------------------------------------------
+# TestSerialisers
+# ---------------------------------------------------------------------------
+
+
+class TestSerialisers:
+    """Tests for _serialise_corridor, _serialise_kill_chain, _serialise_saturation."""
+
+    def _make_corridor_result(self):
+        from salus.engine.threat_corridor import CorridorResult
+        from salus.models.threat import ThreatCorridor
+
+        corridor = ThreatCorridor(bearing_deg=45.0, altitude_m=50.0, start_distance_m=1000.0)
+        return CorridorResult(
+            corridor=corridor,
+            threat_name="DJI Mavic 3",
+            coverage_pct=72.5,
+            first_detection_distance_m=650.0,
+            last_gap_before_target_m=20.0,
+            time_in_coverage_s=12.3,
+            covered_cells=58,
+            total_cells=80,
+        )
+
+    def _make_kill_chain_result(self):
+        from salus.models.scenario import KillChainResult
+
+        return KillChainResult(
+            available_time_s=23.0,
+            required_time_s=17.7,
+            margin_s=5.3,
+            first_detection_range_m=850.0,
+            engagement_feasible=True,
+            second_engagement_possible=False,
+        )
+
+    def _make_saturation_result(self):
+        from salus.models.saturation import SaturationResult
+
+        return SaturationResult(
+            simultaneous_engagement_capacity=3,
+            saturation_threshold_n=4,
+            unengaged_count_at_threshold=1,
+            per_effector_utilisation={"EffectorA": 0.8, "EffectorB": 0.6},
+        )
+
+    def test_serialise_corridor_maps_real_fields(self):
+        from salus.viewer.export import _serialise_corridor
+
+        result = self._make_corridor_result()
+        d = _serialise_corridor(result)
+        assert d["threat_name"] == "DJI Mavic 3"
+        assert d["coverage_pct"] == pytest.approx(72.5)
+        assert d["first_detection_distance_m"] == pytest.approx(650.0)
+        assert d["covered_cells"] == 58
+        assert d["total_cells"] == 80
+        assert d["path_wgs84"] == []
+
+    def test_serialise_corridor_with_path(self):
+        from salus.viewer.export import _serialise_corridor
+
+        result = self._make_corridor_result()
+        path = [[150.1, -33.9], [150.2, -33.8]]
+        d = _serialise_corridor(result, path_wgs84=path)
+        assert d["path_wgs84"] == path
+
+    def test_serialise_corridor_none_detection_distance(self):
+        from salus.viewer.export import _serialise_corridor
+
+        result = self._make_corridor_result()
+        result = result.__class__(
+            corridor=result.corridor,
+            threat_name=result.threat_name,
+            coverage_pct=result.coverage_pct,
+            first_detection_distance_m=None,
+            last_gap_before_target_m=result.last_gap_before_target_m,
+            time_in_coverage_s=result.time_in_coverage_s,
+            covered_cells=result.covered_cells,
+            total_cells=result.total_cells,
+        )
+        d = _serialise_corridor(result)
+        assert d["first_detection_distance_m"] is None
+
+    def test_serialise_kill_chain_maps_real_fields(self):
+        from salus.viewer.export import _serialise_kill_chain
+
+        result = self._make_kill_chain_result()
+        d = _serialise_kill_chain(result)
+        assert d["available_time_s"] == pytest.approx(23.0)
+        assert d["required_time_s"] == pytest.approx(17.7)
+        assert d["margin_s"] == pytest.approx(5.3)
+        assert d["first_detection_range_m"] == pytest.approx(850.0)
+        assert d["engagement_feasible"] is True
+        assert d["second_engagement_possible"] is False
+
+    def test_serialise_saturation_maps_real_fields(self):
+        from salus.viewer.export import _serialise_saturation
+
+        result = self._make_saturation_result()
+        d = _serialise_saturation(result)
+        assert d["simultaneous_engagement_capacity"] == 3
+        assert d["saturation_threshold_n"] == 4
+        assert d["unengaged_count_at_threshold"] == 1
+        assert "EffectorA" in d["per_effector_utilisation"]
+        assert d["per_effector_utilisation"]["EffectorA"] == pytest.approx(0.8)
+
+    def test_compute_corridor_path_wgs84_with_protected_point(self):
+        import pyproj
+        from rasterio.crs import CRS
+
+        from salus.viewer.export import _compute_corridor_path_wgs84
+
+        result = self._make_corridor_result()
+        transformer = pyproj.Transformer.from_crs(
+            CRS.from_epsg(28354), CRS.from_epsg(4326), always_xy=True
+        )
+        protected_point = (500050.0, 6100050.0)
+        path = _compute_corridor_path_wgs84(result, protected_point, transformer)
+        assert len(path) == 2
+        assert len(path[0]) == 2  # [lon, lat]
+        assert len(path[1]) == 2
+
+    def test_compute_corridor_path_wgs84_no_protected_point(self):
+        import pyproj
+        from rasterio.crs import CRS
+
+        from salus.viewer.export import _compute_corridor_path_wgs84
+
+        result = self._make_corridor_result()
+        transformer = pyproj.Transformer.from_crs(
+            CRS.from_epsg(28354), CRS.from_epsg(4326), always_xy=True
+        )
+        path = _compute_corridor_path_wgs84(result, None, transformer)
+        assert path == []
+
+
+# ---------------------------------------------------------------------------
+# TestCliViewer
+# ---------------------------------------------------------------------------
+
+
+class TestCliViewer:
+    def test_viewer_command_produces_index_html(self, tmp_path, flat_dem_path):
+        """salus viewer on a minimal scenario produces index.html."""
+        import yaml
+        from click.testing import CliRunner
+
+        from salus.cli import main
+
+        scenario = {
+            "site_dem_path": str(flat_dem_path),
+            "sensor_placements": [
+                {
+                    "sensor_name": "Anduril WISP",
+                    "position_x": 500050.0,
+                    "position_y": 6100050.0,
+                    "bearing_deg": 0.0,
+                }
+            ],
+        }
+        scenario_path = tmp_path / "scenario.yaml"
+        scenario_path.write_text(yaml.dump(scenario))
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "viewer",
+                str(scenario_path),
+                "--output",
+                str(tmp_path / "viewer"),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert (tmp_path / "viewer" / "index.html").exists()
+
+    def test_viewer_command_output_message(self, tmp_path, flat_dem_path):
+        import yaml
+        from click.testing import CliRunner
+
+        from salus.cli import main
+
+        scenario = {
+            "site_dem_path": str(flat_dem_path),
+            "sensor_placements": [],
+        }
+        scenario_path = tmp_path / "scenario.yaml"
+        scenario_path.write_text(yaml.dump(scenario))
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "viewer",
+                str(scenario_path),
+                "--output",
+                str(tmp_path / "viewer"),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Viewer ready" in result.output
+
+    def test_viewer_sanitise_redacted(self, tmp_path, flat_dem_path):
+        import yaml
+        from click.testing import CliRunner
+
+        from salus.cli import main
+
+        scenario = {
+            "site_dem_path": str(flat_dem_path),
+            "sensor_placements": [],
+        }
+        scenario_path = tmp_path / "scenario.yaml"
+        scenario_path.write_text(yaml.dump(scenario))
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "viewer",
+                str(scenario_path),
+                "--output",
+                str(tmp_path / "viewer"),
+                "--sanitise",
+                "redacted",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+
+    def test_viewer_missing_scenario_exits_nonzero(self, tmp_path):
+        from click.testing import CliRunner
+
+        from salus.cli import main
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "viewer",
+                str(tmp_path / "nonexistent.yaml"),
+                "--output",
+                str(tmp_path / "viewer"),
+            ],
+        )
+        assert result.exit_code != 0

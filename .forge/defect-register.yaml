@@ -2870,3 +2870,102 @@ defects:
     resolution: "Added CoverageStats and npt.NDArray[np.bool_] to TYPE_CHECKING imports; updated signature."
     status: resolved
     commit: "2688044"
+
+  - id: D-261
+    severity: high
+    task: S14
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/export.py
+    line: 464
+    description: "_serialise_corridor uses non-existent CorridorResult attributes (total_length_m, covered_length_m, coverage_fraction, path_xy). All real CorridorResult objects always produce zeros and empty path due to getattr defaults. Exception is swallowed without logging."
+    resolution: "Rewrote _serialise_corridor to use actual CorridorResult fields (coverage_pct, first_detection_distance_m, last_gap_before_target_m, time_in_coverage_s, covered_cells, total_cells). Added _compute_corridor_path_wgs84 helper. Added _log.warning on except."
+    status: resolved
+    commit: "pending"
+
+  - id: D-262
+    severity: high
+    task: S14
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/export.py
+    line: 485
+    description: "_serialise_kill_chain uses non-existent KillChainResult attributes (corridor_index, detection_time_s, engagement_start_s, engagement_end_s, time_of_arrival_s). Real fields are available_time_s, required_time_s, margin_s, first_detection_range_m. Exception swallowed without logging."
+    resolution: "Rewrote _serialise_kill_chain to use actual KillChainResult fields (available_time_s, required_time_s, margin_s, first_detection_range_m, engagement_feasible, second_engagement_possible). Added _log.warning on except."
+    status: resolved
+    commit: "pending"
+
+  - id: D-263
+    severity: high
+    task: S14
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/export.py
+    line: 313
+    description: "fill_value = float(np.nanmin(dem)) raises ValueError if DEM is entirely NaN/nodata. No guard before the reduction operation."
+    resolution: "Added np.any(np.isfinite(dem)) guard; falls back to fill_value=0.0 with _log.warning if no finite values present."
+    status: resolved
+    commit: "pending"
+
+  - id: D-264
+    severity: medium
+    task: S14
+    found_by: spec_compliance
+    file: src/salus/viewer/static/app.js
+    line: 316
+    description: "S14-3 requires gap click-to-inspect to show both area and location. setupGapInspect() only shows lat/lon — area of the clicked gap polygon is absent."
+    resolution: "Added roughAreaM2() helper using the shoelace formula on WGS84 coordinates. Gap tooltip now shows area (~m² or km²) plus lat/lon."
+    status: resolved
+    commit: "pending"
+
+  - id: D-265
+    severity: medium
+    task: S14
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/export.py
+    line: 504
+    description: "_serialise_saturation references sweep_data via getattr but SaturationResult has no sweep_data field — it has per_effector_utilisation. Saturation detail always serialised as empty dict. Exception swallowed without logging."
+    resolution: "Rewrote _serialise_saturation to use per_effector_utilisation field. Updated saturation bar chart in app.js to display per-effector utilisation bars. Added _log.warning on except."
+    status: resolved
+    commit: "pending"
+
+  - id: D-266
+    severity: medium
+    task: S14
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/export.py
+    line: 604
+    description: "CDN fallback writes document.write('<script>') which is blocked by browsers after page load (including file:// pages). MapLibreGL silently fails to load."
+    resolution: "Replaced document.write with DOM-based script injection via createElement+appendChild in the CDN fallback JS stub."
+    status: resolved
+    commit: "pending"
+
+  - id: D-267
+    severity: medium
+    task: S14
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/export.py
+    line: 444
+    description: "_build_sensor_geojson calls transformer.transform(p.position_x, p.position_y) without None guard. None coordinates cause uncaught TypeError aborting entire export."
+    resolution: "Added None guard: skips placement with _log.warning if position_x or position_y is None."
+    status: resolved
+    commit: "pending"
+
+  - id: D-268
+    severity: medium
+    task: S14
+    found_by: spec_compliance
+    file: src/salus/viewer/sanitise.py
+    line: 110
+    description: "sanitise_for_export FULL mode strips wrong kill chain timing fields (detection_time_s, engagement_start_s, engagement_end_s) which don't exist on KillChainResult. Should strip available_time_s, required_time_s, first_detection_range_m, margin_s."
+    resolution: "Updated FULL mode to strip available_time_s, required_time_s, first_detection_range_m, margin_s from kill chain results."
+    status: resolved
+    commit: "pending"
+
+  - id: D-269
+    severity: medium
+    task: S14
+    found_by: spec_compliance
+    file: src/salus/viewer/sanitise.py
+    line: 121
+    description: "sanitise_for_export FULL mode removes sweep_data from saturation_result but SaturationResult has no sweep_data field — it has per_effector_utilisation."
+    resolution: "Updated FULL mode to remove per_effector_utilisation instead of sweep_data."
+    status: resolved
+    commit: "pending"

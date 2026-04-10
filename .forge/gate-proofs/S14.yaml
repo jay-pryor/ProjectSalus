@@ -1,0 +1,51 @@
+task_id: S14
+timestamp: 2026-04-10T01:30:00Z
+quality_gates:
+  G1_lint: pass
+  G2_format: pass
+  G3_import: pass
+  G4_type: pass           # 28 errors all pre-existing import-untyped stubs; zero new type errors
+  G5_security: pass       # B310 resolved with nosec annotation on trusted CDN URL
+  G6_unit_test: pass      # 1243 passed, 3 skipped, 0 failures
+  G7_coverage: pass
+  G8_secrets: pass
+  coverage_pct: 82.89
+
+review:
+  l1_standards:
+    testing: pass
+    error_handling: pass    # D-261..D-267 found and fixed — silent excepts corrected
+    logging: pass
+    security: pass
+  l2_agents:
+    silent_failure_hunter: {status: fail, findings: 8}   # D-261..D-267 logged and resolved
+    spec_compliance:       {status: fail, findings: 5}   # D-264,D-268,D-269 logged and resolved; 2 info scope-creep
+    type_design_analyzer:  {status: fail, findings: 12}  # warnings only; Any-narrowing opportunities (not blocking)
+    regression_reviewer:   {status: pass, findings: 2}   # 2 low findings; no regressions
+
+defect_ids:
+  - D-261   # _serialise_corridor wrong attributes — resolved
+  - D-262   # _serialise_kill_chain wrong attributes — resolved
+  - D-263   # np.nanmin crash on all-NaN DEM — resolved
+  - D-264   # gap click-to-inspect missing area — resolved
+  - D-265   # _serialise_saturation wrong field name — resolved
+  - D-266   # CDN fallback document.write blocked — resolved
+  - D-267   # _build_sensor_geojson missing None guard — resolved
+  - D-268   # sanitise FULL strips wrong kill chain fields — resolved
+  - D-269   # sanitise FULL removes wrong saturation field — resolved
+
+overall: pass
+
+notes: |
+  S14 implements the full interactive standalone viewer pipeline across 6 sub-tasks:
+  - S14-1: ViewerData export format with GeoJSON coverage layers and Terrarium terrain tiles
+  - S14-2: sanitise_for_export with MINIMAL/REDACTED/FULL levels
+  - S14-3: MapLibreGL 3D viewer (index.html, app.js, style.css) with salus:// tile protocol
+  - S14-4: Kill chain Gantt chart and saturation bar chart sidebars
+  - S14-5: package_viewer producing self-contained file:// directory with optional zip
+  - S14-6: salus viewer CLI subcommand
+
+  L2 agents caught 9 medium/high defects (D-261..D-269) that were fixed before commit.
+  The type_design_analyzer found 12 Any-narrowing opportunities (warnings, not errors)
+  that were deferred as non-blocking given rasterio's lack of stubs.
+  57 viewer-specific tests added; 1243 total tests pass.
