@@ -1,0 +1,40 @@
+# S13 PDF Report Demo — Compound Defence Site
+# Uses the compound terrain from demo/09_compound (1.5 km × 1.5 km, EPSG:28354)
+#
+# Three-sensor layered air-defence network:
+#   - EO/IR camera on the comms tower (close-in high ground)
+#   - Radar on the NW hill (wide arc covering the northern valley approach)
+#   - RF detector on the SE hill (passive, non-LOS, detects RF emissions early)
+#
+# Zones mark three concentric threat rings around the compound.
+
+site_dem_path: ../09_compound/compound_terrain.tif
+
+sensor_placements:
+  # EO/IR on the compound comms tower — 360° close-in coverage
+  - sensor_name: Anduril WISP
+    position_x: 500750.0
+    position_y: 6100750.0
+    bearing_deg: 0.0
+    height_override_m: 22.0
+
+  # Radar on the NW hill — covers the northern valley (primary threat corridor)
+  - sensor_name: Echodyne EchoGuard
+    position_x: 500200.0
+    position_y: 6101300.0
+    bearing_deg: 135.0
+    height_override_m: 5.0
+
+  # Radar on the SE hill — covers eastern and southern approaches
+  - sensor_name: Echodyne EchoGuard
+    position_x: 501200.0
+    position_y: 6100200.0
+    bearing_deg: 315.0
+    height_override_m: 5.0
+
+  # RF detector at the compound perimeter — passive detection layer
+  - sensor_name: DroneShield RfOne Mk2
+    position_x: 500750.0
+    position_y: 6100750.0
+    bearing_deg: 0.0
+    height_override_m: 8.0
