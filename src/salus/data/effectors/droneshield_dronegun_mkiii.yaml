@@ -1,0 +1,19 @@
+# DroneShield DroneGun Mk3 — Portable RF/GNSS Jammer (shoulder-mounted)
+# Source: DroneShield product datasheet / public demonstrations
+# Last updated: 2026-04-10
+# Note: DroneGun Mk3 is a shoulder-mounted RF/GNSS disruption device. It disrupts
+#       C2 link and GNSS simultaneously, causing the UAS to land, hover, or RTH.
+#       Effective range is directional; figure below is the published jamming range.
+
+name: DroneShield DroneGun Mk3
+type: RF_Jammer
+
+max_range_m: 2000.0            # confidence: high — DroneShield published 2 km effective range
+min_range_m: 0.0               # confidence: high — RF propagation; no minimum range
+engagement_arc_deg: 30.0       # confidence: medium — narrow forward-directed beam; ~30° effective jamming cone estimated
+reaction_time_s: 2.0           # confidence: medium — operator aim + activation; estimated 2 s
+simultaneous_engagements: 1    # confidence: high — single operator, single beam device
+reload_time_s: 0.5             # confidence: medium — electronic re-targeting; near-instantaneous estimated
+defeat_probability: 0.88       # confidence: medium — effective against most commercial COTS drones; lower vs frequency-hopping systems
+requires_los: true             # confidence: high — directional RF jamming requires LOS for effective power delivery
+defeat_mechanism: "RF/GNSS disruption — disrupts C2 link and GPS navigation, forcing land, hover, or return-to-home behaviour"

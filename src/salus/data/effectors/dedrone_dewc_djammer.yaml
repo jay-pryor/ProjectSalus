@@ -1,0 +1,19 @@
+# DEWC Systems DJ600 — Directional RF Jammer (fixed/vehicle-mount)
+# Source: DEWC Systems product materials / Australian Defence Industry publications
+# Last updated: 2026-04-10
+# Note: DEWC's DJ600 is an Australian-designed directional RF jammer for fixed
+#       or vehicle-mounted cUAS deployment. Targets standard commercial UAS C2 frequencies.
+#       Often paired with Dedrone RF detection for a complete detect-defeat system.
+
+name: DEWC DJ600 Jammer
+type: RF_Jammer
+
+max_range_m: 3000.0            # confidence: medium — DEWC claims "up to 3 km" effective range in marketing materials
+min_range_m: 0.0               # confidence: high — RF propagation; no minimum range
+engagement_arc_deg: 60.0       # confidence: medium — directional horn antenna; ~60° effective arc estimated
+reaction_time_s: 1.0           # confidence: medium — electronic beam activation; sub-second estimated
+simultaneous_engagements: 2    # confidence: medium — multiple frequency bands can be activated simultaneously; 2 estimated
+reload_time_s: 1.0             # confidence: medium — frequency retuning; estimated
+defeat_probability: 0.85       # confidence: medium — against standard COTS commercial drones on covered frequencies
+requires_los: true             # confidence: high — directional jamming requires LOS
+defeat_mechanism: "Directional RF jamming across 2.4 GHz, 5.8 GHz, and GNSS L1/L2 — disrupts control link and navigation"

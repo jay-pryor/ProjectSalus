@@ -1,0 +1,21 @@
+# Raytheon KuRFS — Ku-band AESA Cued Acquisition Radar
+# Source: Raytheon product materials / US Army procurement documentation
+# Last updated: 2026-04-10
+# Note: KuRFS is a cued acquisition radar optimised for Group 1/2 UAS detection.
+#       Range figures from US Army counter-UAS documentation (unclassified).
+#       Originally designed as part of the Indirect Fire Protection Capability (IFPC).
+
+name: Raytheon KuRFS
+type: Radar
+
+max_range_m: 10000.0         # confidence: medium — cited in open-source US Army IFPC documentation as 10 km detection range for Group 1 UAS
+min_range_m: 50.0            # confidence: low — large aperture implies significant short-range blind zone; 50 m estimated
+azimuth_coverage_deg: 360.0  # confidence: high — electronically scanned; full 360° coverage published
+elevation_coverage_deg: 60.0 # confidence: medium — wide elevation AESA coverage; 60° estimated from sensor class
+elevation_boresight_deg: 10.0 # confidence: low — slight upward bias for UAS acquisition; not published
+frequency_bands:             # confidence: high — Ku-band published
+  - "15 GHz"
+requires_los: true           # confidence: high — radar requires direct LOS
+mounting_height_m: 3.5       # confidence: medium — HMMWV-mounted or fixed pedestal; typical mast height
+vegetation_penetration: 0.3  # confidence: medium — Ku-band moderate foliage penetration; estimated
+cost_aud: null               # confidence: N/A — classified/export-controlled pricing

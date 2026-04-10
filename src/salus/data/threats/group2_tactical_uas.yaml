@@ -1,0 +1,14 @@
+# Group 2 Tactical UAS — Medium Fixed-Wing Military UAS threat profile
+# Representative of STANAG Group 2 UAS (up to 25 kg, up to 3500 ft AGL, up to 250 kts).
+# Examples: AeroVironment RQ-20 Puma, Insitu ScanEagle, BIRD Aerosystems BATCAM.
+# Source: US DoD UAS roadmap classifications; open-source operator manuals.
+# Last updated: 2026-04-10
+
+name: "Group 2 Tactical UAS — Fixed Wing"
+rcs_m2: 0.1           # confidence: medium — medium fixed-wing with ~2 m wingspan; 0.05–0.2 m² typical for this class
+rf_signature: "Low probability of intercept C2 datalink (frequency-hopping, encrypted); may relay via satellite; minimal commercial RF signature"
+max_speed_ms: 35.0    # confidence: medium — typical Group 2 cruise ~25–35 m/s; 35 m/s used as worst-case
+typical_altitude_m: 300.0  # confidence: medium — Group 2 operational ceiling; 150–600 m AGL typical ingress altitude
+approach_vectors:
+  - "any"
+evasion_capability: advanced  # confidence: medium — LPI/LPD datalinks; may execute evasive manoeuvres; EO countermeasures on some variants

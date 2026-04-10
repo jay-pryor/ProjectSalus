@@ -1,0 +1,21 @@
+# SAAB Giraffe 1X — C-band Deployable Air Surveillance Radar (cUAS adaptation)
+# Source: SAAB Giraffe 1X product datasheet / DSEI and DVD trade show documentation
+# Last updated: 2026-04-10
+# Note: The Giraffe 1X is a lightweight vehicle-deployable 3D air surveillance radar
+#       with a dedicated Low/Slow/Small (LSS) cUAS mode. Detection range against
+#       Group 1 UAS (0.01 m² RCS) is published by SAAB.
+
+name: SAAB Giraffe 1X
+type: Radar
+
+max_range_m: 8000.0          # confidence: medium — SAAB published ~8 km detection in LSS cUAS mode against Group 1 UAS; environment-dependent
+min_range_m: 75.0            # confidence: medium — rotating antenna short-range blind zone; typical for this class
+azimuth_coverage_deg: 360.0  # confidence: high — mechanically rotating antenna; 360° coverage
+elevation_coverage_deg: 20.0 # confidence: medium — narrow elevation beam; typical for air search radar
+elevation_boresight_deg: 5.0 # confidence: medium — slight upward tilt for low-altitude air targets
+frequency_bands:             # confidence: high — C-band published for Giraffe 1X
+  - "5.4 GHz"
+requires_los: true           # confidence: high — radar requires direct LOS
+mounting_height_m: 4.0       # confidence: medium — vehicle-mast deployment; published approximate height
+vegetation_penetration: 0.4  # confidence: medium — C-band has moderate foliage attenuation; estimated
+cost_aud: null               # confidence: N/A — not publicly disclosed

@@ -1,0 +1,19 @@
+# Netline C-Guard — Vehicle-Mounted Omni RF Jammer
+# Source: Netline Communications Technologies product materials
+# Last updated: 2026-04-10
+# Note: C-Guard is an omnidirectional vehicle-mounted jamming system covering
+#       multiple frequency bands. Widely used in convoy protection and fixed-site
+#       force protection. Effective range varies with output power configuration.
+
+name: Netline C-Guard
+type: RF_Jammer
+
+max_range_m: 1500.0            # confidence: medium — typical omnidirectional jammer effective range; exact figure not published for current variant
+min_range_m: 0.0               # confidence: high — omnidirectional RF; no minimum range
+engagement_arc_deg: 360.0      # confidence: high — omnidirectional antenna design; 360° coverage published
+reaction_time_s: 1.0           # confidence: medium — always-on / rapid activation mode; estimated
+simultaneous_engagements: 4    # confidence: medium — multi-band operation allows simultaneous engagement; estimated
+reload_time_s: 0.5             # confidence: medium — electronic; near-instantaneous
+defeat_probability: 0.82       # confidence: medium — omnidirectional power spread reduces effective density vs directional systems; estimated
+requires_los: false            # confidence: high — omnidirectional jamming; some NLOS effect via diffraction
+defeat_mechanism: "Omnidirectional broadband RF jamming across GNSS and drone C2 frequencies — disrupts navigation and C2 link"

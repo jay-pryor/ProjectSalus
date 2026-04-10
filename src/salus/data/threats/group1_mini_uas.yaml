@@ -1,0 +1,14 @@
+# Group 1 Mini UAS — Small Fixed-Wing / Hybrid military-grade UAS threat
+# Representative of STANAG Group 1 UAS (< 20 kg, < 1200 ft AGL, < 100 kts).
+# Examples: AeroVironment RQ-11B Raven, Bayraktar Mini, Parrot ANAFI USA (tactical).
+# Source: US DoD UAS classification; open-source operator data.
+# Last updated: 2026-04-10
+
+name: "Group 1 Mini UAS — Fixed Wing"
+rcs_m2: 0.02          # confidence: medium — small fixed-wing ~1 m wingspan; 0.01–0.04 m² estimated
+rf_signature: "Encrypted digital C2 datalink at 900 MHz or 2.4 GHz; minimal RF signature vs commercial drones; GNSS-dependent"
+max_speed_ms: 25.0    # confidence: medium — Group 1 typical max speed ~25 m/s (Raven: 15 m/s, faster variants 25+)
+typical_altitude_m: 150.0  # confidence: medium — Group 1 operational altitude; 50–400 m AGL typical
+approach_vectors:
+  - "any"
+evasion_capability: basic  # confidence: medium — encrypted datalink provides some resistance; limited active evasion

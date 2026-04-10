@@ -1,0 +1,21 @@
+# HENSOLDT Spexer 2000 — X-band Doppler Radar (medium-range, vehicle-portable)
+# Source: HENSOLDT Spexer 2000 product brochure / public radar reference data
+# Last updated: 2026-04-10
+# Note: Spexer 2000 is a medium-range ground surveillance radar. cUAS capability is
+#       a secondary role; primary design is for ground/low-air surveillance.
+#       Range given against small RPAS targets (RCS ~0.01 m²).
+
+name: HENSOLDT Spexer 2000
+type: Radar
+
+max_range_m: 2000.0          # confidence: high — published 2 km against pedestrian/small vehicle; ~2 km against small UAS estimated
+min_range_m: 25.0            # confidence: medium — short-range blind zone estimated from dish size; not published
+azimuth_coverage_deg: 360.0  # confidence: high — rotating antenna; 360° coverage over one rotation
+elevation_coverage_deg: 20.0 # confidence: medium — narrow elevation beam typical of ground surveillance radar; estimated 20°
+elevation_boresight_deg: 5.0 # confidence: medium — slight upward tilt to cover low-flying targets; not published
+frequency_bands:             # confidence: high — X-band published
+  - "9.4 GHz"
+requires_los: true           # confidence: high — Doppler radar requires direct LOS
+mounting_height_m: 3.0       # confidence: medium — vehicle mast or elevated tripod; typical height
+vegetation_penetration: 0.3  # confidence: medium — X-band (9 GHz) has moderate foliage attenuation; 0.3 estimated
+cost_aud: null               # confidence: N/A — not publicly disclosed

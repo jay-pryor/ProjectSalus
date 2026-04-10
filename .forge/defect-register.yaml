@@ -2969,3 +2969,47 @@ defects:
     resolution: "Updated FULL mode to remove per_effector_utilisation instead of sweep_data."
     status: resolved
     commit: "7cbef54"
+
+  - id: D-270
+    severity: high
+    task: S15
+    found_by: spec_compliance
+    file: src/salus/data/threats/
+    line: null
+    description: "S15-4 acceptance criterion explicitly requires Group 1/2/3 military UAS threat profiles. Group 1 and Group 2 were created but Group 3 (21–1320 lbs, ~MQ-1C Gray Eagle / Bayraktar TB2 class) is missing."
+    resolution: "Created src/salus/data/threats/group3_medium_uas.yaml with representative Bayraktar TB2/Gray Eagle class parameters."
+    status: resolved
+    commit: ""
+
+  - id: D-271
+    severity: medium
+    task: S15
+    found_by: silent_failure_hunter
+    file: src/salus/data/sensors/squarehead_discovair.yaml
+    line: 17
+    description: "frequency_bands entry '20 Hz–20 kHz' uses an en-dash (U+2013) which is non-standard. If downstream code parses frequency_bands strings numerically it may fail silently or raise an unhandled exception."
+    resolution: "Changed to '20Hz-20kHz' using plain hyphen; no semantic change."
+    status: resolved
+    commit: ""
+
+  - id: D-272
+    severity: medium
+    task: S15
+    found_by: silent_failure_hunter
+    file: src/salus/data/sensors/qinetiq_auds.yaml
+    line: 19
+    description: "frequency_bands set to '2.4 GHz' is ambiguous — could be mistaken for Wi-Fi 2.4 GHz rather than the radar emission band. The inline comment says E/F-band but the value is a common consumer frequency, risking incorrect downstream RF-band matching."
+    resolution: "Changed to '2.4 GHz radar (E/F-band)' with clarifying comment distinguishing radar emission from passive RF detection band."
+    status: resolved
+    commit: ""
+
+  - id: D-273
+    severity: medium
+    task: S15
+    found_by: spec_compliance
+    file: src/salus/data/sensors/
+    line: null
+    description: "S15-1 names L3Harris as an explicit vendor; no L3Harris sensor YAML was created. S15-1 also names SAAB Giraffe/Arthur but saab_eagleeye.yaml is a different SAAB product (Eagle Eye)."
+    resolution: "Created l3harris_pureacuity.yaml (L3Harris PurAcuity cUAS radar) and saab_giraffe_1x.yaml (SAAB Giraffe 1X, correct product family). SAAB Eagle Eye retained as additional sensor."
+    status: resolved
+    commit: ""

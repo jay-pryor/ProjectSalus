@@ -1,0 +1,13 @@
+# DJI Matrice 300 RTK — Heavy Commercial Multirotor (enterprise/tactical use threat)
+# Representative of larger commercial drones used in ISR and payload-delivery roles.
+# Source: DJI Matrice 300 RTK product specifications; open-source cUAS modelling data.
+# Last updated: 2026-04-10
+
+name: "DJI Matrice 300 — Enterprise ISR"
+rcs_m2: 0.05          # confidence: medium — larger airframe (~900 mm diagonal) produces higher RCS; 0.05 m² estimated vs ~0.01 m² for Mavic class
+rf_signature: "2.4 GHz and 5.8 GHz OcuSync 3 C2 link; active video downlink; also GNSS-dependent (L1/L2)"
+max_speed_ms: 23.0    # confidence: high — DJI published max speed 23 m/s (sport mode)
+typical_altitude_m: 80.0   # confidence: medium — higher operating altitude for sensor payload clearance; ISR ingress profile
+approach_vectors:
+  - "any"
+evasion_capability: none

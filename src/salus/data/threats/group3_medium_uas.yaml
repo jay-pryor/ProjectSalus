@@ -1,0 +1,14 @@
+# Group 3 Medium UAS — Medium Fixed-Wing Military UAS threat profile
+# Representative of STANAG Group 3 UAS (21–1320 lbs, up to 18,000 ft AGL).
+# Examples: Bayraktar TB2, AeroVironment MQ-1C Gray Eagle (early config), CAIG Wing Loong.
+# Source: US DoD UAS roadmap classifications; open-source operator manuals; Jane's.
+# Last updated: 2026-04-10
+
+name: "Group 3 Medium UAS — Fixed Wing"
+rcs_m2: 0.5           # confidence: medium — medium fixed-wing with ~3–6 m wingspan; 0.3–1.0 m² typical for this class; 0.5 m² representative
+rf_signature: "Low probability of intercept / low probability of detection (LPI/LPD) datalink; frequency-hopping encrypted C2; may use SATCOM relay; minimal commercial RF signature detectable by passive sensors"
+max_speed_ms: 55.0    # confidence: medium — Bayraktar TB2 max ~65 m/s; Gray Eagle ~55 m/s; 55 m/s used as representative
+typical_altitude_m: 2000.0  # confidence: medium — Group 3 nominal operating altitude 1000–5000 m AGL; 2000 m representative for ingress profile
+approach_vectors:
+  - "any"
+evasion_capability: advanced  # confidence: high — LPI/LPD datalinks; electronic countermeasures on some variants; ability to orbit outside engagement range

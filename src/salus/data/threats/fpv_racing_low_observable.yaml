@@ -1,0 +1,14 @@
+# FPV Racing Drone (Low Observable Payload Carrier) — Small fast UAS threat
+# Representative of commercial FPV racing frames modified for attack/ISR payload delivery.
+# Widely used in contemporary conflict for one-way attack missions.
+# Source: Open-source conflict reporting; UAS performance modelling.
+# Last updated: 2026-04-10
+
+name: "FPV Racing Drone — Low Observable"
+rcs_m2: 0.003         # confidence: medium — very small carbon fibre airframe; 0.003–0.005 m² estimated for typical 5-inch FPV
+rf_signature: "5.8 GHz analogue video link (if active); C2 via 2.4 GHz ExpressLRS or similar FHSS protocol; minimal signature compared to DJI"
+max_speed_ms: 40.0    # confidence: medium — racing-frame top speed 30–50 m/s in level flight; 40 m/s typical for loaded attack variant
+typical_altitude_m: 10.0   # confidence: medium — low nap-of-earth profile to minimise radar exposure; 5–20 m typical
+approach_vectors:
+  - "any"
+evasion_capability: basic  # confidence: medium — FHSS control link provides some frequency-hopping resistance; no active counter-CM

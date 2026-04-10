@@ -1,0 +1,24 @@
+# Axis Q6135-LE — EO/IR PTZ Camera (thermal + visible cUAS integration)
+# Source: Axis Communications Q6135-LE product datasheet
+# Last updated: 2026-04-10
+# Note: The Q6135-LE is a network PTZ camera with integrated thermal imaging.
+#       As a cued sensor, it has a narrow instantaneous FOV but pan/tilt capability.
+#       The azimuth and elevation figures here represent its slew-to-cue search sector
+#       when integrated into a cUAS system (not instantaneous FOV).
+#       Detection range is for a DJI Mavic class target in clear conditions.
+
+name: Axis Q6135-LE EO/IR
+type: EO_IR
+
+max_range_m: 800.0           # confidence: medium — thermal detection of multirotor at 800 m estimated; heavily condition-dependent
+min_range_m: 5.0             # confidence: medium — close-range motion blur / FOV limits practical minimum; estimated
+azimuth_coverage_deg: 90.0   # confidence: medium — 90° sector assigned per camera when deployed in cUAS array; actual pan is 360° but coverage sector per unit assumed 90°
+elevation_coverage_deg: 60.0 # confidence: medium — tilt range ±30° typical for PTZ; 60° total
+elevation_boresight_deg: 10.0 # confidence: medium — slight upward bias for low-altitude air targets
+frequency_bands:             # confidence: high — EO (visible) + LWIR thermal published
+  - "8–14 µm thermal"
+  - "visible"
+requires_los: true           # confidence: high — EO/IR requires direct optical LOS
+mounting_height_m: 4.0       # confidence: medium — pole or building-edge mount; typical height
+vegetation_penetration: 0.1  # confidence: high — optical/IR cannot penetrate foliage; near-zero penetration
+cost_aud: null               # confidence: N/A — not publicly disclosed

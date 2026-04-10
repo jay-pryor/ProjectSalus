@@ -1,0 +1,20 @@
+# AUDS RF Inhibitor — Broadband RF Inhibitor (AUDS system effector component)
+# Source: Enterprise Control Systems (AUDS partner) / QinetiQ AUDS documentation
+# Last updated: 2026-04-10
+# Note: The AUDS RF Inhibitor is the defeat component of the QinetiQ AUDS system.
+#       It is a directional high-power RF inhibitor targeting drone C2 and video links.
+#       Typically used in conjunction with the Blighter radar and EO/IR camera in the
+#       AUDS stack. Range and arc from published AUDS capability documents.
+
+name: AUDS RF Inhibitor
+type: RF_Jammer
+
+max_range_m: 1000.0            # confidence: medium — AUDS published effective inhibition range ~1 km
+min_range_m: 0.0               # confidence: high — RF inhibitor; no minimum range
+engagement_arc_deg: 20.0       # confidence: medium — narrow high-power directional beam; ~20° effective arc
+reaction_time_s: 3.0           # confidence: medium — cued from radar/EO-IR; aim and activate; estimated
+simultaneous_engagements: 1    # confidence: high — single narrow-beam director
+reload_time_s: 1.0             # confidence: medium — beam redirection; estimated
+defeat_probability: 0.90       # confidence: medium — high-power directional; effective against COTS drones; lower vs spread-spectrum
+requires_los: true             # confidence: high — directional high-power RF inhibitor requires LOS
+defeat_mechanism: "Directional broadband RF inhibition across drone C2 and video frequencies — forces hover or RTH"

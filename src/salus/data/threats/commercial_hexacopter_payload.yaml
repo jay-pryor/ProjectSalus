@@ -1,0 +1,13 @@
+# Commercial Hexacopter Payload Carrier — Medium COTS drone modified for payload delivery
+# Representative of DJI Agras / Matrice series or similar used as improvised payload carriers.
+# Source: Open-source conflict incident reporting; commercial drone specifications.
+# Last updated: 2026-04-10
+
+name: "Commercial Hexacopter — Payload Carrier"
+rcs_m2: 0.08          # confidence: medium — hexacopter ~1.2 m motor-to-motor; larger than quad; 0.05–0.1 m² estimated
+rf_signature: "2.4 GHz and 5.8 GHz C2 link; active GPS/GNSS; active during whole mission; DJI/Yuneec signature detectable"
+max_speed_ms: 15.0    # confidence: medium — payload-laden hexacopter speed reduced; 12–18 m/s typical with payload
+typical_altitude_m: 60.0   # confidence: medium — moderate altitude to avoid obstacles while carrying payload; 30–100 m typical
+approach_vectors:
+  - "any"
+evasion_capability: none
