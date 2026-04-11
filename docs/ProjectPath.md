@@ -520,6 +520,31 @@ _Goal: produce a self-contained HTML/JS package that can be opened in a browser 
 
 ---
 
+### Iterative Improvement Phase
+
+_Goal: surface and fix real-world issues through structured exploration and direct observation before final polish. Sits between S14 and S15 so that iteration happens on a complete, working tool but before the database is fully populated._
+
+_There are two ways tasks enter this phase:_
+- _**Triage** — you notice something wrong or improvable while using the tool. Describe it; it becomes an I-task._
+- _**Exploration** — we run a designed simulation scenario (from `demo/explore/`) to stress a specific part of the tool. Issues that surface become I-tasks._
+
+_All I-tasks follow the full Forge workflow (12 steps, G1–G8, L1+L2 reviews). Tasks are numbered sequentially: I-1, I-2, I-3, ... Gate proofs go in `.forge/gate-proofs/I-N.yaml`._
+
+_Exploration scenarios are stored in `demo/explore/` with the naming convention `ENN_short_description/` (e.g. `E01_compound_defence_baseline/`, `E02_coastal_radar_layering/`). Each scenario that generates I-tasks is noted in the task's description._
+
+<!-- I-tasks are appended below as they are identified -->
+
+**I-1: Fix 3D terrain not rendering in interactive viewer**
+- _Source:_ Triage — terrain displays flat (no visible hills) when the viewer is loaded.
+- _Root cause:_ The `salus://` protocol handler returns `new ArrayBuffer(0)` for tiles outside the DEM bounds. When the map is pitched (default 50°), MapLibreGL requests adjacent tiles that fall outside the site's extent. An empty ArrayBuffer is not a valid PNG; the raster-dem decoder fails, silently disabling terrain for the entire source. Additionally, `fitBounds` was not explicitly preserving pitch.
+- _Fix:_ Replace the empty-ArrayBuffer fallback with a pre-computed flat Terrarium PNG (R=128, G=0, B=0 = 0 m elevation, 757 bytes). Ensure `fitBounds` passes `pitch` explicitly. Raise exaggeration to 2.0 for better visual impact on modest terrain.
+- _Acceptance criteria:_
+  - Hills and ridges are visible when the viewer loads with default pitch 50°.
+  - Tilting and orbiting the map reveals terrain relief.
+  - Protocol handler never resolves with empty ArrayBuffer for any tile request.
+
+---
+
 ### Slice 15 — Populate Full Sensor/Effector/Threat Database
 
 _Goal: populate the YAML database with all sensors from the research files to enable realistic configurations._

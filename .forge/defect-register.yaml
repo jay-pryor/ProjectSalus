@@ -3013,3 +3013,36 @@ defects:
     resolution: "Created l3harris_pureacuity.yaml (L3Harris PurAcuity cUAS radar) and saab_giraffe_1x.yaml (SAAB Giraffe 1X, correct product family). SAAB Eagle Eye retained as additional sensor."
     status: resolved
     commit: ""
+
+  - id: D-274
+    severity: medium
+    task: I-1
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/static/app.js
+    line: 74
+    description: "No try/catch around atob(_FLAT_TERRAIN_TILE_B64) called at registerTerrainProtocol() startup. If the constant is malformed, DOMException propagates through initMap() into the unguarded IIFE entry point, producing a blank screen with no error message."
+    resolution: "Wrapped startup decode in try/catch; on failure logs console.error and sets flatBuffer to null; protocol handler rejects if flatBuffer unavailable rather than silently failing."
+    status: resolved
+    commit: ""
+
+  - id: D-275
+    severity: medium
+    task: I-1
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/static/app.js
+    line: 683
+    description: "Pre-existing: 'thresh' is referenced in renderSaturationChart() but never declared. Should be sat.saturation_threshold_n. Throws ReferenceError when saturation panel renders, silently breaking the stats display."
+    resolution: "Declared 'const thresh = sat.saturation_threshold_n' before the innerHTML assignment; guarded null check with thresh != null."
+    status: resolved
+    commit: ""
+
+  - id: D-276
+    severity: low
+    task: I-1
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/static/app.js
+    line: 90
+    description: "Pre-existing: reject() parameter declared but never called in the tile decode Promise constructor. If atob(b64) throws (invalid base64), the Promise rejects via implicit throw rather than explicit reject(), producing an unhandled rejection with no diagnostic."
+    resolution: "Wrapped atob(b64) in try/catch with explicit console.error + reject(err) call so the diagnostic is logged and the rejection is explicit."
+    status: resolved
+    commit: ""

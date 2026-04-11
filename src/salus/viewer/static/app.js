@@ -49,21 +49,62 @@ function layerLabel(key) {
  * from the inline window.SALUS_TILES dict without any fetch() calls.
  * This ensures file:// compatibility.
  */
+// Pre-computed 256×256 Terrarium PNG where every pixel is R=128, G=0, B=0.
+// This encodes elevation = 0 m and is returned for any tile outside the DEM
+// extent.  An empty ArrayBuffer is NOT a valid PNG — returning one causes the
+// raster-dem decoder to fail and silently disables terrain for the whole map.
+const _FLAT_TERRAIN_TILE_B64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAIAAADTED8xAAACvElEQVR4nO3TMQEAIAzAMED5' +
+  'pCNjRxMFfXrnQNfbDoBNBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxAmg' +
+  'FIMwBpBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZ' +
+  'gDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxAmg' +
+  'FIMwBpBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZ' +
+  'gDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxAmg' +
+  'FIMwBpBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZ' +
+  'gDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxAmg' +
+  'FIMwBpBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZ' +
+  'gDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxAmg' +
+  'FIMwBpBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZ' +
+  'gDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxAmg' +
+  'FIMwBpBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZ' +
+  'gDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxA2gfEPAKAiZTlsQAAAABJRU5ErkJggg==';
+
 function registerTerrainProtocol() {
+  // Decode the flat fallback tile once on startup.
+  let flatBuffer = null;
+  try {
+    const flatBinary = atob(_FLAT_TERRAIN_TILE_B64);
+    const flatBytes = new Uint8Array(flatBinary.length);
+    for (let i = 0; i < flatBinary.length; i++) flatBytes[i] = flatBinary.charCodeAt(i);
+    flatBuffer = flatBytes.buffer;
+  } catch (err) {
+    console.error('[salus] Failed to decode flat terrain tile constant:', err);
+  }
+
   maplibregl.addProtocol('salus', (params, abortController) => {
     return new Promise((resolve, reject) => {
       const key = params.url.replace('salus://', '');
       const b64 = (window.SALUS_TILES || {})[key];
       if (!b64) {
-        // Tile not in set — return a transparent 256×256 blank tile
-        resolve({ data: new ArrayBuffer(0) });
+        // Tile outside DEM extent — return a flat (0 m elevation) PNG so the
+        // raster-dem decoder always receives a valid image and terrain renders.
+        if (flatBuffer) {
+          resolve({ data: flatBuffer.slice(0) });
+        } else {
+          reject(new Error('Flat fallback tile unavailable'));
+        }
         return;
       }
       // Decode base64 PNG → ArrayBuffer
-      const binary = atob(b64);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      resolve({ data: bytes.buffer });
+      try {
+        const binary = atob(b64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        resolve({ data: bytes.buffer });
+      } catch (err) {
+        console.error('[salus] Failed to decode terrain tile', key, err);
+        reject(err);
+      }
     });
   });
 }
@@ -97,7 +138,7 @@ function initMap(data) {
     setupGapInspect(map);
     setupSidebar(data);
     buildLayerControls(map, data);
-    map.fitBounds([[west, south], [east, north]], { padding: 40, duration: 800 });
+    map.fitBounds([[west, south], [east, north]], { padding: 40, duration: 800, pitch: 50, bearing: 0 });
   });
 
   return map;
@@ -186,7 +227,7 @@ function addCoverageLayers(map, data) {
 
   // Enable 3D terrain now that layers are loaded
   if (map.getSource('terrain-dem')) {
-    map.setTerrain({ source: 'terrain-dem', exaggeration: 1.5 });
+    map.setTerrain({ source: 'terrain-dem', exaggeration: 2.0 });
     // Sky layer for atmosphere
     map.addLayer({
       id: 'sky',
@@ -646,6 +687,7 @@ function renderSaturationChart(sat) {
 
   if (statsEl) {
     const cap = sat.simultaneous_engagement_capacity || 0;
+    const thresh = sat.saturation_threshold_n;
     statsEl.innerHTML = `
       <div class="stat-row">
         <span class="stat-label">Engagement capacity</span>
@@ -653,7 +695,7 @@ function renderSaturationChart(sat) {
       </div>
       <div class="stat-row">
         <span class="stat-label">Saturation at</span>
-        <span class="stat-value" style="color:${thresh <= 3 ? '#ef4444' : '#f97316'}">${thresh || 'N/A'} targets</span>
+        <span class="stat-value" style="color:${thresh != null && thresh <= 3 ? '#ef4444' : '#f97316'}">${thresh != null ? thresh + ' targets' : 'N/A'}</span>
       </div>`;
   }
 }
