@@ -1,0 +1,63 @@
+# E01 Dramatic Terrain — 3D Viewer Showcase Scenario
+#
+# 2 km × 2 km site with 370 m terrain relief (150 m valley floor → 520 m ridge peaks).
+# Designed to stress-test the 3D interactive viewer and demonstrate compound visibility.
+#
+# Terrain features:
+#   - Northern ridge:     520 m peak (370 m above valley)
+#   - Eastern escarpment: 480 m / 430 m peaks on east side
+#   - SW and SE hills:    460 m / 440 m peaks
+#   - Western approach:   Natural low corridor (~155 m) for threat ingress
+#   - Central valley:     ~150 m base, flat compound area
+#
+# Compound (120 m × 120 m, centre at projected 501000 E, 6101000 N):
+#   - 4 m perimeter walls (2 cells thick for DEM visibility)
+#   - 30 m guard tower NE corner
+#   - 15 m main building (N side)
+#   - 8 m barracks (SW)
+#   - 6 m vehicle bay (SE)
+#   - 20 m gate gap on south wall
+#
+# Run generate.py first to create dramatic_terrain.tif.
+
+site_dem_path: dramatic_terrain.tif
+
+sensor_placements:
+  # EO/IR on the guard tower — elevated 30 m structure for 360° close-in coverage
+  - sensor_name: Anduril WISP
+    position_x: 501060.0
+    position_y: 6101060.0
+    bearing_deg: 0.0
+    height_override_m: 0.0   # guard tower height already in DEM
+
+  # Radar on northern ridge peak — dominates the western approach corridor
+  - sensor_name: Echodyne EchoGuard
+    position_x: 500500.0
+    position_y: 6101825.0
+    bearing_deg: 225.0
+    height_override_m: 5.0
+
+  # Radar on eastern escarpment — covers eastern and southern approaches
+  - sensor_name: Echodyne EchoGuard
+    position_x: 501800.0
+    position_y: 6101400.0
+    bearing_deg: 270.0
+    height_override_m: 5.0
+
+  # RF detector on SW hill — passive detection, covers western corridor
+  - sensor_name: DroneShield RfOne Mk2
+    position_x: 500300.0
+    position_y: 6100350.0
+    bearing_deg: 0.0
+    height_override_m: 5.0
+
+protected_point: [501000.0, 6101000.0]
+
+threat_profiles:
+  - "DJI Mavic 3 — Low Slow"
+  - "FPV Racing Drone — Low Observable"
+
+sweep_altitudes_m: [30.0, 80.0, 150.0]
+sweep_dive_angles_deg: [0.0, -10.0, -20.0]
+sweep_segment_length_m: 50.0
+placement_bearing_step_deg: 45.0

@@ -3046,3 +3046,36 @@ defects:
     resolution: "Wrapped atob(b64) in try/catch with explicit console.error + reject(err) call so the diagnostic is logged and the rejection is explicit."
     status: resolved
     commit: ""
+
+  - id: D-277
+    severity: medium
+    task: I-2
+    found_by: silent_failure_hunter
+    file: demo/explore/E01_dramatic_terrain/generate.py
+    line: 264
+    description: "subprocess.run() called without check=True — if the salus CLI exits non-zero the script continues and prints success. Silent failure: viewer packaging failure is not propagated."
+    resolution: "Added explicit check on result.returncode with error message including exit code; FileNotFoundError handler added in same block."
+    status: resolved
+    commit: ""
+
+  - id: D-278
+    severity: low
+    task: I-2
+    found_by: silent_failure_hunter
+    file: demo/explore/E01_dramatic_terrain/generate.py
+    line: 264
+    description: "FileNotFoundError is not caught when the salus binary is absent from PATH. The exception propagates uncaught, producing an unhelpful traceback instead of a clear user message."
+    resolution: "Wrapped subprocess.run() in try/except FileNotFoundError; prints clear message and returns early."
+    status: resolved
+    commit: ""
+
+  - id: D-279
+    severity: low
+    task: I-2
+    found_by: silent_failure_hunter
+    file: demo/explore/E01_dramatic_terrain/generate.py
+    line: 132
+    description: "Dead-code placeholder ridge call: dem += _ridge(rr, cc, 200, 0, 0, 0.0, 1.0) contributes nothing (height=0.0) but misleads readers into thinking an eastern escarpment ridge feature is active."
+    resolution: "Removed dead-code placeholder line; eastern escarpment features expressed via two _gaussian() calls which follow."
+    status: resolved
+    commit: ""

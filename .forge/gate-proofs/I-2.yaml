@@ -1,0 +1,58 @@
+task_id: I-2
+timestamp: 2026-04-11T05:15:00Z
+quality_gates:
+  G1_lint: pass        # ruff check demo/explore/E01_dramatic_terrain/generate.py — no issues
+  G2_format: pass      # ruff format --check — already formatted
+  G3_import: N/A       # no src/ Python files changed; demo script only
+  G4_type: N/A         # demo script only; no src/salus/ changes
+  G5_security: N/A     # demo script only; subprocess.run with static args, no shell=True
+  G6_unit_test: N/A    # no test files changed; existing 1243 tests unaffected
+  G7_coverage: N/A     # no src/salus/ changes; coverage unchanged at 82.89%
+  G8_secrets: N/A      # demo script only; no secrets introduced
+  coverage_pct: 82.89
+
+review:
+  l1_standards:
+    testing: N/A        # no test files changed
+    error_handling: N/A # only demo script exception handling changed (not src/)
+    logging: N/A        # no logging added to src/
+    security: N/A       # demo script uses static subprocess args, no user-supplied input
+
+  l2_agents:
+    silent_failure_hunter: {status: fail, findings: 3}   # D-277..D-279 logged and resolved
+    spec_compliance:       {status: pass, findings: 0}
+
+defect_ids:
+  - D-277   # subprocess.run without check — resolved
+  - D-278   # FileNotFoundError uncaught — resolved
+  - D-279   # dead-code placeholder ridge call — resolved
+
+overall: pass
+
+notes: |
+  I-2 creates a new dramatic terrain demonstration scenario for the interactive 3D viewer.
+
+  Deliverables:
+  - demo/explore/E01_dramatic_terrain/generate.py — synthetic DEM generator
+  - demo/explore/E01_dramatic_terrain/scenario.yaml — sensor placement scenario
+  - demo/explore/E01_dramatic_terrain/dramatic_terrain.tif — generated output
+  - demo/explore/E01_dramatic_terrain/viewer/ — packaged interactive viewer
+
+  Terrain specification:
+  - 2 km × 2 km at 5 m/px (400×400 grid), EPSG:28354
+  - Elevation range: 130 m – 658 m (528 m spread; > 300 m spec requirement)
+  - Northern ridge: 520 m peak (370 m above valley floor)
+  - Eastern escarpment: ~480 m and ~430 m peaks
+  - SW / SE hills: ~460 m and ~440 m
+  - Western corridor: natural low approach at ~155 m
+  - Central valley: ~150 m base, flat compound area
+
+  Compound (120 m × 120 m, centred at EPSG:28354 501000E / 6101000N):
+  - 4 m perimeter walls (2-cell thick), south gate gap 20 m
+  - 30 m guard tower (NE corner) — dominant visual anchor in 3D view
+  - 15 m main building (N side)
+  - 8 m barracks (SW quadrant)
+  - 6 m vehicle bay (SE quadrant)
+  All features encoded directly in the DEM elevation values.
+
+  Only demo/ files changed; Python source and test suite unaffected.
