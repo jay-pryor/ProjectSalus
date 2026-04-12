@@ -213,9 +213,91 @@ function addCoverageLayers(map, data) {
   }
 }
 
+// ── Sensor bearing wedge helpers ─────────────────────────────────────────────
+
+// Visual radius of bearing wedge in degrees (~220 m at equatorial scale).
+const _SECTOR_RADIUS_DEG = 0.002;
+
+function _buildSectorPolygon(lon, lat, bearingDeg, arcDeg) {
+  if (arcDeg <= 0 || arcDeg >= 360) return null;
+  const halfArc = arcDeg / 2.0;
+  const startBearing = bearingDeg - halfArc;
+  const steps = Math.max(6, Math.round(arcDeg / 8));
+  const coords = [[lon, lat]];
+  for (let i = 0; i <= steps; i++) {
+    const b = (startBearing + (i * arcDeg / steps)) * (Math.PI / 180);
+    // Bearing is clockwise from north: x offset = sin(b), y offset = cos(b)
+    coords.push([
+      lon + _SECTOR_RADIUS_DEG * Math.sin(b),
+      lat + _SECTOR_RADIUS_DEG * Math.cos(b),
+    ]);
+  }
+  coords.push([lon, lat]);
+  return { type: 'Polygon', coordinates: [coords] };
+}
+
+function _buildSectorFeatures(sensorFeatures) {
+  const features = [];
+  for (const f of sensorFeatures) {
+    const p = f.properties;
+    const azimuth = p.azimuth_coverage_deg;
+    const bearing = p.bearing_deg;
+    if (azimuth == null || azimuth >= 360) continue;
+    if (bearing == null) continue;
+    if (!f.geometry || f.geometry.type !== 'Point' || !Array.isArray(f.geometry.coordinates)) continue;
+    const [lon, lat] = f.geometry.coordinates;
+    const geom = _buildSectorPolygon(lon, lat, bearing, azimuth);
+    if (!geom) continue;
+    features.push({
+      type: 'Feature',
+      geometry: geom,
+      properties: { sensor_type: p.sensor_type || '' },
+    });
+  }
+  return features;
+}
+
+// Shared MapLibreGL match expression for sensor-type → colour.
+const _SENSOR_TYPE_COLOUR_EXPR = [
+  'match', ['get', 'sensor_type'],
+  'Radar',    LAYER_COLOURS.Radar,
+  'RF',       LAYER_COLOURS.RF,
+  'EO_IR',    LAYER_COLOURS.EO_IR,
+  'Acoustic', LAYER_COLOURS.Acoustic,
+  '#f8fafc',
+];
+
 // ── Sensor markers ───────────────────────────────────────────────────────────
 function addSensorMarkers(map, data) {
   if (!data.sensor_placements || !data.sensor_placements.features) return;
+
+  // Bearing wedge sectors for directional (< 360°) sensors
+  const sectorFeatures = _buildSectorFeatures(data.sensor_placements.features);
+  if (sectorFeatures.length > 0) {
+    map.addSource('sensor-sectors', {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: sectorFeatures },
+    });
+    map.addLayer({
+      id: 'sensor-sectors-fill',
+      type: 'fill',
+      source: 'sensor-sectors',
+      paint: {
+        'fill-color': _SENSOR_TYPE_COLOUR_EXPR,
+        'fill-opacity': 0.25,
+      },
+    });
+    map.addLayer({
+      id: 'sensor-sectors-outline',
+      type: 'line',
+      source: 'sensor-sectors',
+      paint: {
+        'line-color': _SENSOR_TYPE_COLOUR_EXPR,
+        'line-width': 1.5,
+        'line-opacity': 0.7,
+      },
+    });
+  }
 
   map.addSource('sensors', { type: 'geojson', data: data.sensor_placements });
 
@@ -224,10 +306,33 @@ function addSensorMarkers(map, data) {
     type: 'circle',
     source: 'sensors',
     paint: {
-      'circle-radius': 7,
-      'circle-color': '#f8fafc',
+      'circle-radius': 8,
+      'circle-color': _SENSOR_TYPE_COLOUR_EXPR,
       'circle-stroke-color': '#1e293b',
       'circle-stroke-width': 2,
+    },
+  });
+
+  // Type abbreviation badge centred on each circle
+  map.addLayer({
+    id: 'sensors-type-badge',
+    type: 'symbol',
+    source: 'sensors',
+    layout: {
+      'text-field': ['match', ['get', 'sensor_type'],
+        'Radar',    'R',
+        'RF',       'RF',
+        'EO_IR',    'E',
+        'Acoustic', 'A',
+        '?'],
+      'text-size': 9,
+      'text-offset': [0, 0],
+      'text-anchor': 'center',
+    },
+    paint: {
+      'text-color': '#0f172a',
+      'text-halo-color': 'rgba(0,0,0,0)',
+      'text-halo-width': 0,
     },
   });
 
@@ -250,6 +355,7 @@ function addSensorMarkers(map, data) {
 
   // Popup on click
   map.on('click', 'sensors-circle', (e) => {
+    if (!e.features || e.features.length === 0) return;
     const props = e.features[0].properties;
     const coords = e.features[0].geometry.coordinates;
     const rows = Object.entries(props)
@@ -487,7 +593,8 @@ function buildLayerControls(map, data) {
 
     // Determine which map layers this toggle controls
     const mapLayerIds = key === 'sensors'
-      ? ['sensors-circle', 'sensors-label']
+      ? ['sensors-circle', 'sensors-label', 'sensors-type-badge',
+         'sensor-sectors-fill', 'sensor-sectors-outline']
       : key === 'corridors'
         ? ['corridors-line']
         : [`fill-${key}`, `outline-${key}`];

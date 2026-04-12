@@ -311,6 +311,48 @@ class TestExportViewerData:
         result = export_viewer_data(sim)
         assert result.saturation_result is None
 
+    def test_sensor_feature_has_sensor_type_property(self, flat_dem_path):
+        from salus.ingest.terrain import load_dem
+
+        site = load_dem(flat_dem_path)
+        sim = _make_sim_results(site)
+        result = export_viewer_data(sim)
+        feat = result.sensor_placements["features"][0]
+        assert "sensor_type" in feat["properties"]
+        assert feat["properties"]["sensor_type"] == "EO_IR"
+
+    def test_sensor_feature_has_azimuth_coverage_deg_property(self, flat_dem_path):
+        from salus.ingest.terrain import load_dem
+
+        site = load_dem(flat_dem_path)
+        sim = _make_sim_results(site)
+        result = export_viewer_data(sim)
+        feat = result.sensor_placements["features"][0]
+        assert "azimuth_coverage_deg" in feat["properties"]
+        assert feat["properties"]["azimuth_coverage_deg"] == 120.0
+
+    def test_sensor_type_defaults_when_no_sensor_def(self, flat_dem_path):
+        """If sensor_defs is empty the type defaults to empty string and azimuth to 360."""
+        from salus.ingest.terrain import load_dem
+        from salus.report.pdf import SimulationResults
+
+        site = load_dem(flat_dem_path)
+        sim = _make_sim_results(site)
+        # Override sensor_defs to empty list — simulates missing lookup
+        sim_no_defs = SimulationResults(
+            site=sim.site,
+            scenario=sim.scenario,
+            composite=sim.composite,
+            layer_coverages=sim.layer_coverages,
+            stats=sim.stats,
+            sensor_defs=[],
+            gaps=sim.gaps,
+        )
+        result = export_viewer_data(sim_no_defs)
+        feat = result.sensor_placements["features"][0]
+        assert feat["properties"]["sensor_type"] == ""
+        assert feat["properties"]["azimuth_coverage_deg"] == 360.0
+
 
 # ---------------------------------------------------------------------------
 # TestPackageViewer

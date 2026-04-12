@@ -91,7 +91,11 @@ def sanitise_for_export(viewer_data: ViewerData, config: SanitiseConfig) -> View
         # Replace sensor names with generic labels
         _anonymise_sensors(out.sensor_placements)
 
-        # Remove bearing and height properties (reveal deployment tactics)
+        # Remove bearing and height properties (reveal deployment tactics).
+        # sensor_type and azimuth_coverage_deg are intentionally NOT stripped here:
+        # sensor_type is a property of the sensor model (same for every unit of that type,
+        # publicly knowable), and azimuth_coverage_deg is also model-level, not placement-level.
+        # bearing_deg is the sensitive field — it reveals the deployment direction.
         _strip_sensor_properties(out.sensor_placements, {"bearing_deg", "height_override_m"})
 
         # Replace per-layer keys with band labels in stats

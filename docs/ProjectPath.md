@@ -543,6 +543,35 @@ _Exploration scenarios are stored in `demo/explore/` with the naming convention 
   - Tilting and orbiting the map reveals terrain relief.
   - Protocol handler never resolves with empty ArrayBuffer for any tile request.
 
+**I-2: Dramatic terrain and walled compound for 3D viewer testing**
+- _Source:_ Triage — the default E01 test scenario used flat terrain, making it impossible to visually verify 3D rendering was working.
+- _Fix:_ New `demo/explore/E01_dramatic_terrain/generate.py` that synthesises a DEM with prominent ridgelines (500 m peak), a valley, and a walled compound in the valley floor.
+- _Acceptance criteria:_
+  - `generate.py` produces a GeoTIFF DEM and runs `salus viewer-export` without error.
+  - The output viewer shows visible ridgelines and a compound footprint.
+
+**I-3: Fix 3D terrain rendering — serve terrain tiles as HTTP files**
+- _Source:_ Triage — after I-1 the terrain still rendered flat because MapLibreGL v3 fetches `raster-dem` tiles inside a Web Worker; `addProtocol` handlers on the main thread are not proxied to the worker.
+- _Fix:_ `package_viewer` writes terrain tiles to `output_dir/tiles/{z}/{x}/{y}.png`; `app.js` uses standard HTTP URLs; terrain style property set in initial style object; hillshade layer added for visual depth; `viewer_data.js` no longer embeds tile base64.
+- _Acceptance criteria:_
+  - 3D terrain (hills, ridges) is visible when the viewer is loaded in a browser.
+  - Hillshade layer provides light/shadow depth cues.
+  - `viewer_data.js` contains no terrain tile base64 data.
+  - `terrain_tile_count` in `SALUS_DATA` payload reflects actual tiles written.
+
+**I-4: Per-type sensor symbols with bearing wedge in interactive viewer**
+- _Source:_ Triage — all sensors displayed as identical white circles with no indication of type or pointing direction.
+- _Fix:_ Add `sensor_type` and `azimuth_coverage_deg` to GeoJSON feature properties (looked up from `sim_results.sensor_defs`); update viewer JS to colour markers by type, show type abbreviation badge, and draw a bearing wedge for sector sensors.
+- _Acceptance criteria:_
+  1. Each sensor marker circle is coloured by type using `LAYER_COLOURS`: Radar=orange (`#f97316`), RF=purple (`#a855f7`), EO_IR=green (`#22c55e`), Acoustic=cyan (`#06b6d4`); fallback `#f8fafc` if type unknown.
+  2. Each sensor circle shows a type abbreviation centred on the circle: `R` (Radar), `RF` (RF), `E` (EO_IR), `A` (Acoustic).
+  3. For `azimuth_coverage_deg < 360` and `bearing_deg` present: a filled sector wedge is drawn at the sensor position, centred on `bearing_deg`, spanning the full `azimuth_coverage_deg` arc, coloured to match the sensor type at ~25% opacity with a solid outline.
+  4. For `azimuth_coverage_deg == 360` or `bearing_deg` null/absent: no wedge is drawn.
+  5. GeoJSON feature properties include `sensor_type` (string) and `azimuth_coverage_deg` (number).
+  6. Sensor name label below the circle is preserved.
+  7. Click popup, hover cursor, and all existing layer-control behaviour is preserved.
+  8. All existing tests pass; new tests cover the added properties.
+
 ---
 
 ### Slice 15 — Populate Full Sensor/Effector/Threat Database

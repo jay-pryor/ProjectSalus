@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import math
 import shutil
 import zipfile
 from dataclasses import dataclass
@@ -187,8 +188,24 @@ def export_viewer_data(sim_results: SimulationResults) -> ViewerData:
         _log.warning("Failed to vectorise gaps: %s", exc)
         layers["gaps"] = _empty_feature_collection()
 
+    # Build lookup: sensor name → (type value, azimuth_coverage_deg)
+    sensor_info_map: dict[str, tuple[str, float]] = {
+        sdef.name: (sdef.type.value, sdef.azimuth_coverage_deg) for sdef in sim_results.sensor_defs
+    }
+    if not sensor_info_map and sim_results.scenario.sensor_placements:
+        _log.warning(
+            "sensor_info_map is empty; all sensor markers will show type='' "
+            "and no bearing wedges will be drawn — check that sensor_defs are loaded"
+        )
+
     # Sensor placement points
-    sensor_placements = _build_sensor_geojson(sim_results.scenario.sensor_placements, src_crs)
+    try:
+        sensor_placements = _build_sensor_geojson(
+            sim_results.scenario.sensor_placements, src_crs, sensor_info_map
+        )
+    except Exception as exc:
+        _log.warning("Failed to build sensor placement GeoJSON: %s", exc)
+        sensor_placements = _empty_feature_collection()
 
     # Coverage statistics
     stats_dict: dict[str, Any] = {
@@ -459,8 +476,21 @@ def _empty_feature_collection() -> dict[str, Any]:
     return {"type": "FeatureCollection", "features": []}
 
 
-def _build_sensor_geojson(placements: list[Any], src_crs: CRS) -> dict[str, Any]:
-    """Build a GeoJSON FeatureCollection of sensor placement points (WGS84)."""
+def _build_sensor_geojson(
+    placements: list[Any],
+    src_crs: CRS,
+    sensor_info_map: dict[str, tuple[str, float]] | None = None,
+) -> dict[str, Any]:
+    """Build a GeoJSON FeatureCollection of sensor placement points (WGS84).
+
+    Args:
+        placements: List of :class:`~salus.models.scenario.SensorPlacement` instances.
+        src_crs: CRS of the source coordinates; output is always WGS84.
+        sensor_info_map: Optional mapping of sensor name to ``(type_value,
+            azimuth_coverage_deg)`` for enriching feature properties.  When
+            absent or when a sensor name is not present in the map, ``sensor_type``
+            defaults to ``""`` and ``azimuth_coverage_deg`` defaults to ``360``.
+    """
     import pyproj
 
     transformer = pyproj.Transformer.from_crs(src_crs, CRS.from_epsg(4326), always_xy=True)
@@ -470,12 +500,26 @@ def _build_sensor_geojson(placements: list[Any], src_crs: CRS) -> dict[str, Any]
             _log.warning("Skipping sensor placement with missing coordinates: %s", p.sensor_name)
             continue
         lon, lat = transformer.transform(p.position_x, p.position_y)
+        if not (math.isfinite(lon) and math.isfinite(lat)):
+            _log.warning(
+                "Sensor '%s' produced non-finite WGS84 coordinates (%.6g, %.6g); skipping",
+                p.sensor_name,
+                lon,
+                lat,
+            )
+            continue
+        sensor_type = ""
+        azimuth_coverage_deg: float = 360.0
+        if sensor_info_map and p.sensor_name in sensor_info_map:
+            sensor_type, azimuth_coverage_deg = sensor_info_map[p.sensor_name]
         features.append(
             {
                 "type": "Feature",
                 "geometry": {"type": "Point", "coordinates": [round(lon, 6), round(lat, 6)]},
                 "properties": {
                     "sensor_name": p.sensor_name,
+                    "sensor_type": sensor_type,
+                    "azimuth_coverage_deg": azimuth_coverage_deg,
                     "bearing_deg": p.bearing_deg,
                     "height_override_m": p.height_override_m,
                 },

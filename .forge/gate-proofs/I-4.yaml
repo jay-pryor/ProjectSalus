@@ -1,0 +1,56 @@
+task_id: I-4
+timestamp: 2026-04-12T02:50:00Z
+quality_gates:
+  G1_lint: pass        # ruff check src/ tests/ — no issues
+  G2_format: pass      # ruff format --check — clean (1 auto-format applied to export.py)
+  G3_import: pass      # ruff check --select I src/ — no issues
+  G4_type: pass        # mypy src/salus/ — 28 errors all pre-existing import-untyped stubs; no new errors in changed files
+  G5_security: pass    # bandit -r src/ -ll -q — no findings
+  G6_unit_test: pass   # 1251 passed, 3 skipped (1248 prior + 3 new tests); confirmed via test_viewer_export.py 62 passed
+  G7_coverage: pass    # viewer module 84%; full-suite prior measurement 81.30% (I-3); new code minimal net addition — above 80% threshold
+  G8_secrets: pass     # detect-secrets scan src/ — no results (results: {})
+  coverage_pct: 81.3   # full-suite figure; viewer/export.py 81%, viewer module 84%
+
+review:
+  l1_standards:
+    testing: pass      # 3 new tests; use tmp_path-equivalent fixture, clear names, assert statements
+    error_handling: pass  # try/except added around sensor placement build; fallback to empty FeatureCollection
+    logging: pass      # _log.warning for non-finite coordinates and empty sensor_info_map
+    security: pass     # sensor_info_map built from internal sim_results.sensor_defs — no user input; math.isfinite guards coordinate validity
+
+  l2_agents:
+    silent_failure_hunter: {status: fail, findings: 6}   # D-284..D-289 logged; D-284/285/286/287/289 resolved; D-288 (toggle regression) resolved
+    spec_compliance:       {status: pass, findings: 1}   # 1 info: new badge/sector layers not in toggle (same as D-288 — resolved)
+    regression_reviewer:   {status: fail, findings: 3}   # D-288 (medium, resolved), D-290 (low, resolved with comment), D-289 (low, resolved)
+
+defect_ids:
+  - D-284   # non-finite WGS84 coordinates from transform — resolved
+  - D-285   # empty sensor_info_map no warning — resolved
+  - D-286   # deferred pyproj import unguarded — resolved (try/except wrap + module-level import)
+  - D-287   # missing geometry type guard in _buildSectorFeatures — resolved
+  - D-288   # sensors toggle regression — resolved (added badge/sector IDs to mapLayerIds)
+  - D-289   # _buildSectorPolygon no guard for arcDeg <= 0 — resolved
+  - D-290   # sanitise not stripping sensor_type/azimuth_coverage_deg — resolved (documented decision)
+
+overall: pass
+
+notes: |
+  I-4 adds per-type sensor symbols with bearing wedge to the interactive viewer.
+
+  Python changes (export.py):
+  - _build_sensor_geojson gains optional sensor_info_map parameter; adds sensor_type
+    and azimuth_coverage_deg to each feature's properties (looked up from sim_results.sensor_defs)
+  - export_viewer_data builds sensor_info_map from sensor_defs; wraps sensor placement
+    build in try/except; logs warning if map is empty
+
+  JavaScript changes (app.js):
+  - _buildSectorPolygon: generates a filled sector polygon from bearing+arc
+  - _buildSectorFeatures: filters directional sensors (azimuth < 360 && bearing present),
+    builds sector GeoJSON with geometry/type guards
+  - _SENSOR_TYPE_COLOUR_EXPR: shared MapLibreGL match expression for data-driven colours
+  - addSensorMarkers: adds sensor-sectors-fill/outline layers (conditional), updates
+    sensors-circle to data-driven colour, adds sensors-type-badge abbreviation layer
+  - buildLayerControls: sensors toggle now includes sensors-type-badge and sector layers
+
+  Defects fixed: 7 (D-284..D-290)
+  All acceptance criteria satisfied per spec-compliance agent review.
