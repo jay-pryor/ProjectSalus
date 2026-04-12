@@ -1,0 +1,55 @@
+task_id: I-3
+timestamp: 2026-04-12T01:45:00Z
+quality_gates:
+  G1_lint: pass        # ruff check src/ tests/ — no issues
+  G2_format: pass      # ruff format --check — clean after auto-format
+  G3_import: pass      # ruff check --select I src/ — no issues
+  G4_type: pass        # mypy src/salus/ — 28 errors all pre-existing import-untyped stubs; no new errors in changed files
+  G5_security: pass    # bandit -r src/ -ll -q — no findings
+  G6_unit_test: pass   # 1253 passed (1252 prior + 1 new test)
+  G7_coverage: pass    # 81.30% — above 80% threshold
+  G8_secrets: pass     # detect-secrets scan src/ — no results
+  coverage_pct: 81.30
+
+review:
+  l1_standards:
+    testing: pass      # 3 new tests added; all use tmp_path, have assert, clear names
+    error_handling: pass  # _write_terrain_tile_files: split guarded, all exceptions caught, written/total logged
+    logging: pass      # _log.error for total failure, _log.info with written/total counts
+    security: pass     # tile keys from internal mercantile data, no user input; OSError caught
+
+  l2_agents:
+    silent_failure_hunter: {status: fail, findings: 7}   # D-280..D-283 logged; D-280/281/282/283 resolved; D-284..286 pre-existing in unrelated code not introduced by I-3
+    spec_compliance:       {status: pass, findings: 2}   # 2 info items: stale JSDoc (fixed) and redundant setTerrain (pre-existing, harmless)
+    regression_reviewer:   not_invoked                   # N/A — new function _write_terrain_tile_files, not modifying existing working logic
+
+defect_ids:
+  - D-280   # key.split outside try/except — resolved
+  - D-281   # total tile failure indistinguishable from success — resolved
+  - D-282   # hasTerrainTiles always true — resolved via terrain_tile_count
+  - D-283   # no map.on('error') handler — resolved
+
+overall: pass
+
+notes: |
+  I-3 fixes 3D terrain rendering by replacing the custom salus:// addProtocol
+  approach with HTTP-served tile files.
+
+  Root cause of I-1 regression: MapLibreGL v3 fetches raster-dem tiles inside
+  a Web Worker. addProtocol handlers registered on the main thread are not
+  proxied to the worker for raster-dem sources. All terrain tile requests
+  silently failed, MapLibreGL received no elevation data, and terrain rendered
+  flat.
+
+  Fix:
+  - package_viewer now writes terrain tiles to output_dir/tiles/{z}/{x}/{y}.png
+  - app.js uses tiles/{z}/{x}/{y}.png as the tile URL (standard HTTP, no custom protocol)
+  - terrain property set in the initial MapLibreGL style object (canonical approach)
+  - Hillshade layer included for visual depth cues
+  - viewer_data.js no longer embeds terrain tile base64 (~2MB reduction in file size)
+  - terrain_tile_count added to payload so app.js can conditionally enable terrain
+
+  Additional improvements:
+  - _write_terrain_tile_files guards against malformed keys and reports write failures
+  - map.on('error') handler surfaces MapLibreGL errors in browser console
+  - JSDoc comment updated to reflect removal of SALUS_TILES / salus:// protocol

@@ -1,9 +1,10 @@
 /**
  * Salus Interactive Coverage Viewer — app.js
  *
- * Reads window.SALUS_DATA and window.SALUS_TILES (written by package_viewer
- * into viewer_data.js) and renders:
- *   - MapLibreGL 3D terrain (Terrarium tiles via custom salus:// protocol)
+ * Reads window.SALUS_DATA (written by package_viewer into viewer_data.js) and
+ * renders:
+ *   - MapLibreGL 3D terrain (Terrarium tiles served from tiles/{z}/{x}/{y}.png)
+ *   - Hillshade layer for terrain depth cues
  *   - Toggle-able coverage layers draped on terrain surface
  *   - Sensor placement markers with popup details
  *   - Threat corridor overlays
@@ -43,78 +44,17 @@ function layerLabel(key) {
   return LAYER_LABELS[key] || key;
 }
 
-// ── Custom tile protocol ─────────────────────────────────────────────────────
-/**
- * Register a salus:// protocol so MapLibreGL can load Terrarium terrain tiles
- * from the inline window.SALUS_TILES dict without any fetch() calls.
- * This ensures file:// compatibility.
- */
-// Pre-computed 256×256 Terrarium PNG where every pixel is R=128, G=0, B=0.
-// This encodes elevation = 0 m and is returned for any tile outside the DEM
-// extent.  An empty ArrayBuffer is NOT a valid PNG — returning one causes the
-// raster-dem decoder to fail and silently disables terrain for the whole map.
-const _FLAT_TERRAIN_TILE_B64 =
-  'iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAIAAADTED8xAAACvElEQVR4nO3TMQEAIAzAMED5' +
-  'pCNjRxMFfXrnQNfbDoBNBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxAmg' +
-  'FIMwBpBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZ' +
-  'gDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxAmg' +
-  'FIMwBpBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZ' +
-  'gDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxAmg' +
-  'FIMwBpBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZ' +
-  'gDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxAmg' +
-  'FIMwBpBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZ' +
-  'gDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxAmg' +
-  'FIMwBpBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZ' +
-  'gDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxAmg' +
-  'FIMwBpBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxAmgFIMwBpBiDNAKQZ' +
-  'gDQDkGYA0gxAmgFIMwBpBiDNAKQZgDQDkGYA0gxA2gfEPAKAiZTlsQAAAABJRU5ErkJggg==';
-
-function registerTerrainProtocol() {
-  // Decode the flat fallback tile once on startup.
-  let flatBuffer = null;
-  try {
-    const flatBinary = atob(_FLAT_TERRAIN_TILE_B64);
-    const flatBytes = new Uint8Array(flatBinary.length);
-    for (let i = 0; i < flatBinary.length; i++) flatBytes[i] = flatBinary.charCodeAt(i);
-    flatBuffer = flatBytes.buffer;
-  } catch (err) {
-    console.error('[salus] Failed to decode flat terrain tile constant:', err);
-  }
-
-  maplibregl.addProtocol('salus', (params, abortController) => {
-    return new Promise((resolve, reject) => {
-      const key = params.url.replace('salus://', '');
-      const b64 = (window.SALUS_TILES || {})[key];
-      if (!b64) {
-        // Tile outside DEM extent — return a flat (0 m elevation) PNG so the
-        // raster-dem decoder always receives a valid image and terrain renders.
-        if (flatBuffer) {
-          resolve({ data: flatBuffer.slice(0) });
-        } else {
-          reject(new Error('Flat fallback tile unavailable'));
-        }
-        return;
-      }
-      // Decode base64 PNG → ArrayBuffer
-      try {
-        const binary = atob(b64);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-        resolve({ data: bytes.buffer });
-      } catch (err) {
-        console.error('[salus] Failed to decode terrain tile', key, err);
-        reject(err);
-      }
-    });
-  });
-}
+// Terrain tiles are served as static files under tiles/{z}/{x}/{y}.png by the
+// HTTP server.  No custom protocol handler is needed — MapLibreGL fetches them
+// directly via standard HTTP.  The salus:// addProtocol approach was removed
+// because MapLibreGL v3 fetches raster-dem tiles inside a Web Worker; protocol
+// handlers registered on the main thread are not proxied to the worker for
+// that source type, so all terrain tile requests silently fail.
 
 // ── Map bootstrap ────────────────────────────────────────────────────────────
 function initMap(data) {
   const [west, south, east, north] = data.bounds_wgs84;
   const [lon, lat] = data.centre_wgs84;
-
-  registerTerrainProtocol();
 
   const map = new maplibregl.Map({
     container: 'map',
@@ -131,6 +71,10 @@ function initMap(data) {
   map.addControl(new maplibregl.ScaleControl({ maxWidth: 120, unit: 'metric' }), 'bottom-right');
   map.addControl(new maplibregl.FullscreenControl(), 'top-right');
 
+  // Surface MapLibreGL errors (e.g. terrain tile 404s) in the console so
+  // rendering failures are visible during development.
+  map.on('error', (e) => { console.error('[salus] MapLibreGL error:', e.error); });
+
   map.on('load', () => {
     addCoverageLayers(map, data);
     addSensorMarkers(map, data);
@@ -146,16 +90,18 @@ function initMap(data) {
 
 // ── Map style (base + terrain) ───────────────────────────────────────────────
 function buildMapStyle(data) {
-  const hasTerrainTiles = Object.keys(window.SALUS_TILES || {}).length > 0;
+  // terrain_tile_count is the number of PNG files successfully written to disk.
+  // terrain_min_zoom / terrain_max_zoom are always serialised (non-optional),
+  // so they cannot be used as a presence guard on their own.
+  const hasTerrainTiles = (data.terrain_tile_count || 0) > 0;
 
   const sources = {};
   const layers = [];
 
   if (hasTerrainTiles) {
-    const tileUrls = [`salus://{z}/{x}/{y}`];
     sources['terrain-dem'] = {
       type: 'raster-dem',
-      tiles: tileUrls,
+      tiles: ['tiles/{z}/{x}/{y}.png'],
       tileSize: 256,
       encoding: 'terrarium',
       minzoom: data.terrain_min_zoom,
@@ -170,7 +116,24 @@ function buildMapStyle(data) {
     paint: { 'background-color': '#1a2235' },
   });
 
-  return {
+  // Hillshade gives terrain visual depth — slopes facing the virtual sun are
+  // bright, slopes away are dark.  Without this layer terrain looks flat even
+  // when the elevation mesh is correctly deforming the surface.
+  if (hasTerrainTiles) {
+    layers.push({
+      id: 'hillshade',
+      type: 'hillshade',
+      source: 'terrain-dem',
+      paint: {
+        'hillshade-illumination-anchor': 'viewport',
+        'hillshade-exaggeration': 0.5,
+        'hillshade-shadow-color': '#1a1a2e',
+        'hillshade-highlight-color': '#ffffff',
+      },
+    });
+  }
+
+  const style = {
     version: 8,
     sources,
     layers,
@@ -184,6 +147,15 @@ function buildMapStyle(data) {
       'fog-ground-blend': 1.0,
     },
   };
+
+  // Include terrain in the initial style so MapLibreGL activates the terrain
+  // rendering pipeline from startup.  Without this the library calls
+  // setTerrain(null) at style-load time (erasing any dynamically-set terrain).
+  if (hasTerrainTiles) {
+    style.terrain = { source: 'terrain-dem', exaggeration: 2.0 };
+  }
+
+  return style;
 }
 
 // ── Coverage layers ──────────────────────────────────────────────────────────

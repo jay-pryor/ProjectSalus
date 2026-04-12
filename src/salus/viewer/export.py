@@ -260,10 +260,11 @@ def package_viewer(
 ) -> Path:
     """Write a self-contained interactive viewer to *output_dir*.
 
-    The resulting directory contains HTML, JS, CSS, and all data embedded as
-    inline JavaScript — it opens via ``file://`` without a server.  Terrain
-    tiles and coverage GeoJSON are both embedded in ``viewer_data.js`` using
-    a custom ``salus://`` protocol registered in MapLibreGL.
+    The resulting directory contains HTML, JS, CSS, GeoJSON/stats embedded as
+    inline JavaScript, and terrain tiles written as individual PNG files under
+    ``tiles/{z}/{x}/{y}.png``.  The viewer requires an HTTP server (e.g.
+    ``python -m http.server 8080``); it cannot be opened via ``file://`` due to
+    browser restrictions on cross-origin file requests.
 
     Args:
         viewer_data: Exported (and optionally sanitised) viewer data.
@@ -277,13 +278,17 @@ def package_viewer(
     output_dir = Path(output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. Write embedded data JS (tiles + GeoJSON + stats)
-    _write_viewer_data_js(viewer_data, output_dir / "viewer_data.js")
+    # 1. Write terrain tiles as PNG files (tiles/{z}/{x}/{y}.png) first so the
+    #    tile count is available for the viewer_data.js payload.
+    terrain_tile_count = _write_terrain_tile_files(viewer_data, output_dir)
 
-    # 2. Copy static assets (HTML, app.js, style.css)
+    # 2. Write embedded data JS (GeoJSON, stats — tile count included for JS guard)
+    _write_viewer_data_js(viewer_data, output_dir / "viewer_data.js", terrain_tile_count)
+
+    # 3. Copy static assets (HTML, app.js, style.css)
     _copy_static_assets(output_dir)
 
-    # 3. Bundle MapLibreGL vendor files
+    # 4. Bundle MapLibreGL vendor files
     _ensure_vendor_files(output_dir)
 
     _log.info("Viewer packaged → %s", output_dir)
@@ -580,12 +585,20 @@ def _serialise_saturation(result: SaturationResult) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _write_viewer_data_js(viewer_data: ViewerData, dest: Path) -> None:
-    """Write all viewer data as a single inline JavaScript file.
+def _write_viewer_data_js(viewer_data: ViewerData, dest: Path, terrain_tile_count: int) -> None:
+    """Write viewer data as a single inline JavaScript file.
 
-    The file assigns ``window.SALUS_DATA`` (coverage GeoJSON, stats, results)
-    and ``window.SALUS_TILES`` (terrain tile base64 PNGs) which are read by
-    ``app.js`` at startup.  This allows ``file://`` access without CORS issues.
+    Assigns ``window.SALUS_DATA`` (coverage GeoJSON, stats, corridor/kill-chain
+    results) which is read by ``app.js`` at startup.  Terrain tiles are written
+    as individual PNG files (see :func:`_write_terrain_tile_files`) and served
+    by the HTTP server; they are no longer embedded here.
+
+    Args:
+        viewer_data: Exported viewer data.
+        dest: Destination path for ``viewer_data.js``.
+        terrain_tile_count: Number of terrain tile PNG files successfully written
+            to disk.  Passed through to the JS payload so ``app.js`` can guard
+            the terrain source on whether tiles actually exist.
     """
     data_payload: dict[str, Any] = {
         "scenario_name": viewer_data.scenario_name,
@@ -600,16 +613,46 @@ def _write_viewer_data_js(viewer_data: ViewerData, dest: Path) -> None:
         "saturation_result": viewer_data.saturation_result,
         "terrain_min_zoom": viewer_data.terrain_min_zoom,
         "terrain_max_zoom": viewer_data.terrain_max_zoom,
+        "terrain_tile_count": terrain_tile_count,
         "sanitised": viewer_data.sanitised,
     }
 
     data_json = json.dumps(data_payload, separators=(",", ":"))
-    tiles_json = json.dumps(viewer_data.terrain_tiles, separators=(",", ":"))
+    dest.write_text(f"window.SALUS_DATA={data_json};\n", encoding="utf-8")
 
-    dest.write_text(
-        f"window.SALUS_DATA={data_json};\nwindow.SALUS_TILES={tiles_json};\n",
-        encoding="utf-8",
-    )
+
+def _write_terrain_tile_files(viewer_data: ViewerData, output_dir: Path) -> int:
+    """Write terrain tiles as individual PNG files under ``output_dir/tiles/``.
+
+    Each tile is written to ``tiles/{z}/{x}/{y}.png`` so MapLibreGL can fetch
+    them directly over HTTP without a custom protocol handler.  This avoids the
+    Web Worker / main-thread boundary that prevents ``addProtocol`` from working
+    with ``raster-dem`` sources in MapLibreGL v3.
+
+    Returns:
+        Number of tiles successfully written.
+    """
+    tiles_dir = output_dir / "tiles"
+    written = 0
+    total = len(viewer_data.terrain_tiles)
+    for key, b64 in viewer_data.terrain_tiles.items():
+        parts = key.split("/")
+        if len(parts) != 3:  # noqa: PLR2004
+            _log.warning("Skipping malformed terrain tile key %r (expected z/x/y)", key)
+            continue
+        z, x, y = parts
+        tile_dir = tiles_dir / z / x
+        try:
+            tile_dir.mkdir(parents=True, exist_ok=True)
+            (tile_dir / f"{y}.png").write_bytes(base64.b64decode(b64))
+            written += 1
+        except Exception as exc:
+            _log.warning("Failed to write terrain tile %s: %s", key, exc)
+    if written == 0 and total > 0:
+        _log.error("All %d terrain tile(s) failed to write — viewer terrain will not render", total)
+    else:
+        _log.info("Written %d/%d terrain tile files → %s", written, total, tiles_dir)
+    return written
 
 
 def _copy_static_assets(output_dir: Path) -> None:

@@ -3079,3 +3079,47 @@ defects:
     resolution: "Removed dead-code placeholder line; eastern escarpment features expressed via two _gaussian() calls which follow."
     status: resolved
     commit: ""
+
+  - id: D-280
+    severity: high
+    task: I-3
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/export.py
+    line: 625
+    description: "key.split('/') unpacking in _write_terrain_tile_files sits outside the try/except block. A malformed key (not exactly z/x/y) raises ValueError that propagates uncaught, aborting the entire tile-writing pass with no diagnostic identifying the bad key."
+    resolution: "Replaced bare destructuring with len check; malformed keys logged and skipped. split and mkdir/write_bytes moved inside try block."
+    status: resolved
+    commit: ""
+
+  - id: D-281
+    severity: high
+    task: I-3
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/export.py
+    line: 628
+    description: "Total tile-write failure is indistinguishable from success. If all base64.b64decode calls fail, _write_terrain_tile_files logs 'Written N terrain tile files' (counting keys, not files) and returns normally. The viewer will silently 404 every terrain tile request."
+    resolution: "Added written/total counters; logs error if written==0 and total>0; logs written/total on success. Function now returns written count."
+    status: resolved
+    commit: ""
+
+  - id: D-282
+    severity: medium
+    task: I-3
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/static/app.js
+    line: 89
+    description: "hasTerrainTiles is true whenever terrain_min_zoom is defined (always), even when terrain_tiles dict was empty and no tile files were written to disk. MapLibreGL registers the terrain source and immediately 404s every tile request silently."
+    resolution: "Added terrain_tile_count to viewer_data.js payload; hasTerrainTiles now guards on (data.terrain_tile_count || 0) > 0."
+    status: resolved
+    commit: ""
+
+  - id: D-283
+    severity: medium
+    task: I-3
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/static/app.js
+    line: 57
+    description: "No map.on('error', ...) handler. MapLibreGL tile-load failures (404s from terrain tiles) produce no application-level console message, making terrain rendering failures invisible to the developer."
+    resolution: "Added map.on('error', (e) => console.error('[salus] MapLibreGL error:', e.error)) in initMap."
+    status: resolved
+    commit: ""

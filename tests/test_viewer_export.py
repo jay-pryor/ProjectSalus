@@ -379,7 +379,8 @@ class TestPackageViewer:
         assert data_js.exists()
         content = data_js.read_text()
         assert "window.SALUS_DATA" in content
-        assert "window.SALUS_TILES" in content
+        # Terrain tiles are now served as files, not embedded in viewer_data.js
+        assert "window.SALUS_TILES" not in content
 
     def test_viewer_data_js_contains_scenario_name(self, tmp_path):
         vd = self._make_minimal_viewer_data()
@@ -388,12 +389,34 @@ class TestPackageViewer:
         content = (out / "viewer_data.js").read_text()
         assert "test_site" in content
 
-    def test_viewer_data_js_contains_tile_data(self, tmp_path):
+    def test_terrain_tile_files_written(self, tmp_path):
+        vd = self._make_minimal_viewer_data()
+        out = tmp_path / "viewer_out"
+        package_viewer(vd, out)
+        # Tile 12/3689/2493 should be written as tiles/12/3689/2493.png
+        tile_path = out / "tiles" / "12" / "3689" / "2493.png"
+        assert tile_path.exists()
+        assert tile_path.stat().st_size > 0
+
+    def test_viewer_data_js_does_not_contain_tile_data(self, tmp_path):
         vd = self._make_minimal_viewer_data()
         out = tmp_path / "viewer_out"
         package_viewer(vd, out)
         content = (out / "viewer_data.js").read_text()
-        assert "12/3689/2493" in content
+        # Tile keys must not be embedded in viewer_data.js anymore
+        assert "12/3689/2493" not in content
+
+    def test_viewer_data_js_contains_terrain_tile_count(self, tmp_path):
+        vd = self._make_minimal_viewer_data()
+        out = tmp_path / "viewer_out"
+        package_viewer(vd, out)
+        import json
+
+        content = (out / "viewer_data.js").read_text()
+        # Strip the window.SALUS_DATA= prefix and trailing semicolon/newline
+        json_str = content.removeprefix("window.SALUS_DATA=").rstrip(";\n")
+        data = json.loads(json_str)
+        assert data["terrain_tile_count"] == 1  # one tile in _make_minimal_viewer_data
 
     def test_vendor_directory_created(self, tmp_path):
         vd = self._make_minimal_viewer_data()
