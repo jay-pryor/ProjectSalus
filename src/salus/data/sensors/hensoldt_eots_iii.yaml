@@ -1,0 +1,25 @@
+# HENSOLDT EOTS III SHORAD — EO/IR Targeting Turret (fire control / cued tracking)
+# Source: HENSOLDT product datasheet / Resources/Sensors/EO_IR/hensoldt_eots_iii.md
+# Last updated: 2026-04-12
+# Note: Targeting and fire-control sensor, not a wide-area search sensor. Best used
+#       with radar cueing. Continuous azimuth rotation (PTZ) with narrow instantaneous FOV
+#       (1.5–26°). Detection range against DJI Mavic class UAS is estimated; actual range
+#       is heavily dependent on atmospheric conditions and target contrast.
+#       Elevation: -20° to +90° (full overhead coverage). Laser rangefinder to 20 Hz.
+
+name: HENSOLDT EOTS III SHORAD
+type: EO_IR
+
+max_range_m: 10000.0         # confidence: low — SHORAD-class targeting range estimated; UAS detection range not published; heavily condition-dependent
+min_range_m: 0.0             # confidence: medium — no stated minimum; optical sensor can focus at short range
+azimuth_coverage_deg: 360.0  # confidence: high — datasheet: continuous rotation ("n x 360 degrees"); narrow instantaneous FOV
+elevation_coverage_deg: 110.0 # confidence: high — datasheet: -20° to +90° = 110° total arc
+elevation_boresight_deg: 35.0 # confidence: medium — centre of -20° to +90° arc
+frequency_bands:             # confidence: high — dual EO + MWIR published
+  - "visible"
+  - "NIR"
+  - "3–5 µm MWIR"
+requires_los: true           # confidence: high — EO/IR requires direct optical LOS to target
+mounting_height_m: 3.0       # confidence: medium — vehicle-mounted turret; typical vehicle height estimated
+vegetation_penetration: 0.1  # confidence: high — optical/IR cannot penetrate foliage; near-zero penetration
+cost_aud: null               # confidence: N/A — not publicly disclosed

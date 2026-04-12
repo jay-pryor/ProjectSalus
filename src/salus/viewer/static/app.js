@@ -17,14 +17,37 @@
 
 // ── Layer colour palette ─────────────────────────────────────────────────────
 const LAYER_COLOURS = {
-  composite: '#3b82f6',   // blue
-  gaps:      '#ef4444',   // red
-  EO_IR:     '#22c55e',   // green
-  Radar:     '#f97316',   // orange
-  RF:        '#a855f7',   // purple
-  Acoustic:  '#06b6d4',   // cyan
-  Effector:  '#eab308',   // yellow
+  composite:       '#3b82f6',   // blue
+  gaps:            '#ef4444',   // red
+  EO_IR:           '#22c55e',   // green
+  Radar:           '#f97316',   // orange
+  RF:              '#a855f7',   // purple
+  Acoustic:        '#06b6d4',   // cyan
+  Effector:        '#eab308',   // yellow
+  // Effector sub-types — all map to the same yellow as Effector
+  RF_Jammer:       '#eab308',
+  Kinetic:         '#eab308',
+  Directed_Energy: '#eab308',
+  Cyber:           '#eab308',
 };
+
+// ── Library panel configuration ──────────────────────────────────────────────
+// Edit this array to add, remove, or relabel fields shown in the spec expand view.
+// Each entry: { key: YAML field name, label: display label }.
+const SPEC_DISPLAY_FIELDS = [
+  { key: 'type',                 label: 'Type' },
+  { key: 'max_range_m',          label: 'Max Range (m)' },
+  { key: 'azimuth_coverage_deg', label: 'Azimuth (°)' },
+  { key: 'requires_los',         label: 'Requires LOS' },
+  { key: 'cost_aud',             label: 'Cost (AUD)' },
+];
+
+// ── User placement state ─────────────────────────────────────────────────────
+// userPlacements is the source-of-truth for all session-placed sensors/effectors.
+// getUserPlacementsAsGeoJSON() converts it for export or simulation triggering.
+const userPlacements = [];
+let _nextPlacementId = 0;
+let _draggedLibraryItem = null;
 
 const LAYER_LABELS = {
   composite: 'Composite Coverage',
@@ -82,6 +105,8 @@ function initMap(data) {
     setupGapInspect(map);
     setupSidebar(data);
     buildLayerControls(map, data);
+    _addUserPlacementLayers(map);
+    initLibraryPanel(map, data);
     map.fitBounds([[west, south], [east, north]], { padding: 40, duration: 800, pitch: 50, bearing: 0 });
   });
 
@@ -213,30 +238,12 @@ function addCoverageLayers(map, data) {
   }
 }
 
-// ── Sensor bearing wedge helpers ─────────────────────────────────────────────
+// ── Sensor bearing indicator helpers ─────────────────────────────────────────
 
-// Visual radius of bearing wedge in degrees (~220 m at equatorial scale).
+// Visual length of bearing indicator lines in degrees (~220 m at equatorial scale).
 const _SECTOR_RADIUS_DEG = 0.002;
 
-function _buildSectorPolygon(lon, lat, bearingDeg, arcDeg) {
-  if (arcDeg <= 0 || arcDeg >= 360) return null;
-  const halfArc = arcDeg / 2.0;
-  const startBearing = bearingDeg - halfArc;
-  const steps = Math.max(6, Math.round(arcDeg / 8));
-  const coords = [[lon, lat]];
-  for (let i = 0; i <= steps; i++) {
-    const b = (startBearing + (i * arcDeg / steps)) * (Math.PI / 180);
-    // Bearing is clockwise from north: x offset = sin(b), y offset = cos(b)
-    coords.push([
-      lon + _SECTOR_RADIUS_DEG * Math.sin(b),
-      lat + _SECTOR_RADIUS_DEG * Math.cos(b),
-    ]);
-  }
-  coords.push([lon, lat]);
-  return { type: 'Polygon', coordinates: [coords] };
-}
-
-function _buildSectorFeatures(sensorFeatures) {
+function _buildBearingLineFeatures(sensorFeatures) {
   const features = [];
   for (const f of sensorFeatures) {
     const p = f.properties;
@@ -246,24 +253,37 @@ function _buildSectorFeatures(sensorFeatures) {
     if (bearing == null) continue;
     if (!f.geometry || f.geometry.type !== 'Point' || !Array.isArray(f.geometry.coordinates)) continue;
     const [lon, lat] = f.geometry.coordinates;
-    const geom = _buildSectorPolygon(lon, lat, bearing, azimuth);
-    if (!geom) continue;
+    const halfArc = azimuth / 2.0;
+    const leftRad  = (bearing - halfArc) * (Math.PI / 180);
+    const rightRad = (bearing + halfArc) * (Math.PI / 180);
+    // Divide longitude offset by cos(lat) so lines follow true compass bearings
+    // in WGS84 degrees — without this correction, degree-of-longitude compression
+    // at non-equatorial latitudes causes the lines to point at the wrong angle.
+    const cosLat = Math.cos(lat * (Math.PI / 180));
+    const leftEnd  = [lon + (_SECTOR_RADIUS_DEG * Math.sin(leftRad))  / cosLat, lat + _SECTOR_RADIUS_DEG * Math.cos(leftRad)];
+    const rightEnd = [lon + (_SECTOR_RADIUS_DEG * Math.sin(rightRad)) / cosLat, lat + _SECTOR_RADIUS_DEG * Math.cos(rightRad)];
+    // Single LineString: left_end → sensor centre → right_end
     features.push({
       type: 'Feature',
-      geometry: geom,
-      properties: { sensor_type: p.sensor_type || '' },
+      geometry: { type: 'LineString', coordinates: [leftEnd, [lon, lat], rightEnd] },
+      properties: {},
     });
   }
   return features;
 }
 
-// Shared MapLibreGL match expression for sensor-type → colour.
+// Shared MapLibreGL match expression for sensor/effector type → circle colour.
+// Covers both scenario sensor types and effector types used by user placements.
 const _SENSOR_TYPE_COLOUR_EXPR = [
   'match', ['get', 'sensor_type'],
-  'Radar',    LAYER_COLOURS.Radar,
-  'RF',       LAYER_COLOURS.RF,
-  'EO_IR',    LAYER_COLOURS.EO_IR,
-  'Acoustic', LAYER_COLOURS.Acoustic,
+  'Radar',           LAYER_COLOURS.Radar,
+  'RF',              LAYER_COLOURS.RF,
+  'EO_IR',           LAYER_COLOURS.EO_IR,
+  'Acoustic',        LAYER_COLOURS.Acoustic,
+  'RF_Jammer',       LAYER_COLOURS.Effector,
+  'Kinetic',         LAYER_COLOURS.Effector,
+  'Directed_Energy', LAYER_COLOURS.Effector,
+  'Cyber',           LAYER_COLOURS.Effector,
   '#f8fafc',
 ];
 
@@ -271,30 +291,21 @@ const _SENSOR_TYPE_COLOUR_EXPR = [
 function addSensorMarkers(map, data) {
   if (!data.sensor_placements || !data.sensor_placements.features) return;
 
-  // Bearing wedge sectors for directional (< 360°) sensors
-  const sectorFeatures = _buildSectorFeatures(data.sensor_placements.features);
-  if (sectorFeatures.length > 0) {
-    map.addSource('sensor-sectors', {
+  // Red boundary lines for directional (< 360°) sensors
+  const bearingLineFeatures = _buildBearingLineFeatures(data.sensor_placements.features);
+  if (bearingLineFeatures.length > 0) {
+    map.addSource('sensor-bearing-lines', {
       type: 'geojson',
-      data: { type: 'FeatureCollection', features: sectorFeatures },
+      data: { type: 'FeatureCollection', features: bearingLineFeatures },
     });
     map.addLayer({
-      id: 'sensor-sectors-fill',
-      type: 'fill',
-      source: 'sensor-sectors',
-      paint: {
-        'fill-color': _SENSOR_TYPE_COLOUR_EXPR,
-        'fill-opacity': 0.25,
-      },
-    });
-    map.addLayer({
-      id: 'sensor-sectors-outline',
+      id: 'sensor-bearing-lines',
       type: 'line',
-      source: 'sensor-sectors',
+      source: 'sensor-bearing-lines',
       paint: {
-        'line-color': _SENSOR_TYPE_COLOUR_EXPR,
-        'line-width': 1.5,
-        'line-opacity': 0.7,
+        'line-color': '#ef4444',
+        'line-width': 2,
+        'line-opacity': 0.9,
       },
     });
   }
@@ -594,7 +605,7 @@ function buildLayerControls(map, data) {
     // Determine which map layers this toggle controls
     const mapLayerIds = key === 'sensors'
       ? ['sensors-circle', 'sensors-label', 'sensors-type-badge',
-         'sensor-sectors-fill', 'sensor-sectors-outline']
+         'sensor-bearing-lines']
       : key === 'corridors'
         ? ['corridors-line']
         : [`fill-${key}`, `outline-${key}`];
@@ -777,6 +788,430 @@ function renderSaturationChart(sat) {
         <span class="stat-value" style="color:${thresh != null && thresh <= 3 ? '#ef4444' : '#f97316'}">${thresh != null ? thresh + ' targets' : 'N/A'}</span>
       </div>`;
   }
+}
+
+// ── User placements ───────────────────────────────────────────────────────────
+
+/**
+ * Returns a GeoJSON FeatureCollection of all session-placed sensors/effectors.
+ * Hook for future scenario export or simulation triggering — call this to get
+ * the current state of user-placed items without modifying any other code.
+ * @returns {{type: string, features: Array}}
+ */
+function getUserPlacementsAsGeoJSON() {
+  return {
+    type: 'FeatureCollection',
+    features: userPlacements.map(p => ({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [p.lng, p.lat] },
+      properties: {
+        id: p.id,
+        name: p.definition.name || '',
+        sensor_type: p.definition.type || '',
+        azimuth_coverage_deg: p.definition.azimuth_coverage_deg != null
+          ? p.definition.azimuth_coverage_deg : 360,
+        bearing_deg: p.bearing_deg,
+        category: p.category,
+      },
+    })),
+  };
+}
+
+function _addUserPlacementLayers(map) {
+  // Bearing lines (updated on rotate)
+  map.addSource('user-placement-bearing-lines', {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] },
+  });
+  map.addLayer({
+    id: 'user-placement-bearing-lines',
+    type: 'line',
+    source: 'user-placement-bearing-lines',
+    paint: {
+      'line-color': '#ef4444',
+      'line-width': 1.5,
+      'line-opacity': 0.85,
+      'line-dasharray': [4, 2],
+    },
+  });
+
+  // Placement points
+  map.addSource('user-placements', {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] },
+  });
+  map.addLayer({
+    id: 'user-placement-circles',
+    type: 'circle',
+    source: 'user-placements',
+    paint: {
+      'circle-radius': 8,
+      'circle-color': _SENSOR_TYPE_COLOUR_EXPR,
+      'circle-stroke-color': '#ffffff',
+      'circle-stroke-width': 2.5,
+    },
+  });
+  map.addLayer({
+    id: 'user-placement-badges',
+    type: 'symbol',
+    source: 'user-placements',
+    layout: {
+      'text-field': ['match', ['get', 'sensor_type'],
+        'Radar',           'R',
+        'RF',              'RF',
+        'EO_IR',           'E',
+        'Acoustic',        'A',
+        'RF_Jammer',       'J',
+        'Kinetic',         'K',
+        'Directed_Energy', 'D',
+        'Cyber',           'C',
+        '?'],
+      'text-size': 9,
+      'text-offset': [0, 0],
+      'text-anchor': 'center',
+    },
+    paint: {
+      'text-color': '#0f172a',
+      'text-halo-color': 'rgba(0,0,0,0)',
+      'text-halo-width': 0,
+    },
+  });
+  map.addLayer({
+    id: 'user-placement-labels',
+    type: 'symbol',
+    source: 'user-placements',
+    layout: {
+      'text-field': ['get', 'name'],
+      'text-size': 11,
+      'text-offset': [0, 1.4],
+      'text-anchor': 'top',
+    },
+    paint: {
+      'text-color': '#ffffff',
+      'text-halo-color': '#0f172a',
+      'text-halo-width': 1.5,
+    },
+  });
+}
+
+function _refreshUserPlacementsSource(map) {
+  const placementSrc = map.getSource('user-placements');
+  if (placementSrc) placementSrc.setData(getUserPlacementsAsGeoJSON());
+
+  // Rebuild bearing lines from current placements
+  const lineFeatures = [];
+  for (const p of userPlacements) {
+    const az = p.definition.azimuth_coverage_deg != null ? p.definition.azimuth_coverage_deg : 360;
+    if (az >= 360) continue;
+    const bearing = p.bearing_deg || 0;
+    const cosLat = Math.cos(p.lat * Math.PI / 180);
+    const halfArc = az / 2;
+    const leftRad  = (bearing - halfArc) * Math.PI / 180;
+    const rightRad = (bearing + halfArc) * Math.PI / 180;
+    const leftEnd  = [p.lng + (_SECTOR_RADIUS_DEG * Math.sin(leftRad))  / cosLat, p.lat + _SECTOR_RADIUS_DEG * Math.cos(leftRad)];
+    const rightEnd = [p.lng + (_SECTOR_RADIUS_DEG * Math.sin(rightRad)) / cosLat, p.lat + _SECTOR_RADIUS_DEG * Math.cos(rightRad)];
+    lineFeatures.push({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: [leftEnd, [p.lng, p.lat], rightEnd] },
+      properties: {},
+    });
+  }
+  const lineSrc = map.getSource('user-placement-bearing-lines');
+  if (lineSrc) lineSrc.setData({ type: 'FeatureCollection', features: lineFeatures });
+}
+
+/**
+ * Compute the WGS84 position of the rotate handle for a placement.
+ * The handle sits at _SECTOR_RADIUS_DEG distance in the bearing direction.
+ * @param {{lat: number, lng: number, bearing_deg: number}} placement
+ * @returns {[number, number]} [lng, lat]
+ */
+function _rotateHandlePos(placement) {
+  const rad = (placement.bearing_deg || 0) * Math.PI / 180;
+  const cosLat = Math.cos(placement.lat * Math.PI / 180);
+  return [
+    placement.lng + (_SECTOR_RADIUS_DEG * Math.sin(rad)) / cosLat,
+    placement.lat + _SECTOR_RADIUS_DEG * Math.cos(rad),
+  ];
+}
+
+function _addRotateHandle(map, placement) {
+  const az = placement.definition.azimuth_coverage_deg != null
+    ? placement.definition.azimuth_coverage_deg : 360;
+  if (az >= 360) return;  // omnidirectional — no handle needed
+
+  const el = document.createElement('div');
+  el.className = 'rotate-handle';
+  el.title = 'Drag to rotate';
+
+  const [hLng, hLat] = _rotateHandlePos(placement);
+  const marker = new maplibregl.Marker({ element: el, anchor: 'center' })
+    .setLngLat([hLng, hLat])
+    .addTo(map);
+
+  placement.rotateMarker = marker;
+
+  el.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // Disable map drag so the handle drag is captured correctly
+    map.dragPan.disable();
+
+    const onMove = (moveEvent) => {
+      const canvas = map.getCanvas();
+      const rect = canvas.getBoundingClientRect();
+      const x = moveEvent.clientX - rect.left;
+      const y = moveEvent.clientY - rect.top;
+      const lngLat = map.unproject([x, y]);
+      // Bearing = atan2(Δlng·cosLat, Δlat) — great-circle approximation
+      const dLng = (lngLat.lng - placement.lng) * Math.cos(placement.lat * Math.PI / 180);
+      const dLat = lngLat.lat - placement.lat;
+      placement.bearing_deg = (Math.atan2(dLng, dLat) * 180 / Math.PI + 360) % 360;
+      // Move the handle marker
+      const [newLng, newLat] = _rotateHandlePos(placement);
+      marker.setLngLat([newLng, newLat]);
+      // Redraw bearing lines
+      _refreshUserPlacementsSource(map);
+    };
+
+    const onUp = () => {
+      map.dragPan.enable();
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      window.removeEventListener('blur', onUp);
+      document.removeEventListener('contextmenu', onUp);
+    };
+
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    // Re-enable dragPan if focus is lost (Alt+Tab) or context menu interrupts drag
+    window.addEventListener('blur', onUp, { once: true });
+    document.addEventListener('contextmenu', onUp, { once: true });
+  });
+}
+
+function placeSensor(map, lat, lng, definition, category) {
+  const id = `user-${_nextPlacementId++}`;
+  const placement = {
+    id,
+    lat,
+    lng,
+    bearing_deg: 0,
+    definition,
+    category,
+    rotateMarker: null,
+  };
+  userPlacements.push(placement);
+  _refreshUserPlacementsSource(map);
+  _addRotateHandle(map, placement);
+}
+
+// ── Library panel ─────────────────────────────────────────────────────────────
+
+function initLibraryPanel(map, data) {
+  const toggle  = document.getElementById('library-toggle');
+  const panel   = document.getElementById('library-panel');
+  const closeBtn = document.getElementById('library-close');
+  if (!toggle || !panel) return;
+
+  buildLibraryContent(document.getElementById('library-panel-body'), data);
+
+  const panelBody = document.getElementById('library-panel-body');
+  let _savedScrollTop = 0;
+
+  const openPanel = () => {
+    panel.classList.remove('hidden');
+    if (panelBody) panelBody.scrollTop = _savedScrollTop;
+  };
+  const closePanel = () => {
+    if (panelBody) _savedScrollTop = panelBody.scrollTop;
+    panel.classList.add('hidden');
+  };
+
+  toggle.addEventListener('click', () => {
+    if (panel.classList.contains('hidden')) openPanel(); else closePanel();
+  });
+  closeBtn?.addEventListener('click', closePanel);
+
+  // Drag-drop target on the map container
+  const mapEl = document.getElementById('map');
+  if (!mapEl) return;
+  mapEl.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+  });
+  mapEl.addEventListener('drop', (e) => {
+    e.preventDefault();
+    if (!_draggedLibraryItem) return;
+    const rect = mapEl.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const lngLat = map.unproject([x, y]);
+    placeSensor(map, lngLat.lat, lngLat.lng,
+      _draggedLibraryItem.definition, _draggedLibraryItem.category);
+    _draggedLibraryItem = null;
+  });
+}
+
+function buildLibraryContent(container, data) {
+  if (!container) return;
+  container.innerHTML = '';
+
+  const sections = [
+    { label: 'Sensors',   lib: data.sensor_library   || {}, category: 'sensor' },
+    { label: 'Effectors', lib: data.effector_library || {}, category: 'effector' },
+  ];
+
+  for (const { label, lib, category } of sections) {
+    const typeKeys = Object.keys(lib);
+    if (typeKeys.length === 0) continue;
+
+    const sectionEl = document.createElement('div');
+    sectionEl.className = 'lib-section';
+
+    // Section header (collapsible)
+    const sectionHeader = document.createElement('div');
+    sectionHeader.className = 'lib-section-header';
+    sectionHeader.innerHTML =
+      `<span>${label}</span><span class="lib-section-arrow">▼</span>`;
+    sectionHeader.addEventListener('click', () => {
+      const body  = sectionEl.querySelector('.lib-section-body');
+      const arrow = sectionHeader.querySelector('.lib-section-arrow');
+      body?.classList.toggle('hidden');
+      if (arrow) arrow.textContent = body?.classList.contains('hidden') ? '▶' : '▼';
+    });
+    sectionEl.appendChild(sectionHeader);
+
+    const sectionBody = document.createElement('div');
+    sectionBody.className = 'lib-section-body';
+
+    for (const typeKey of typeKeys) {
+      const items = lib[typeKey];
+      if (!items || items.length === 0) continue;
+
+      const groupEl = document.createElement('div');
+      groupEl.className = 'lib-group';
+
+      const groupColour = layerColour(typeKey);
+      const groupHeader = document.createElement('div');
+      groupHeader.className = 'lib-group-header';
+      groupHeader.innerHTML =
+        `<span class="lib-group-dot" style="background:${groupColour}"></span>` +
+        `<span>${typeKey.replace(/_/g, '\u2009')}</span>` +
+        `<span class="lib-group-count">${items.length}</span>` +
+        `<span class="lib-group-arrow">▼</span>`;
+      groupHeader.addEventListener('click', () => {
+        const body  = groupEl.querySelector('.lib-group-body');
+        const arrow = groupHeader.querySelector('.lib-group-arrow');
+        body?.classList.toggle('hidden');
+        if (arrow) arrow.textContent = body?.classList.contains('hidden') ? '▶' : '▼';
+      });
+      groupEl.appendChild(groupHeader);
+
+      const groupBody = document.createElement('div');
+      groupBody.className = 'lib-group-body';
+      for (const item of items) {
+        groupBody.appendChild(_makeLibraryEntry(item, typeKey, category));
+      }
+      groupEl.appendChild(groupBody);
+      sectionBody.appendChild(groupEl);
+    }
+
+    sectionEl.appendChild(sectionBody);
+    container.appendChild(sectionEl);
+  }
+}
+
+function _typeAbbrev(typeKey) {
+  const abbrevMap = {
+    Radar: 'R', RF: 'RF', EO_IR: 'E', Acoustic: 'A',
+    RF_Jammer: 'J', Kinetic: 'K', Directed_Energy: 'D', Cyber: 'C',
+  };
+  return abbrevMap[typeKey] || typeKey.slice(0, 2).toUpperCase();
+}
+
+function _makeLibraryEntry(item, typeKey, category) {
+  const colour = layerColour(typeKey);
+  const name   = item.name || 'Unknown';
+  if (!item.name || !item.type) {
+    console.warn('[salus] Library entry missing name or type field:', item);
+  }
+
+  const entry = document.createElement('div');
+  entry.className = 'lib-entry';
+
+  // Drag handle
+  const dragHandle = document.createElement('span');
+  dragHandle.className = 'lib-drag-handle';
+  dragHandle.textContent = '⠿';
+  dragHandle.title = 'Drag onto map to place';
+  dragHandle.setAttribute('draggable', 'true');
+  dragHandle.addEventListener('dragstart', (e) => {
+    _draggedLibraryItem = { definition: item, category };
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = 'copy';
+      e.dataTransfer.setData('text/plain', name);
+    }
+  });
+  dragHandle.addEventListener('dragend', () => {
+    // Clear if the drop was not consumed (e.g. dropped outside the map)
+    setTimeout(() => { _draggedLibraryItem = null; }, 50);
+  });
+
+  // Type badge
+  const badge = document.createElement('span');
+  badge.className = 'lib-badge';
+  badge.style.background = colour;
+  badge.textContent = _typeAbbrev(typeKey);
+
+  // Name
+  const nameEl = document.createElement('span');
+  nameEl.className = 'lib-name';
+  nameEl.textContent = name;
+  nameEl.title = name;
+
+  // Expand button
+  const expandBtn = document.createElement('button');
+  expandBtn.className = 'lib-expand-btn';
+  expandBtn.textContent = '▶';
+  expandBtn.title = 'Show specifications';
+
+  // Spec table (hidden until expanded)
+  const specsEl = document.createElement('div');
+  specsEl.className = 'lib-entry-specs hidden';
+  const table = document.createElement('table');
+  table.className = 'lib-specs-table';
+  for (const { key, label } of SPEC_DISPLAY_FIELDS) {
+    const val = item[key];
+    const displayVal = (val === null || val === undefined) ? '—' : String(val);
+    const tr = document.createElement('tr');
+    const tdKey = document.createElement('td');
+    tdKey.className = 'lib-spec-key';
+    tdKey.textContent = label;
+    const tdVal = document.createElement('td');
+    tdVal.className = 'lib-spec-val';
+    tdVal.textContent = displayVal;
+    tr.appendChild(tdKey);
+    tr.appendChild(tdVal);
+    table.appendChild(tr);
+  }
+  specsEl.appendChild(table);
+
+  expandBtn.addEventListener('click', () => {
+    const hidden = specsEl.classList.toggle('hidden');
+    expandBtn.textContent = hidden ? '▶' : '▼';
+  });
+
+  const header = document.createElement('div');
+  header.className = 'lib-entry-header';
+  header.appendChild(dragHandle);
+  header.appendChild(badge);
+  header.appendChild(nameEl);
+  header.appendChild(expandBtn);
+
+  entry.appendChild(header);
+  entry.appendChild(specsEl);
+  return entry;
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────

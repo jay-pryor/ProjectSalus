@@ -1,0 +1,22 @@
+# QinetiQ Obsidian — X-band FMCW Staring Array Radar (short-range cUAS)
+# Source: QinetiQ product datasheet / Resources/Sensors/Radar/qinetiq_obsidian.md
+# Last updated: 2026-04-12
+# Note: Detection range published against UAVs <20 kg (DJI Mavic class, ~0.01 m² RCS).
+#       Per-unit deployment: 180° azimuth, ~47° elevation. Paired units give 360° az / 90° el.
+#       Unique staring-array architecture — 80+ simultaneous static beams, no moving parts.
+#       Extended range variant achieves up to 3,500 m.
+
+name: QinetiQ Obsidian
+type: Radar
+
+max_range_m: 2000.0          # confidence: high — datasheet: 2,000 m against UAVs <20 kg; 3,500 m extended-range variant
+min_range_m: 20.0            # confidence: high — datasheet: 20 m minimum
+azimuth_coverage_deg: 180.0  # confidence: high — datasheet: 180° per unit; 360° with paired units
+elevation_coverage_deg: 47.0 # confidence: medium — per unit; estimated -2° to +45° = 47°; 90° total with paired units
+elevation_boresight_deg: 21.5 # confidence: medium — centre of estimated -2° to +45° arc
+frequency_bands:             # confidence: medium — X-band FMCW stated; centre frequency estimated
+  - "9.5 GHz"
+requires_los: true           # confidence: high — radar requires direct LOS to target
+mounting_height_m: 3.0       # confidence: medium — ground-based system; typical deployment height estimated
+vegetation_penetration: 0.2  # confidence: medium — X-band (9.5 GHz) heavily attenuated by dense foliage; 0.2 for dense canopy
+cost_aud: null               # confidence: N/A — not publicly disclosed

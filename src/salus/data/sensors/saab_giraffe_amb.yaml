@@ -1,0 +1,23 @@
+# SAAB Giraffe AMB — C-band Agile Multi-Beam Radar (air defence / GBAD, cUAS adaptation)
+# Source: SAAB product datasheet / Resources/Sensors/Radar/saab_giraffe_amb.md
+# Last updated: 2026-04-12
+# Note: Max range not formally published for land variant. Sea variant output power 25 kW,
+#       frequency 5.4–5.85 GHz. Estimated 100 km range against aircraft class (~5 m² RCS).
+#       For small UAS (~0.01 m² RCS) the theoretical range is ~21 km; conservative estimate
+#       of 15 km used to account for clutter limitations vs. low-slow targets.
+#       Large containerised system — suited to fixed GBAD sites rather than point cUAS.
+
+name: SAAB Giraffe AMB
+type: Radar
+
+max_range_m: 15000.0         # confidence: low — estimated for small UAS; land range not published; 100 km vs aircraft estimated, RCS-scaled to 21 km, conservative 15 km
+min_range_m: 200.0           # confidence: low — large rotating radar; estimated minimum, not published
+azimuth_coverage_deg: 360.0  # confidence: high — datasheet: mechanically rotating, 360°
+elevation_coverage_deg: 70.0 # confidence: high — datasheet: 0° to 70°
+elevation_boresight_deg: 35.0 # confidence: high — centre of published 0° to 70° arc
+frequency_bands:             # confidence: high — C-band (G/H-band) published; sea variant 5.4–5.85 GHz
+  - "5.6 GHz"
+requires_los: true           # confidence: high — radar requires direct LOS to target
+mounting_height_m: 12.0      # confidence: high — datasheet: hydraulically operated 12 m mast
+vegetation_penetration: 0.4  # confidence: medium — C-band has moderate foliage attenuation; consistent with Giraffe 1X estimate
+cost_aud: null               # confidence: N/A — not publicly disclosed

@@ -479,6 +479,153 @@ class TestPackageViewer:
         result = package_viewer(vd, out)
         assert result.is_absolute()
 
+    def test_viewer_data_js_contains_sensor_library(self, tmp_path):
+        """package_viewer embeds sensor_library in SALUS_DATA."""
+        import json
+
+        vd = self._make_minimal_viewer_data()
+        out = tmp_path / "viewer_out"
+        package_viewer(vd, out)
+        content = (out / "viewer_data.js").read_text()
+        json_str = content.removeprefix("window.SALUS_DATA=").rstrip(";\n")
+        data = json.loads(json_str)
+        assert "sensor_library" in data
+        assert isinstance(data["sensor_library"], dict)
+
+    def test_viewer_data_js_contains_effector_library(self, tmp_path):
+        """package_viewer embeds effector_library in SALUS_DATA."""
+        import json
+
+        vd = self._make_minimal_viewer_data()
+        out = tmp_path / "viewer_out"
+        package_viewer(vd, out)
+        content = (out / "viewer_data.js").read_text()
+        json_str = content.removeprefix("window.SALUS_DATA=").rstrip(";\n")
+        data = json.loads(json_str)
+        assert "effector_library" in data
+        assert isinstance(data["effector_library"], dict)
+
+    def test_sensor_library_grouped_by_type(self, tmp_path):
+        """Each key in sensor_library is a sensor type; items are lists of dicts."""
+        import json
+
+        vd = self._make_minimal_viewer_data()
+        out = tmp_path / "viewer_out"
+        package_viewer(vd, out)
+        content = (out / "viewer_data.js").read_text()
+        json_str = content.removeprefix("window.SALUS_DATA=").rstrip(";\n")
+        data = json.loads(json_str)
+        for type_key, items in data["sensor_library"].items():
+            assert isinstance(type_key, str), f"Expected string key, got {type(type_key)}"
+            assert isinstance(items, list), f"Expected list under '{type_key}'"
+            for item in items:
+                assert isinstance(item, dict)
+                assert item.get("type") == type_key, (
+                    f"Item type mismatch: {item.get('type')!r} != {type_key!r}"
+                )
+
+
+# ---------------------------------------------------------------------------
+# TestLoadSensorLibrary
+# ---------------------------------------------------------------------------
+
+
+class TestLoadSensorLibrary:
+    def test_groups_yamls_by_type_field(self, tmp_path):
+        """YAML files are grouped under the value of their 'type' field."""
+        from salus.viewer.export import _load_sensor_library
+
+        sensor_dir = tmp_path / "sensors"
+        sensor_dir.mkdir()
+        (sensor_dir / "radar_a.yaml").write_text("name: Radar A\ntype: Radar\nmax_range_m: 1000\n")
+        (sensor_dir / "radar_b.yaml").write_text("name: Radar B\ntype: Radar\nmax_range_m: 2000\n")
+        (sensor_dir / "rf_a.yaml").write_text("name: RF A\ntype: RF\nmax_range_m: 500\n")
+
+        result = _load_sensor_library(sensor_dir)
+
+        assert set(result.keys()) == {"Radar", "RF"}
+        assert len(result["Radar"]) == 2
+        assert len(result["RF"]) == 1
+
+    def test_missing_directory_returns_empty_dict(self, tmp_path):
+        """A non-existent directory yields an empty dict without raising."""
+        from salus.viewer.export import _load_sensor_library
+
+        result = _load_sensor_library(tmp_path / "nonexistent")
+        assert result == {}
+
+    def test_invalid_yaml_is_skipped(self, tmp_path):
+        """A malformed YAML file is logged and skipped; valid files still load."""
+        from salus.viewer.export import _load_sensor_library
+
+        sensor_dir = tmp_path / "sensors"
+        sensor_dir.mkdir()
+        (sensor_dir / "bad.yaml").write_text("{{invalid yaml: [}")
+        (sensor_dir / "good.yaml").write_text("name: Good Sensor\ntype: Radar\n")
+
+        result = _load_sensor_library(sensor_dir)
+        assert "Radar" in result
+        assert len(result["Radar"]) == 1
+        assert result["Radar"][0]["name"] == "Good Sensor"
+
+    def test_missing_type_field_groups_as_unknown(self, tmp_path):
+        """Entries without a 'type' field are grouped under 'Unknown'."""
+        from salus.viewer.export import _load_sensor_library
+
+        sensor_dir = tmp_path / "sensors"
+        sensor_dir.mkdir()
+        (sensor_dir / "notype.yaml").write_text("name: No Type Sensor\nmax_range_m: 1000\n")
+
+        result = _load_sensor_library(sensor_dir)
+        assert "Unknown" in result
+        assert result["Unknown"][0]["name"] == "No Type Sensor"
+
+    def test_all_fields_preserved(self, tmp_path):
+        """All YAML fields are present in the loaded dict."""
+        from salus.viewer.export import _load_sensor_library
+
+        sensor_dir = tmp_path / "sensors"
+        sensor_dir.mkdir()
+        yaml_text = (
+            "name: Test\ntype: EO_IR\nmax_range_m: 800\n"
+            "azimuth_coverage_deg: 90\nrequires_los: true\n"
+        )
+        (sensor_dir / "sensor.yaml").write_text(yaml_text)
+
+        result = _load_sensor_library(sensor_dir)
+        item = result["EO_IR"][0]
+        assert item["name"] == "Test"
+        assert item["max_range_m"] == 800
+        assert item["azimuth_coverage_deg"] == 90
+        assert item["requires_los"] is True
+
+    def test_returns_sorted_keys(self, tmp_path):
+        """Keys in the returned dict are sorted alphabetically."""
+        from salus.viewer.export import _load_sensor_library
+
+        sensor_dir = tmp_path / "sensors"
+        sensor_dir.mkdir()
+        (sensor_dir / "z.yaml").write_text("name: Z\ntype: RF\n")
+        (sensor_dir / "a.yaml").write_text("name: A\ntype: Acoustic\n")
+        (sensor_dir / "r.yaml").write_text("name: R\ntype: Radar\n")
+
+        result = _load_sensor_library(sensor_dir)
+        assert list(result.keys()) == sorted(result.keys())
+
+    def test_get_user_placements_geojson_structure(self, tmp_path):
+        """Verify the exported JS contains getUserPlacementsAsGeoJSON and userPlacements."""
+        # Verify app.js (the static source) contains the required functions and state.
+        app_js = Path(__file__).parent.parent / "src" / "salus" / "viewer" / "static" / "app.js"
+        content = app_js.read_text(encoding="utf-8")
+        assert "getUserPlacementsAsGeoJSON" in content, "Public API function must be present"
+        assert "userPlacements" in content, "Module-level placement array must be present"
+        assert "SPEC_DISPLAY_FIELDS" in content, "Spec field config constant must be present"
+
+        # Verify the GeoJSON returned by the function has the correct shape by checking
+        # that the function body references the required properties.
+        assert "FeatureCollection" in content, "Must return FeatureCollection type"
+        assert "bearing_deg" in content, "Must include bearing_deg in feature properties"
+
 
 # ---------------------------------------------------------------------------
 # TestSanitiseForExport

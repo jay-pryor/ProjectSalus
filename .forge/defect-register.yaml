@@ -3200,3 +3200,79 @@ defects:
     resolution: "Decision documented in sanitise.py comment: sensor_type and azimuth_coverage_deg are model-level properties (publicly knowable from the sensor model spec), not deployment-level. bearing_deg is the tactically sensitive field and remains stripped."
     status: resolved
     commit: bb90cf1
+- id: D-291
+  severity: high
+  task: I-5
+  found_by: silent_failure_hunter
+  file: src/salus/viewer/static/app.js
+  line: 958
+  description: "map.dragPan.disable() in _addRotateHandle is not re-enabled if browser loses focus mid-drag (Alt+Tab, context menu, etc.). The mouseup event fires on document but window blur/contextmenu events are not handled, so dragPan stays disabled permanently after focus loss."
+  resolution: "Added window 'blur' and document 'contextmenu' listeners (both once:true) that call onUp, guaranteeing dragPan.enable() fires on focus loss or right-click interrupt."
+  status: resolved
+  commit: pending
+
+- id: D-292
+  severity: medium
+  task: I-5
+  found_by: silent_failure_hunter
+  file: src/salus/viewer/static/app.js
+  line: 1018
+  description: "document.getElementById('map') in initLibraryPanel returns null if element is absent. The null result is passed directly to dragover/drop addEventListener calls without a null guard, causing a TypeError at runtime."
+  resolution: "Added 'if (!mapEl) return;' guard immediately after getElementById call."
+  status: resolved
+  commit: pending
+
+- id: D-293
+  severity: medium
+  task: I-5
+  found_by: silent_failure_hunter
+  file: src/salus/viewer/export.py
+  line: 755
+  description: "except Exception in _load_sensor_library is too broad. Catches programming errors (AttributeError, TypeError) masking real bugs. Should be narrowed to yaml.YAMLError, OSError, UnicodeDecodeError."
+  resolution: "Changed catch clause to 'except (yaml.YAMLError, OSError, UnicodeDecodeError)'."
+  status: resolved
+  commit: pending
+
+- id: D-294
+  severity: medium
+  task: I-5
+  found_by: silent_failure_hunter
+  file: src/salus/viewer/static/app.js
+  line: 1133
+  description: "Malformed library YAML items (missing name or type fields) silently render as a grey '?' badge with no console warning, making it impossible to diagnose corrupt or incomplete library entries during development."
+  resolution: "Added console.warn at start of _makeLibraryEntry when item.name or item.type is missing."
+  status: resolved
+  commit: pending
+
+- id: D-295
+  severity: medium
+  task: I-5
+  found_by: spec_compliance
+  file: src/salus/viewer/static/app.js
+  line: 1010
+  description: "Criterion 2 (scroll position preserved on panel open/close) not met. Panel uses display:none toggle which resets scrollTop to 0 each time it is re-opened. No save/restore logic present."
+  resolution: "Extracted openPanel/closePanel helpers. closePanel saves panelBody.scrollTop; openPanel restores it before removing 'hidden' class."
+  status: resolved
+  commit: pending
+
+- id: D-296
+  severity: low
+  task: I-5
+  found_by: silent_failure_hunter
+  file: src/salus/viewer/export.py
+  line: 764
+  description: "str(entry.get('type', 'Unknown')) returns the string 'None' when YAML has 'type: null'. Should use 'entry.get(\"type\") or \"Unknown\"' to coerce None to 'Unknown'."
+  resolution: "Changed to 'str(entry.get(\"type\") or \"Unknown\")' so type:null maps to 'Unknown' not 'None'."
+  status: resolved
+  commit: pending
+
+- id: D-297
+  severity: low
+  task: I-5
+  found_by: silent_failure_hunter
+  file: src/salus/viewer/static/app.js
+  line: 907
+  description: "Division by Math.cos(lat * Math.PI / 180) in bearing-line coordinate calculations produces Infinity at lat=±90. Cosmetic defect only as no real deployment site is at a geographic pole."
+  resolution: "Accepted as won't-fix for now — no real deployment site exists at lat=±90. Documented as known limitation."
+  status: resolved
+  commit: pending

@@ -50,6 +50,20 @@
 <!-- ── Map container ────────────────────────────────────────────────────── -->
 <div id="map"></div>
 
+<!-- ── Library toggle button ────────────────────────────────────────────── -->
+<button id="library-toggle" title="Open sensor &amp; effector library">☰ Library</button>
+
+<!-- ── Library floating panel ───────────────────────────────────────────── -->
+<div id="library-panel" class="hidden">
+  <div id="library-panel-header">
+    <span>Sensor &amp; Effector Library</span>
+    <button id="library-close" title="Close">✕</button>
+  </div>
+  <div id="library-panel-body">
+    <!-- Populated by app.js from SALUS_DATA.sensor_library / effector_library -->
+  </div>
+</div>
+
 <!-- ── Gap inspector tooltip ────────────────────────────────────────────── -->
 <div id="gap-tooltip" class="hidden">
   <strong>Coverage Gap</strong>

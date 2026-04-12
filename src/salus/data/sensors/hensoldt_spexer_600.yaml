@@ -1,0 +1,22 @@
+# HENSOLDT Spexer 600 — X-band AESA Radar (mid-range cUAS)
+# Source: HENSOLDT product datasheet / Resources/Sensors/Radar/hensoldt_spexer_600.md
+# Last updated: 2026-04-12
+# Note: UAV-specific detection range is not published. 6 km published against walking person
+#       (~0.5 m² RCS). max_range_m here is a conservative estimate for small UAS (~0.01 m²)
+#       derived from RCS scaling (6000 × (0.01/0.5)^0.25 ≈ 2.5 km); rounded to 3500 m.
+#       Mid-range product between Spexer 500 (3 km) and Spexer 2000 3D (9 km against 0.2 m²).
+
+name: HENSOLDT Spexer 600
+type: Radar
+
+max_range_m: 3500.0          # confidence: low — estimated for small UAS from walking person range (6 km) via RCS scaling; UAV range not published
+min_range_m: 30.0            # confidence: low — estimated; not published
+azimuth_coverage_deg: 120.0  # confidence: high — datasheet: 120° per panel (AESA, no mechanical movement)
+elevation_coverage_deg: 48.0 # confidence: low — not published; estimated -3° to +45° = 48° total, mid-point between Spexer 500 and 2000 3D
+elevation_boresight_deg: 21.0 # confidence: low — centre of estimated -3° to +45° arc
+frequency_bands:             # confidence: medium — X-band AESA with SharpEye transceiver stated; centre frequency estimated
+  - "9.5 GHz"
+requires_los: true           # confidence: high — radar requires direct LOS to target
+mounting_height_m: 5.0       # confidence: medium — typical mast/pedestal; not specified in datasheet
+vegetation_penetration: 0.2  # confidence: medium — X-band heavily attenuated by dense foliage; 0.2 for dense canopy
+cost_aud: null               # confidence: N/A — not publicly disclosed

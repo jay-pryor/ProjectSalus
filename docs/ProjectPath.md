@@ -572,6 +572,34 @@ _Exploration scenarios are stored in `demo/explore/` with the naming convention 
   7. Click popup, hover cursor, and all existing layer-control behaviour is preserved.
   8. All existing tests pass; new tests cover the added properties.
 
+**I-5: Sensor/effector library panel with drag-and-drop placement**
+- _Source:_ Enhancement — the viewer shows sensors from the scenario file but there is no way to interactively try different sensor placements without editing YAML and re-running the simulation.
+- _Goal:_ Add a collapsible floating panel on the left side of the viewer that lists every sensor and effector in the embedded library, grouped by type. The user can expand entries to inspect key specs, then drag a sensor or effector from the panel and drop it onto the map to visually place it. Placed markers use the same type-coloured rendering as scenario sensors (I-4). Sector sensors get a rotate handle so the user can adjust bearing. All placements are tracked in memory in a form that is ready for future scenario export and simulation triggering.
+- _Architecture notes:_
+  - **Library data embedded at export time.** `viewer-export` loads all sensor and effector YAMLs from `src/salus/data/sensors/` and `src/salus/data/effectors/`, groups them by `type`, and serialises them into `viewer_data.js` as `SALUS_DATA.sensor_library` and `SALUS_DATA.effector_library`. No server is required at view time.
+  - **Spec fields configurable via constant.** A single `SPEC_DISPLAY_FIELDS` array at the top of `app.js` (array of `{key, label}` objects) controls which YAML fields appear in the expand view. Adding, removing, or relabelling fields requires changing only that one array.
+  - **User placements tracked in `userPlacements`.** Each entry: `{id, lat, lng, bearing_deg, definition}` where `definition` is the full library object. A `getUserPlacementsAsGeoJSON()` helper function is present but not yet wired to any export button. This is the hook for future scenario save / simulation trigger I-tasks.
+  - **Drag-and-drop via HTML5.** Panel entries are `draggable`. The map canvas listens for `dragover` / `drop`. On drop, pixel coordinates are converted to `map.unproject()` lat/lng.
+  - **Rotate handle.** For placed sector sensors (azimuth_coverage_deg < 360), a small circular handle marker is placed offset from the sensor. Dragging the handle recomputes bearing from the sensor centre and redraws the wedge. Omnidirectional sensors (azimuth = 360) get no handle.
+  - **Separate MapLibre source/layer for user placements.** User-placed sensors are kept in a dedicated GeoJSON source (`user-placements`) and layer (`user-placement-circles`, `user-placement-wedges`, `user-placement-labels`) so existing scenario layers are untouched and the placement data can be extracted cleanly.
+  - **No viewshed computation in this task.** A disabled "Run Simulation" button placeholder may be included as a visual cue, but triggering Python-side computation is out of scope.
+- _Acceptance criteria:_
+  1. A "Library" toggle button is always visible on the left side of the viewer.
+  2. Clicking the toggle opens a floating panel; clicking it again (or an ✕ on the panel) collapses it. State (open/closed, scroll position, expanded entries) is preserved between toggles within the session.
+  3. The panel has two top-level collapsible sections: **Sensors** and **Effectors**.
+  4. Sensors are sub-grouped by type: Radar, RF, EO_IR, Acoustic. Effectors are sub-grouped by type matching the `type` field in each YAML. Sub-groups with zero entries are hidden.
+  5. Each entry row shows the sensor/effector name, its type abbreviation badge (coloured per `LAYER_COLOURS`), an expand/collapse arrow, and a drag handle icon.
+  6. Clicking the expand arrow reveals a spec table rendered from `SPEC_DISPLAY_FIELDS`. Fields with `null` values display as "—".
+  7. Dragging the drag handle and dropping it onto the map canvas places a marker at the drop location. The marker uses the same circle + abbreviation badge rendering as I-4 scenario sensors.
+  8. Placed sector sensors (azimuth_coverage_deg < 360) are drawn with a bearing wedge at default bearing 0° (North) and receive a rotate handle — a small circle offset from the marker in the direction of the current bearing.
+  9. Dragging the rotate handle updates the sensor's bearing and redraws the wedge in real time.
+  10. Omnidirectional sensors (azimuth_coverage_deg == 360) receive no wedge and no rotate handle.
+  11. `userPlacements` is a module-level array. `getUserPlacementsAsGeoJSON()` returns a valid GeoJSON FeatureCollection of all current placements.
+  12. `SPEC_DISPLAY_FIELDS` is a single array constant at the top of `app.js`; no other code change is needed to add, remove, or relabel a displayed field.
+  13. `viewer-export` embeds `sensor_library` and `effector_library` into `SALUS_DATA` in `viewer_data.js`, grouped by type, each entry containing all YAML fields.
+  14. All existing scenario sensor markers, coverage layers, terrain, layer controls, click popups, and bearing wedges are unaffected.
+  15. All existing tests pass; new tests cover: library serialisation in `viewer-export`, `getUserPlacementsAsGeoJSON()` output shape.
+
 ---
 
 ### Slice 15 — Populate Full Sensor/Effector/Threat Database

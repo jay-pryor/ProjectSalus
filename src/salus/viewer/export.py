@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 import mercantile
 import numpy as np
 import numpy.typing as npt
+import yaml
 from rasterio.crs import CRS
 from rasterio.io import MemoryFile
 from rasterio.transform import from_bounds as _transform_from_bounds
@@ -54,6 +55,9 @@ _SIMPLIFY_TOLERANCE: float = 0.0001
 # Path to the bundled MapLibreGL vendor files.
 _STATIC_DIR: Path = Path(__file__).parent / "static"
 _VENDOR_DIR: Path = _STATIC_DIR / "vendor"
+
+# Path to the sensor/effector YAML data directory.
+_DATA_DIR: Path = Path(__file__).parent.parent / "data"
 
 # MapLibreGL v3 CDN fallback (used only if vendor files are missing).
 _MAPLIBRE_VERSION: str = "3.6.2"
@@ -299,13 +303,28 @@ def package_viewer(
     #    tile count is available for the viewer_data.js payload.
     terrain_tile_count = _write_terrain_tile_files(viewer_data, output_dir)
 
-    # 2. Write embedded data JS (GeoJSON, stats — tile count included for JS guard)
-    _write_viewer_data_js(viewer_data, output_dir / "viewer_data.js", terrain_tile_count)
+    # 2. Load sensor/effector library YAMLs so the interactive panel is populated.
+    sensor_library = _load_sensor_library(_DATA_DIR / "sensors")
+    effector_library = _load_sensor_library(_DATA_DIR / "effectors")
+    _log.info(
+        "Library loaded: %d sensor types, %d effector types",
+        len(sensor_library),
+        len(effector_library),
+    )
 
-    # 3. Copy static assets (HTML, app.js, style.css)
+    # 3. Write embedded data JS (GeoJSON, stats, library — tile count for JS guard)
+    _write_viewer_data_js(
+        viewer_data,
+        output_dir / "viewer_data.js",
+        terrain_tile_count,
+        sensor_library=sensor_library,
+        effector_library=effector_library,
+    )
+
+    # 4. Copy static assets (HTML, app.js, style.css)
     _copy_static_assets(output_dir)
 
-    # 4. Bundle MapLibreGL vendor files
+    # 5. Bundle MapLibreGL vendor files
     _ensure_vendor_files(output_dir)
 
     _log.info("Viewer packaged → %s", output_dir)
@@ -629,13 +648,20 @@ def _serialise_saturation(result: SaturationResult) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def _write_viewer_data_js(viewer_data: ViewerData, dest: Path, terrain_tile_count: int) -> None:
+def _write_viewer_data_js(
+    viewer_data: ViewerData,
+    dest: Path,
+    terrain_tile_count: int,
+    *,
+    sensor_library: dict[str, list[dict[str, Any]]] | None = None,
+    effector_library: dict[str, list[dict[str, Any]]] | None = None,
+) -> None:
     """Write viewer data as a single inline JavaScript file.
 
     Assigns ``window.SALUS_DATA`` (coverage GeoJSON, stats, corridor/kill-chain
-    results) which is read by ``app.js`` at startup.  Terrain tiles are written
-    as individual PNG files (see :func:`_write_terrain_tile_files`) and served
-    by the HTTP server; they are no longer embedded here.
+    results, and sensor/effector library) which is read by ``app.js`` at startup.
+    Terrain tiles are written as individual PNG files (see
+    :func:`_write_terrain_tile_files`) and served by the HTTP server.
 
     Args:
         viewer_data: Exported viewer data.
@@ -643,6 +669,11 @@ def _write_viewer_data_js(viewer_data: ViewerData, dest: Path, terrain_tile_coun
         terrain_tile_count: Number of terrain tile PNG files successfully written
             to disk.  Passed through to the JS payload so ``app.js`` can guard
             the terrain source on whether tiles actually exist.
+        sensor_library: Sensor YAML data grouped by type, as returned by
+            :func:`_load_sensor_library`.  Embedded as ``SALUS_DATA.sensor_library``
+            for the interactive library panel.
+        effector_library: Effector YAML data grouped by type.  Embedded as
+            ``SALUS_DATA.effector_library``.
     """
     data_payload: dict[str, Any] = {
         "scenario_name": viewer_data.scenario_name,
@@ -659,6 +690,8 @@ def _write_viewer_data_js(viewer_data: ViewerData, dest: Path, terrain_tile_coun
         "terrain_max_zoom": viewer_data.terrain_max_zoom,
         "terrain_tile_count": terrain_tile_count,
         "sanitised": viewer_data.sanitised,
+        "sensor_library": sensor_library if sensor_library is not None else {},
+        "effector_library": effector_library if effector_library is not None else {},
     }
 
     data_json = json.dumps(data_payload, separators=(",", ":"))
@@ -697,6 +730,41 @@ def _write_terrain_tile_files(viewer_data: ViewerData, output_dir: Path) -> int:
     else:
         _log.info("Written %d/%d terrain tile files → %s", written, total, tiles_dir)
     return written
+
+
+def _load_sensor_library(data_dir: Path) -> dict[str, list[dict[str, Any]]]:
+    """Load all YAML files from *data_dir* and group them by their ``type`` field.
+
+    Each YAML file that contains a mapping with a ``type`` key is parsed and
+    added to the corresponding group.  Files that are missing, malformed, or
+    that do not produce a dict are skipped with a warning.
+
+    Args:
+        data_dir: Directory containing ``*.yaml`` sensor or effector definitions.
+
+    Returns:
+        Dict mapping type string → list of entry dicts, sorted by type key.
+        Returns an empty dict if *data_dir* does not exist.
+    """
+    if not data_dir.is_dir():
+        _log.warning("Library data directory not found: %s", data_dir)
+        return {}
+
+    library: dict[str, list[dict[str, Any]]] = {}
+    for yaml_path in sorted(data_dir.glob("*.yaml")):
+        try:
+            raw = yaml_path.read_text(encoding="utf-8")
+            entry = yaml.safe_load(raw)
+        except (yaml.YAMLError, OSError, UnicodeDecodeError) as exc:
+            _log.warning("Failed to parse library YAML %s: %s", yaml_path.name, exc)
+            continue
+        if not isinstance(entry, dict):
+            _log.warning("Library YAML %s is not a mapping — skipping", yaml_path.name)
+            continue
+        sensor_type = str(entry.get("type") or "Unknown")
+        library.setdefault(sensor_type, []).append(entry)
+
+    return dict(sorted(library.items()))
 
 
 def _copy_static_assets(output_dir: Path) -> None:

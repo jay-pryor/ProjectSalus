@@ -1,0 +1,21 @@
+# Echodyne EchoFlight — K-band AESA Radar (airborne interceptor / DAA)
+# Source: Echodyne product datasheet / Resources/Sensors/Radar/echodyne_echoflight.md
+# Last updated: 2026-04-12
+# Note: EchoFlight is the smallest/lightest MESA-family radar, designed for airborne
+#       platforms (interceptor drones, DAA systems). Detection range published against
+#       small quadcopter (~0.01 m² RCS). mounting_height_m: 0 — airborne sensor.
+
+name: Echodyne EchoFlight
+type: Radar
+
+max_range_m: 750.0           # confidence: high — datasheet: 750 m against small quadcopter (~0.01 m² RCS)
+min_range_m: 10.0            # confidence: medium — MESA/FMCW type; estimated minimum, not published
+azimuth_coverage_deg: 120.0  # confidence: medium — estimated from same MESA technology as EchoGuard (120° per panel)
+elevation_coverage_deg: 80.0 # confidence: medium — estimated from EchoGuard family; -5° to +70° arc
+elevation_boresight_deg: 32.5 # confidence: low — centre of estimated -5° to +70° arc
+frequency_bands:             # confidence: medium — K-band stated; centre frequency estimated from EchoGuard family
+  - "24.5 GHz"
+requires_los: true           # confidence: high — radar requires direct LOS to target
+mounting_height_m: 0.0       # confidence: high — airborne platform; altitude set by carrier UAS
+vegetation_penetration: 0.4  # confidence: medium — K-band (24 GHz) attenuates through vegetation; consistent with EchoGuard estimate
+cost_aud: null               # confidence: N/A — not publicly disclosed

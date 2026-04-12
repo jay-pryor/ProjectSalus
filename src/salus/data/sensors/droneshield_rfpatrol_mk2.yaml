@@ -1,0 +1,26 @@
+# DroneShield RfPatrol Mk2 — Wearable Passive RF Detection Sensor
+# Source: DroneShield product datasheet / Resources/Sensors/RF/droneshield_rfpatrol_mk2.md
+# Last updated: 2026-04-12
+# Note: Body-mounted wearable sensor — passive, no intentional RF emissions.
+#       Detection and classification only; no direction finding or geolocation.
+#       Rural detection range up to 4 km; urban ~1 km.
+#       Typically paired with DroneGun Mk4 in Immediate Response Kit (IRK).
+#       mounting_height_m: 1.5 reflects body-worn height, not fixed infrastructure.
+
+name: DroneShield RfPatrol Mk2
+type: RF
+
+max_range_m: 4000.0          # confidence: medium — datasheet: up to 4 km rural; 1 km urban
+min_range_m: 0.0             # confidence: high — passive sensor; no minimum range
+azimuth_coverage_deg: 360.0  # confidence: high — omnidirectional ISM band antenna; no direction finding
+elevation_coverage_deg: 90.0 # confidence: medium — hemispherical coverage estimated for body-worn RF sensor
+elevation_boresight_deg: 45.0 # confidence: low — upward-biased for airborne targets; estimated
+frequency_bands:             # confidence: medium — ISM bands, WiFi, custom protocols stated; integrated SDR
+  - "433 MHz"
+  - "900 MHz"
+  - "2.4 GHz"
+  - "5.8 GHz"
+requires_los: false          # confidence: high — passive RF; signal diffracts around terrain and buildings
+mounting_height_m: 1.5       # confidence: medium — wearable form factor; body-worn at typical shoulder height
+vegetation_penetration: 0.9  # confidence: medium — passive RF at ISM frequencies penetrates vegetation well
+cost_aud: null               # confidence: N/A — not publicly disclosed

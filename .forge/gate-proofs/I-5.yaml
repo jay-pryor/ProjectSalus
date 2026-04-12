@@ -1,0 +1,49 @@
+task_id: I-5
+timestamp: 2026-04-12T10:05:00Z
+quality_gates:
+  G1_lint: pass
+  G2_format: pass
+  G3_import: pass
+  G4_type: pass           # informational only — import-untyped warnings for rasterio, shapely, yaml (no stubs available); no correctness errors
+  G5_security: pass
+  G6_unit_test: pass      # 1258 passed, 3 skipped (full suite); 72 passed (test_viewer_export.py)
+  G7_coverage: pass
+  G8_secrets: pass        # detect-secrets scan src/ — results: {} (no secrets detected)
+  coverage_pct: 83        # 82.86% total; required 80%
+
+review:
+  l1_standards:
+    testing: pass         # New TestLoadSensorLibrary class (7 tests) and 3 TestPackageViewer tests follow fixture/isolation/naming standards
+    error_handling: pass  # _load_sensor_library catches specific exceptions; JS guards added for null map element
+    logging: pass         # _log.warning used for skipped YAMLs; console.warn added for malformed JS items
+    security: pass        # yaml.safe_load used (not yaml.load); no path traversal; library loaded from bundled data dir only
+  l2_agents:
+    silent_failure_hunter: {status: pass, findings: 6}
+    spec_compliance: {status: pass, findings: 2}
+    type_design_analyzer: {status: N/A, reason: "no new Python type annotations in this task"}
+    regression_reviewer: {status: N/A, reason: "JS-only new code; Python changes are additive (_load_sensor_library new function + _write_viewer_data_js new keyword args with defaults)"}
+
+defect_ids:
+  - D-291   # HIGH: dragPan permanently disabled on focus loss — resolved
+  - D-292   # MEDIUM: no null guard for #map element — resolved
+  - D-293   # MEDIUM: except Exception too broad in _load_sensor_library — resolved
+  - D-294   # MEDIUM: malformed library items silent render — resolved (console.warn added)
+  - D-295   # MEDIUM: scroll position not preserved on panel close — resolved
+  - D-296   # LOW: type:null grouped as 'None' not 'Unknown' — resolved
+  - D-297   # LOW: cosLat division at lat=±90 — accepted won't-fix (documented)
+
+overall: pass
+
+notes: |
+  I-5 implements the Sensor & Effector Library panel for the interactive viewer.
+  Key deliverables:
+  - Library toggle button (fixed position, sidebar-aware)
+  - Collapsible floating panel with sensor/effector sections grouped by type
+  - Per-entry drag handle, coloured type badge, expand arrow with spec table
+  - HTML5 drag-and-drop onto map → visual placement marker
+  - Rotate handle (sector sensors only) with bearing adjustment
+  - userPlacements[] module state + getUserPlacementsAsGeoJSON() public helper
+  - SPEC_DISPLAY_FIELDS constant for configurable spec display
+  - export.py: _load_sensor_library(), sensor_library/effector_library embedded in SALUS_DATA
+  - 10 new tests in test_viewer_export.py
+  - 12 new sensor YAML files (echodyne, hensoldt ×5, saab ×2, qinetiq, dedrone ×2, droneshield)

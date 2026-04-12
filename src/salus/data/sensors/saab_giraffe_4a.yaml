@@ -1,0 +1,23 @@
+# SAAB Giraffe 4A — S-band GaN AESA Radar (air defence / GBAD, cUAS adaptation)
+# Source: SAAB product datasheet / Resources/Sensors/Radar/saab_giraffe_4a.md
+# Last updated: 2026-04-12
+# Note: Instrumented range 400 km is against aircraft class (~5 m² RCS). For small UAS
+#       (~0.01 m² RCS) the theoretical range is ~84 km (RCS scaling); conservative estimate
+#       used here is 50 km, accounting for clutter limitations vs. low-slow targets.
+#       This is a strategic air-defence radar — included for layered GBAD configurations,
+#       not optimised for point-site cUAS. See research notes.
+
+name: SAAB Giraffe 4A
+type: Radar
+
+max_range_m: 50000.0         # confidence: low — estimated for small UAS; instrumented range 400 km against aircraft (~5 m² RCS); clutter limits actual UAS detection
+min_range_m: 500.0           # confidence: low — large rotating radar; estimated minimum range, not published
+azimuth_coverage_deg: 360.0  # confidence: high — datasheet: 360° or sector mode selectable
+elevation_coverage_deg: 71.0 # confidence: medium — datasheet: greater than 70°; modelled as 71°
+elevation_boresight_deg: 34.5 # confidence: medium — centre of estimated -1° to +70° arc
+frequency_bands:             # confidence: high — S-band published; centre frequency estimated
+  - "3.0 GHz"
+requires_los: true           # confidence: high — radar requires direct LOS to target
+mounting_height_m: 8.0       # confidence: medium — vehicle/trailer with mast; estimated from system description
+vegetation_penetration: 0.3  # confidence: medium — S-band has better foliage penetration than X-band; 0.3 estimated
+cost_aud: null               # confidence: N/A — not publicly disclosed
