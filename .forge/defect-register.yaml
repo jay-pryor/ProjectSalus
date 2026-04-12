@@ -3133,7 +3133,7 @@ defects:
     description: "pyproj Transformer.transform() returns (nan, nan) or (inf, inf) for coordinates outside the CRS valid area. round(nan, 6) is nan, producing an invalid GeoJSON feature. MapLibreGL silently drops it — sensor marker disappears with no log."
     resolution: "Added math.isfinite(lon) and math.isfinite(lat) guard; logs _log.warning with coordinates and skips feature."
     status: resolved
-    commit: pending
+    commit: bb90cf1
 
   - id: D-285
     severity: high
@@ -3144,7 +3144,7 @@ defects:
     description: "When sensor_info_map is empty (e.g. sensor_defs not loaded) all sensor features fall back to sensor_type='' and azimuth_coverage_deg=360. No warning is logged, so the misconfiguration produces silently wrong type badges ('?') and no bearing wedges."
     resolution: "Added _log.warning when sensor_info_map is empty and sensor_placements are non-empty."
     status: resolved
-    commit: pending
+    commit: bb90cf1
 
   - id: D-286
     severity: medium
@@ -3155,7 +3155,7 @@ defects:
     description: "Deferred 'import pyproj' inside _build_sensor_geojson is unguarded. ImportError propagates through export_viewer_data with no graceful fallback, unlike all coverage-layer calls which have try/except. Pre-existing in function but now more visible."
     resolution: "Wrapped _build_sensor_geojson call in try/except in export_viewer_data with fallback to _empty_feature_collection(); moved math import to module level."
     status: resolved
-    commit: pending
+    commit: bb90cf1
 
   - id: D-287
     severity: medium
@@ -3166,7 +3166,7 @@ defects:
     description: "In _buildSectorFeatures, f.geometry.coordinates is destructured without checking f.geometry exists and is a Point. A non-Point feature produces undefined lon/lat, causing NaN coordinates in sector polygons silently dropped by MapLibreGL."
     resolution: "Added guard: if (!f.geometry || f.geometry.type !== 'Point' || !Array.isArray(f.geometry.coordinates)) continue;"
     status: resolved
-    commit: pending
+    commit: bb90cf1
 
   - id: D-288
     severity: medium
@@ -3177,7 +3177,7 @@ defects:
     description: "Sensors layer toggle only controls ['sensors-circle', 'sensors-label']. The new sensors-type-badge and sensor-sectors-fill/outline layers are not toggled. Hiding 'Sensors' leaves type badges and bearing wedges visible — regression from pre-I-4 behaviour."
     resolution: "Updated mapLayerIds for 'sensors' to include 'sensors-type-badge', 'sensor-sectors-fill', 'sensor-sectors-outline'; existing map.getLayer guard handles conditional absence of sector layers."
     status: resolved
-    commit: pending
+    commit: bb90cf1
 
   - id: D-289
     severity: low
@@ -3188,7 +3188,7 @@ defects:
     description: "No guard for arcDeg <= 0 in _buildSectorPolygon. A zero-arc sector produces a degenerate spike polygon; MapLibreGL renders nothing but emits no error."
     resolution: "Added guard: if (arcDeg <= 0 || arcDeg >= 360) return null; _buildSectorFeatures checks result for null before pushing."
     status: resolved
-    commit: pending
+    commit: bb90cf1
 
   - id: D-290
     severity: low
@@ -3199,4 +3199,4 @@ defects:
     description: "sensor_type and azimuth_coverage_deg are not stripped in REDACTED/FULL sanitise mode. sensor_type reveals detection technology; azimuth_coverage_deg reveals whether sensor is directional. Pre-existing strip set only removes bearing_deg and height_override_m."
     resolution: "Decision documented in sanitise.py comment: sensor_type and azimuth_coverage_deg are model-level properties (publicly knowable from the sensor model spec), not deployment-level. bearing_deg is the tactically sensitive field and remains stripped."
     status: resolved
-    commit: pending
+    commit: bb90cf1
