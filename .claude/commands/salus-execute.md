@@ -34,12 +34,18 @@ pytest tests/ -v                                          # G6 Unit tests
 pytest tests/ --cov=src/salus --cov-fail-under=80 -q      # G7 Coverage
 ```
 
+G1–G7 apply to Python files only. If the task touches only `.js`, `.html`, or
+`manifest.json` files under `src/salus/viewer/static/` or `modules/` and no
+Python files changed, record G1–G7 as N/A with reason "JS-only task".
+
 **Step 5 — L1 Self-review**
 Read `.salus/standards/` and check the changed files against each applicable standard:
 - `testing.md` — if test files changed
 - `error-handling.md` — if exception handling changed
 - `logging.md` — if any logging added
 - `security.md` — if file I/O or external data handling changed
+- `interface-modules.md` — if any `.js`, `.html`, or `manifest.json` files
+  under `src/salus/viewer/static/` or `modules/` changed
 
 Document any violations found.
 
@@ -53,6 +59,10 @@ Always invoke:
 Also invoke if applicable:
 - `.claude/agents/type-design-analyzer.md` — if type annotations changed
 - `.claude/agents/regression-reviewer.md` — if modifying existing working code
+- `.claude/agents/module-architecture-reviewer.md` — if any `.js`, `.html`,
+  or `manifest.json` files under `src/salus/viewer/static/` or `modules/`
+  changed. Pass the full content of every changed JS/HTML/manifest file and
+  the content of any associated `manifest.json` files for context.
 
 Record each agent's findings count.
 

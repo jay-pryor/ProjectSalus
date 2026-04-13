@@ -22,6 +22,10 @@ pytest tests/ -v                                          # G6
 pytest tests/ --cov=src/salus --cov-fail-under=80 -q      # G7
 ```
 
+G1–G7 apply to Python files only. If the task touches only `.js`, `.html`, or
+`manifest.json` files under `src/salus/viewer/static/` or `modules/` and no
+Python files changed, record G1–G7 as N/A with reason "JS-only task".
+
 ### Phase 2 — L1 Standards Review
 
 Read the changed files against `.salus/standards/`. Check each applicable standard:
@@ -32,6 +36,7 @@ Read the changed files against `.salus/standards/`. Check each applicable standa
 | `error-handling.md` | Any exception handling exists in changed code |
 | `logging.md` | Any module-level state reporting was added |
 | `security.md` | File paths, external data, or user input is handled |
+| `interface-modules.md` | Any `.js`, `.html`, or `manifest.json` file under `src/salus/viewer/static/` or `modules/` was changed |
 
 Document any violations with file and line number.
 
@@ -50,6 +55,11 @@ Invoke each applicable agent using the Agent tool with `subagent_type: "general-
 3. **Type Design Analyzer** — Read `.claude/agents/type-design-analyzer.md` if type annotations were added or changed.
 
 4. **Regression Reviewer** — Read `.claude/agents/regression-reviewer.md` if modifying previously working code (not new modules).
+
+5. **Module Architecture Reviewer** — Read `.claude/agents/module-architecture-reviewer.md`
+   if any `.js`, `.html`, or `manifest.json` files under `src/salus/viewer/static/`
+   or `modules/` were changed. Pass the full content of every changed JS/HTML/manifest
+   file and any associated `manifest.json` files for context.
 
 Collect each agent's JSON output. Note findings count and severity.
 
@@ -96,10 +106,13 @@ review:
     error_handling: pass
     logging: N/A
     security: pass
+    interface_modules: N/A    # set to pass/fail if JS files changed; N/A otherwise
   l2_agents:
     silent_failure_hunter: {status: pass, findings: 0}
     spec_compliance: {status: pass, findings: 1}
-    type_design_analyzer: {status: pass, findings: 0}
+    type_design_analyzer: N/A
+    regression_reviewer: N/A
+    module_architecture_reviewer: N/A    # set to pass/fail/findings if JS files changed; N/A otherwise
 defect_ids: [D-001]
 overall: pass
 ```

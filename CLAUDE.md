@@ -54,6 +54,10 @@ Run these in order. Record pass/fail for each.
 If a gate command is not yet installed, document it as `N/A — not installed` in the gate-proof.
 G4 (mypy) and G5 (bandit) warnings are informational unless they indicate clear correctness errors.
 
+**JS-only tasks:** G1–G7 are Python-specific. If the task touches only `.js`,
+`.html`, or `manifest.json` files under `src/salus/viewer/static/` or
+`modules/` and no Python files changed, record G1–G7 as `N/A — JS-only task`.
+
 ---
 
 ## Agent Review (L2 — MANDATORY)
@@ -71,6 +75,9 @@ After quality gates pass, you MUST invoke these agents as Claude Code subagents 
 
 ### Required when modifying existing working code (not new modules):
 - **`.claude/agents/regression-reviewer.md`** — Check for regressions, behaviour changes, removed tests
+
+### Required when any `.js`, `.html`, or `manifest.json` file under `src/salus/viewer/static/` or `modules/` changed:
+- **`.claude/agents/module-architecture-reviewer.md`** — Verify module isolation, state contracts, reactive read patterns (`watch()` not `get()` after `set()`), event contracts, and map layer scoping. Pass the full content of every changed JS/HTML/manifest file plus any associated `manifest.json` files.
 
 **How to invoke:** Use the Agent tool with `subagent_type: "general-purpose"` and the agent's full system prompt as context, passing the changed files' content. Record how many findings each agent returned.
 
@@ -99,9 +106,13 @@ review:
     error_handling: pass
     logging: pass
     security: pass
+    interface_modules: N/A  # pass | fail | N/A — N/A if no JS/HTML/manifest files changed
   l2_agents:
     silent_failure_hunter: {status: pass, findings: 0}
     spec_compliance: {status: pass, findings: 1}
+    type_design_analyzer: N/A
+    regression_reviewer: N/A
+    module_architecture_reviewer: N/A  # pass | fail | N/A — N/A if no JS/HTML/manifest files changed
 defect_ids: []            # D-NNN IDs of findings logged and resolved
 overall: pass
 ```
@@ -146,6 +157,7 @@ Apply these standards when writing and reviewing code. Full definitions in `.sal
 | `error-handling.md` | Any exception handling, file I/O, external calls |
 | `logging.md` | Any module that reports state or errors |
 | `security.md` | Any file I/O, path handling, user input, external data |
+| `interface-modules.md` | Any `.js`, `.html`, or `manifest.json` file under `src/salus/viewer/static/` or `modules/` |
 
 ---
 
