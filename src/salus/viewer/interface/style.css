@@ -1,0 +1,130 @@
+/* Project Salus Interface — Two-column layout
+ *
+ * Left column: navigation bar (fixed width, full height)
+ * Right column: map canvas (fills remaining space) + panel slot overlay
+ */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  color: #e0e0e0;
+  background: #0d0d1a;
+}
+
+/* ------------------------------------------------------------------ */
+/* App shell                                                            */
+/* ------------------------------------------------------------------ */
+
+#app {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ------------------------------------------------------------------ */
+/* Nav bar (left column)                                                */
+/* ------------------------------------------------------------------ */
+
+#nav-bar {
+  width: 210px;
+  flex-shrink: 0;
+  background: #13131f;
+  border-right: 1px solid #1e1e30;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 8px;
+  gap: 4px;
+  overflow-y: auto;
+}
+
+#nav-bar button {
+  background: #1a1a2e;
+  color: #d0d0e0;
+  border: 1px solid #252540;
+  border-radius: 4px;
+  padding: 9px 12px;
+  text-align: left;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.12s, color 0.12s;
+}
+
+#nav-bar button:hover:not(:disabled) {
+  background: #0f3460;
+  color: #ffffff;
+  border-color: #1a4a80;
+}
+
+#nav-bar button:focus-visible {
+  outline: 2px solid #4488cc;
+  outline-offset: 1px;
+}
+
+#nav-bar button[aria-current="page"] {
+  background: #0f3460;
+  color: #ffffff;
+  border-color: #2266aa;
+}
+
+#nav-bar button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+#nav-bar #nav-back {
+  margin-top: auto;
+  border-top: 1px solid #1e1e30;
+  padding-top: 9px;
+  background: transparent;
+  color: #8888aa;
+  font-size: 12px;
+}
+
+#nav-bar #nav-back:hover:not(:disabled) {
+  background: #1a1a2e;
+  color: #aaaacc;
+}
+
+/* ------------------------------------------------------------------ */
+/* Main area (right column): map + panel overlay                        */
+/* ------------------------------------------------------------------ */
+
+#main {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+#map {
+  position: absolute;
+  inset: 0;
+}
+
+/* Panel slot: floating card in the top-right corner of the map */
+#panel-slot {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 340px;
+  max-height: calc(100vh - 24px);
+  background: rgba(13, 13, 26, 0.94);
+  border: 1px solid #252540;
+  border-radius: 6px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
+  overflow-y: auto;
+  z-index: 10;
+  /* Hidden until a module mounts a panel */
+  display: none;
+}
+
+/* Show the slot once it has content */
+#panel-slot:not(:empty) {
+  display: block;
+}

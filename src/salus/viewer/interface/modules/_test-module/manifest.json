@@ -1,0 +1,12 @@
+{
+  "id": "_test-module",
+  "label": "Test Module",
+  "icon": "test",
+  "reads": [],
+  "writes": [],
+  "prerequisites": [],
+  "emits": [],
+  "subscribes": [],
+  "layer_id_prefix": "_test-module",
+  "description": "Stub module for shell integration testing. Verifies discovery, API injection, and panel mounting."
+}

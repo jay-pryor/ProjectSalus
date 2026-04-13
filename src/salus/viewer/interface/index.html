@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Project Salus — Interface</title>
+  <link rel="stylesheet" href="../static/vendor/maplibre-gl.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <nav id="nav-bar" aria-label="Module navigation"></nav>
+    <div id="main">
+      <div id="map"></div>
+      <div id="panel-slot" aria-live="polite"></div>
+    </div>
+  </div>
+  <!-- MapLibreGL global loaded before shell so maplibregl is available to shell.js -->
+  <script src="../static/vendor/maplibre-gl.js"></script>
+  <script type="module" src="shell.js"></script>
+</body>
+</html>
