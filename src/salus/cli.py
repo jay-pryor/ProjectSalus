@@ -2374,3 +2374,86 @@ def viewer(
 
     click.echo(f"\nViewer ready: {result}")
     click.echo("Open index.html in a browser to explore the coverage data.")
+
+
+# ---------------------------------------------------------------------------
+# S14.2-5 — salus interface command
+# ---------------------------------------------------------------------------
+
+
+@main.command("interface")
+@click.option(
+    "--scenario",
+    "scenario",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False),
+    help="Scenario YAML to pre-load (passed to the UI on startup).",
+)
+@click.option(
+    "--port",
+    default=5000,
+    show_default=True,
+    type=int,
+    help="TCP port for the backend API server.",
+)
+@click.option(
+    "--host",
+    default="127.0.0.1",
+    show_default=True,
+    help="Bind address for the backend API server.",
+)
+@click.option(
+    "--no-browser",
+    "no_browser",
+    is_flag=True,
+    default=False,
+    help="Do not open the browser automatically.",
+)
+def interface(
+    scenario: str | None,
+    port: int,
+    host: str,
+    no_browser: bool,
+) -> None:
+    """Start the Salus interactive interface.
+
+    Launches the FastAPI backend API server and (unless --no-browser is set)
+    opens the interface HTML in the default browser.
+
+    Example:
+
+        salus interface --scenario site.yaml --port 5000
+    """
+    try:
+        import uvicorn
+
+        from salus.interface_api.app import app
+    except ImportError as exc:
+        click.echo(
+            f"Error: interface dependencies not installed ({exc}). "
+            "Install them with: pip install 'salus[interface]'",
+            err=True,
+        )
+        sys.exit(1)
+
+    interface_dir = Path(__file__).parent / "viewer" / "static"
+    index_html = interface_dir / "interface" / "index.html"
+
+    if not no_browser:
+        import webbrowser
+
+        url = f"http://{host}:{port}"
+        if index_html.exists():
+            # Open the bundled interface HTML via the file:// protocol
+            file_url = index_html.resolve().as_uri()
+            click.echo(f"Opening interface: {file_url}")
+            webbrowser.open(file_url)
+        else:
+            click.echo(f"Opening API root: {url}")
+            webbrowser.open(url)
+
+    click.echo(f"Starting Salus Interface API on http://{host}:{port}")
+    if scenario:
+        click.echo(f"Scenario: {scenario}")
+
+    uvicorn.run(app, host=host, port=port, log_level="info")

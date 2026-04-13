@@ -3386,3 +3386,80 @@ defects:
   resolution: "Replaced raw state/bus exposure with narrow handle: only emitScenario(), onScenario(), and activateModule() are exposed — no direct state or bus access."
   status: resolved
   commit: 5743ffc
+
+- id: D-308
+  severity: high
+  task: S14.2
+  found_by: silent_failure_hunter
+  file: src/salus/interface_api/app.py
+  line: 97
+  description: "_get_sensor_defs() swallows load_sensors() exception and returns [], causing all sensor placements to be silently skipped and a 0% complete event emitted with no error indication."
+  resolution: "Removed _sensor_cache=[] from except block; now returns [] uncached so next request retries. Added effector_defs assignment and empty-library warning in simulate pipeline."
+  status: resolved
+  commit: ""
+
+- id: D-309
+  severity: high
+  task: S14.2
+  found_by: silent_failure_hunter
+  file: src/salus/interface_api/app.py
+  line: 97
+  description: "On load failure, _sensor_cache and _effector_cache are set to [] — permanently caching the error state for the process lifetime so subsequent requests never retry the real directory."
+  resolution: "Cache assignment moved to after successful load only. On exception, return [] without caching so transient errors are retried on next request."
+  status: resolved
+  commit: ""
+
+- id: D-310
+  severity: high
+  task: S14.2
+  found_by: silent_failure_hunter
+  file: src/salus/interface_api/app.py
+  line: 160
+  description: "_drain_queue blocks forever if the worker thread exits without pushing a terminal event (e.g. killed by BaseException), holding the HTTP connection open indefinitely."
+  resolution: "Added _queue_get_with_timeout() helper using q.get(timeout=_QUEUE_TIMEOUT_S); on queue.Empty emits an error SSE event and terminates the generator."
+  status: resolved
+  commit: ""
+
+- id: D-311
+  severity: medium
+  task: S14.2
+  found_by: silent_failure_hunter
+  file: src/salus/interface_api/app.py
+  line: 192
+  description: "_get_effector_defs() return value discarded in _run_simulate_pipeline — missing assignment prevents observability when effector library is empty."
+  resolution: "Added effector_defs = _get_effector_defs() with explicit warning log when list is empty."
+  status: resolved
+  commit: ""
+
+- id: D-312
+  severity: medium
+  task: S14.2
+  found_by: silent_failure_hunter
+  file: src/salus/interface_api/app.py
+  line: 245
+  description: "Inline tempfile block for gap map can raise NameError in finally clause if NamedTemporaryFile constructor itself raises, masking the original OSError."
+  resolution: "Replaced inline tempfile block with _render_to_b64_api() call for gap map (same helper already used for other maps). _render_to_b64_api initialises tmp_path=None before the try block."
+  status: resolved
+  commit: ""
+
+- id: D-313
+  severity: high
+  task: S14.2
+  found_by: spec_compliance
+  file: src/salus/interface_api/app.py
+  line: 104
+  description: "OptimiserRequest uses field names (site_dem_path, sensors_to_place, etc.) that do not match spec-defined names (zones, constraints, sensor_library_filter, effector_library_filter, terrain)."
+  resolution: "Redesigned OptimiserRequest with spec-defined field names: terrain, sensor_library_filter, effector_library_filter, zones, constraints (nested OptimiserConstraints model). Updated _run_optimise_pipeline and tests accordingly."
+  status: resolved
+  commit: ""
+
+- id: D-314
+  severity: high
+  task: S14.2
+  found_by: spec_compliance
+  file: src/salus/interface_api/app.py
+  line: 134
+  description: "ReportRequest uses field name 'scenario' where spec requires 'report_config'."
+  resolution: "Renamed 'scenario' field to 'report_config' in ReportRequest. Updated /api/report endpoint and tests to use new field name."
+  status: resolved
+  commit: ""
