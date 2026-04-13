@@ -1,25 +1,34 @@
-# cUAS Site Simulation Tool — Technical Architecture
+# Project Salus — Simulation Engine Architecture
 
-### Working Document — Architecture Scoping & Discussion
+### Reference Document — Backend computation engine and data models
+
+> **See also:** [`docs/InterfaceArchitecture.md`](InterfaceArchitecture.md) — the
+> interactive interface layer (shell, modules, state proxy, event bus) that sits
+> in front of this engine and exposes it to analysts through a browser UI.
 
 ---
 
 ## 1. System Overview
 
-The tool takes **site terrain data + sensor/effector specifications + threat profiles** and produces a **coverage analysis report** showing where a proposed cUAS configuration provides detection/engagement coverage, where gaps exist, and how different configurations compare.
+The tool takes **site terrain data + sensor/effector specifications + threat profiles** and produces two parallel outputs: a **PDF coverage analysis report** for defence proposals and a **standalone interactive HTML viewer** for briefings and handover. The simulation engine described here is the computation backend for both.
 
 ```
-┌─────────────┐    ┌──────────────┐    ┌───────────────┐    ┌──────────────┐
-│  Site Data   │───▶│  Terrain &   │───▶│   Simulation  │───▶│    Report    │
-│  Ingestion   │    │  Scene Model │    │    Engine      │    │  Generation  │
-└─────────────┘    └──────────────┘    └───────────────┘    └──────────────┘
-       ▲                                       ▲
-       │                                       │
-┌─────────────┐                        ┌───────────────┐
-│  LiDAR /    │                        │  Sensor/      │
-│  GIS Data   │                        │  Effector DB  │
-└─────────────┘                        └───────────────┘
+┌─────────────┐    ┌──────────────┐    ┌───────────────┐    ┌──────────────────┐
+│  Site Data   │───▶│  Terrain &   │───▶│   Simulation  │───▶│  PDF Report      │
+│  Ingestion   │    │  Scene Model │    │    Engine      │    │  Generation      │
+└─────────────┘    └──────────────┘    └───────────────┘    └──────────────────┘
+       ▲                                       │  ▲                   │
+       │                                       │  │             ┌─────▼────────────┐
+┌─────────────┐                        ┌───────▼──┴────┐       │  Interactive     │
+│  LiDAR /    │                        │  Sensor/      │       │  HTML Viewer     │
+│  GIS Data   │                        │  Effector DB  │       │  (MapLibreGL)    │
+└─────────────┘                        └───────────────┘       └──────────────────┘
 ```
+
+The interactive viewer is a zero-dependency static package — pre-computed results
+baked in, no simulation capability. The interactive **editing interface** (placement,
+optimisation, live simulation runs) is a separate concern described in
+[`docs/InterfaceArchitecture.md`](InterfaceArchitecture.md).
 
 ---
 
@@ -365,9 +374,12 @@ For a 3 km × 3 km site at 5 m resolution with 5 altitude bands and 4 sensors: ~
 
 ---
 
-### 2.5 — Report Generation
+### 2.5 — Report Generation and Viewer Export
 
-**Purpose:** Produce a professional PDF deliverable that can be included in a defence proposal.
+**Purpose:** Produce two deliverables from the same simulation results:
+1. **PDF report** — static professional document for inclusion in a defence proposal.
+2. **Interactive HTML viewer** — standalone MapLibreGL package for client briefings
+   and handover. Pre-computed results only; no simulation capability at runtime.
 
 **Report contents:**
 1. Executive summary — site overview, configuration assessed, key findings
@@ -391,13 +403,22 @@ For a 3 km × 3 km site at 5 m resolution with 5 altitude bands and 4 sensors: ~
 | Matplotlib/Folium → PDF | Good for map generation | Less control over full document layout |
 | Quarto / Pandoc | Markdown → PDF, good for technical reports | External dependency |
 
-**Map/visualisation generation:**
-- Coverage heat maps: Matplotlib or Folium (interactive HTML) or QGIS rendering
-- 3D terrain views: Pyvista, Plotly 3D, or Three.js (if web-based)
+**Map/visualisation generation (PDF):**
+- Coverage heat maps: Matplotlib (static PNG, embedded in PDF)
 - Site boundary overlays: GeoPandas + Matplotlib
+- Kill chain diagrams, charts: Matplotlib
+
+**Interactive viewer:** `salus/viewer/export.py` packages pre-computed GeoJSON layers,
+sensor placements, and terrain tile metadata into a `viewer_data.js` file alongside
+the MapLibreGL static assets. The viewer runs entirely in the browser — no server
+required after export. `salus/viewer/sanitise.py` strips exact sensor specs, rounds
+coordinates, and omits proprietary parameters before handover.
+
+**Chosen approach:** WeasyPrint for PDF (HTML/CSS → PDF — best layout control, no
+LaTeX dependency). MapLibreGL for interactive viewer (already in use, handles terrain
+tiles and GeoJSON layers). Both are produced on every `salus report` run.
 
 **Open questions:**
-- [ ] Do we produce a static PDF, an interactive HTML report, or both?
 - [ ] Do we need to match a specific Defence report template/format?
 - [ ] How do we handle classification markings on reports?
 
@@ -512,6 +533,7 @@ salus/
 |---------|---------|-------------|
 | **Matplotlib** | Coverage heat maps, gap maps, charts, statistics plots | Standard Python plotting. Produces publication-quality PNGs for PDF embedding. Full control over styling. |
 | **contextily** | Basemap tiles for coverage maps | Adds OpenStreetMap/satellite basemaps behind coverage overlays. Makes maps immediately readable. Works offline with cached tiles. |
+| **MapLibreGL v3.x** (JavaScript) | Interactive viewer and editing interface terrain canvas | 3D terrain with WMTS tiles, GeoJSON layers, symbol layers, data-driven paint. Used in both the standalone viewer export and the full interface. Not a Python dependency — runs in browser. |
 
 #### Report Generation
 | Package | Purpose | Why This One |
@@ -567,12 +589,26 @@ dev = [
 ]
 ```
 
+### Interactive Interface Layer
+
+The interactive editing interface (sensor placement, live simulation runs, optimiser)
+is a JavaScript + MapLibreGL frontend backed by a thin FastAPI wrapper around this
+engine. This layer is architecturally separate from the engine and is documented in
+[`docs/InterfaceArchitecture.md`](InterfaceArchitecture.md).
+
+**FastAPI** is the planned backend API server for the interface layer. It wraps the
+existing Pydantic models with a JSON/SSE API — no new schema. Not needed for the
+CLI-only simulation workflow.
+
+**MapLibreGL** (JavaScript) is used in both the standalone viewer export and the
+interactive interface. It is not a Python dependency.
+
 ### What's NOT in the Stack (and Why)
 
 | Excluded | Reason |
 |----------|--------|
-| Django / Flask / FastAPI | No web UI in MVP. When needed, FastAPI is the likely choice — add it then. |
-| PostgreSQL / PostGIS | Flat files (GeoTIFF, GeoJSON, YAML) are sufficient for single-operator MVP. Add when multi-user. |
+| Django / Flask | FastAPI is the chosen API layer for the interface backend. Django/Flask offer nothing we need over FastAPI for this use case. |
+| PostgreSQL / PostGIS | Flat files (GeoTIFF, GeoJSON, YAML) are sufficient for single-operator use. Add when multi-user (see multi-user migration path in `docs/InterfaceArchitecture.md`). |
 | Open3D | Overkill for 2.5D terrain. PDAL + rasterio handles everything we need. |
 | SPLAT! / Radio Mobile | Considered for RF propagation wrapping, but our MVP RF model (FSPL + knife-edge) is simpler than what these tools solve. Not worth the integration overhead. |
 | Folium | Considered for interactive maps, but Matplotlib handles static map generation for PDF. Folium can be added later for interactive HTML reports. |
