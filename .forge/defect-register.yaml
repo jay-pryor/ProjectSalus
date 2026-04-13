@@ -3286,7 +3286,7 @@ defects:
   description: "activateModule() is async but button click handlers call it fire-and-forget (no await, no .catch()). Any loadModule() rejection or mod.init() throw is silently dropped. activeModuleId is updated before the await, so state appears to advance even if the module never mounts."
   resolution: "All click handler call sites now chain .catch() with console.error logging. activateModule itself has a try/catch around the async loadModule/init block."
   status: resolved
-  commit: pending
+  commit: 5743ffc
 
 - id: D-299
   severity: high
@@ -3297,7 +3297,7 @@ defects:
   description: "mod.init(entry.api) is called without verifying mod is non-null and mod.init is a function. If dynamic import resolves without an init export, TypeError is silently dropped (see D-298)."
   resolution: "Added guard: if (!mod || typeof mod.init !== 'function') throw descriptive Error before calling init."
   status: resolved
-  commit: pending
+  commit: 5743ffc
 
 - id: D-300
   severity: high
@@ -3308,7 +3308,7 @@ defects:
   description: "current.runUnmount() is called without try/catch. An exception from runUnmount would propagate and partially abort activateModule mid-flight — activeModuleId not yet updated at that point."
   resolution: "Wrapped current.runUnmount() in try/catch that logs the error and continues activation."
   status: resolved
-  commit: pending
+  commit: 5743ffc
 
 - id: D-301
   severity: high
@@ -3319,7 +3319,7 @@ defects:
   description: "createModeManager signature mismatch: spec requires (container, state, bus, moduleRegistry); implementation has (navContainer, panelSlot, state, moduleRegistry, _doc) — bus is absent. Mode manager cannot emit/subscribe shell-level lifecycle events."
   resolution: "Added bus as 4th parameter (navContainer, panelSlot, state, bus, moduleRegistry, _doc). Updated shell.js call site. All tests updated."
   status: resolved
-  commit: pending
+  commit: 5743ffc
 
 - id: D-302
   severity: high
@@ -3330,7 +3330,7 @@ defects:
   description: "Icon rendering from manifest.icon is not implemented. Nav buttons show label text only; manifest.icon field is never read."
   resolution: "Added icon rendering: when manifest.icon is set, button contains a <span class=nav-icon> with the icon value and a <span> with the label text."
   status: resolved
-  commit: pending
+  commit: 5743ffc
 
 - id: D-303
   severity: medium
@@ -3341,7 +3341,7 @@ defects:
   description: "initialised.add(moduleId) called BEFORE await entry.loadModule(). If loadModule rejects or init throws, the module ID stays in the Set and can never be re-activated in the session — permanently silently broken."
   resolution: "Moved initialised.add(moduleId) to after mod.init() returns successfully (inside the try block, after init call). Failed loads are not added to the Set so retries work."
   status: resolved
-  commit: pending
+  commit: 5743ffc
 
 - id: D-304
   severity: medium
@@ -3352,7 +3352,7 @@ defects:
   description: "Back button click handler calls activateModule(prev) without .catch(). Same silent-drop path as D-298 for backward navigation."
   resolution: "Added .catch(err => console.error('[mode-manager] Back navigation error:', err)) to activateModule call in Back button handler."
   status: resolved
-  commit: pending
+  commit: 5743ffc
 
 - id: D-305
   severity: medium
@@ -3363,7 +3363,7 @@ defects:
   description: "resp.json() result not validated as a non-null, non-array object before pushing to rawManifests. A manifest.json file containing valid JSON but wrong type (array, string, null) produces misleading validation errors instead of a clear type error."
   resolution: "Added guard after resp.json(): skip with clear warning if manifest is null, array, or non-object type."
   status: resolved
-  commit: pending
+  commit: 5743ffc
 
 - id: D-306
   severity: medium
@@ -3374,7 +3374,7 @@ defects:
   description: "panel.mount(element) has no guard on the element argument. api.panel.mount(null) throws an unhandled TypeError that propagates silently (given D-298)."
   resolution: "Added guard: throws TypeError with clear message if element is null, undefined, or not a DOM node (nodeType check)."
   status: resolved
-  commit: pending
+  commit: 5743ffc
 
 - id: D-307
   severity: medium
@@ -3385,4 +3385,4 @@ defects:
   description: "window._salusShell exposes raw state (setState/getState with no contract checks) and raw bus (emit any event) on the global. Any module can call window._salusShell.state.setState(key, value) to bypass all contract enforcement."
   resolution: "Replaced raw state/bus exposure with narrow handle: only emitScenario(), onScenario(), and activateModule() are exposed — no direct state or bus access."
   status: resolved
-  commit: pending
+  commit: 5743ffc
