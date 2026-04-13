@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title id="page-title">Salus — Coverage Viewer</title>
+  <link rel="stylesheet" href="vendor/maplibre-gl.css"/>
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+
+<!-- ── Sidebar ─────────────────────────────────────────────────────────── -->
+<div id="sidebar">
+  <div id="sidebar-header">
+    <span id="scenario-title">Loading…</span>
+    <button id="sidebar-toggle" title="Collapse sidebar">◀</button>
+  </div>
+
+  <!-- Stats panel -->
+  <section class="panel" id="panel-stats">
+    <h3>Coverage Summary</h3>
+    <div id="stats-content"></div>
+  </section>
+
+  <!-- Layer toggles -->
+  <section class="panel" id="panel-layers">
+    <h3>Layers</h3>
+    <div id="layer-controls"></div>
+  </section>
+
+  <!-- Kill chain panel (hidden until corridors present) -->
+  <section class="panel hidden" id="panel-killchain">
+    <h3>Kill Chain</h3>
+    <div id="killchain-select"></div>
+    <div id="killchain-chart"></div>
+  </section>
+
+  <!-- Saturation panel (hidden until saturation data present) -->
+  <section class="panel hidden" id="panel-saturation">
+    <h3>Saturation</h3>
+    <div id="saturation-chart"></div>
+    <div id="saturation-stats"></div>
+  </section>
+
+  <div id="sidebar-footer">
+    <span id="generated-at"></span>
+  </div>
+</div>
+
+<!-- ── Map container ────────────────────────────────────────────────────── -->
+<div id="map"></div>
+
+<!-- ── Library toggle button ────────────────────────────────────────────── -->
+<button id="library-toggle" title="Open sensor &amp; effector library">☰ Library</button>
+
+<!-- ── Library floating panel ───────────────────────────────────────────── -->
+<div id="library-panel" class="hidden">
+  <div id="library-panel-header">
+    <span>Sensor &amp; Effector Library</span>
+    <button id="library-close" title="Close">✕</button>
+  </div>
+  <div id="library-panel-body">
+    <!-- Populated by app.js from SALUS_DATA.sensor_library / effector_library -->
+  </div>
+</div>
+
+<!-- ── Gap inspector tooltip ────────────────────────────────────────────── -->
+<div id="gap-tooltip" class="hidden">
+  <strong>Coverage Gap</strong>
+  <div id="gap-info"></div>
+</div>
+
+<!-- ── Sensor popup (MapLibreGL popup fills this) ───────────────────────── -->
+
+<!-- ── Inline data (written by package_viewer) ──────────────────────────── -->
+<script src="viewer_data.js"></script>
+
+<!-- ── MapLibreGL ───────────────────────────────────────────────────────── -->
+<script src="vendor/maplibre-gl.js"></script>
+
+<!-- ── Application ──────────────────────────────────────────────────────── -->
+<script src="app.js"></script>
+
+</body>
+</html>
