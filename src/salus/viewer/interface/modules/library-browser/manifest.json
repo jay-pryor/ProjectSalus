@@ -1,0 +1,11 @@
+{
+  "id": "library-browser",
+  "label": "Library Browser",
+  "reads": ["sensor_library", "effector_library"],
+  "writes": [],
+  "prerequisites": [],
+  "emits": ["placement:pending"],
+  "subscribes": [],
+  "layer_id_prefix": "library-browser",
+  "description": "Browse the sensor and effector catalogue and initiate placement by dragging or clicking."
+}

@@ -3463,3 +3463,91 @@ defects:
   resolution: "Renamed 'scenario' field to 'report_config' in ReportRequest. Updated /api/report endpoint and tests to use new field name."
   status: resolved
   commit: "004e888"
+
+- id: D-315
+  severity: medium
+  task: S14.4
+  found_by: module_architecture_reviewer
+  file: src/salus/viewer/interface/modules/library-browser/index.js
+  line: 107
+  description: "document.addEventListener('keydown', ...) attaches listener to global document, violating module isolation (MUST rule 2). Intercepts keystrokes regardless of active module; conflicts with any other module that also handles Escape on document."
+  resolution: "Changed document.addEventListener/removeEventListener('keydown') to api.map.getCanvas().addEventListener/removeEventListener — scopes Escape listener to map canvas, preserving module isolation."
+  status: resolved
+  commit: ""
+
+- id: D-316
+  severity: high
+  task: S14.4
+  found_by: silent_failure_hunter
+  file: src/salus/viewer/interface/modules/library-browser/index.js
+  line: 310
+  description: "e.dataTransfer not null-checked in dragstart handler. draggingDef is assigned before accessing dataTransfer, leaving module in half-initialised drag state if dataTransfer is absent; subsequent drop silently places sensor using stale draggingDef."
+  resolution: "Added `if (!e.dataTransfer) { draggingDef = null; return; }` guard at top of dragstart handler to prevent half-initialised drag state."
+  status: resolved
+  commit: ""
+
+- id: D-317
+  severity: high
+  task: S14.4
+  found_by: silent_failure_hunter
+  file: src/salus/viewer/interface/modules/library-browser/index.js
+  line: 254
+  description: "api.map.unproject() return value not null-checked in _onMapClick (click-to-place). If unproject returns undefined the placement event is silently swallowed."
+  resolution: "Added null-check on api.map.unproject() return value in _onMapClick; returns early if null to prevent swallowed placement."
+  status: resolved
+  commit: ""
+
+- id: D-318
+  severity: high
+  task: S14.4
+  found_by: silent_failure_hunter
+  file: src/salus/viewer/interface/modules/library-browser/index.js
+  line: 287
+  description: "api.map.unproject() return value not null-checked in _onDragOver. Ghost marker silently freezes at last position if unproject returns undefined."
+  resolution: "Added null-check on api.map.unproject() return value in _onDragOver; returns early if null rather than freezing ghost."
+  status: resolved
+  commit: ""
+
+- id: D-319
+  severity: high
+  task: S14.4
+  found_by: silent_failure_hunter
+  file: src/salus/viewer/interface/modules/library-browser/index.js
+  line: 297
+  description: "api.map.unproject() return value not null-checked in _onDrop. If unproject returns undefined, placement:pending is emitted with lat/lng = undefined, silently injecting malformed placement coordinates into downstream simulation."
+  resolution: "Added null-check on api.map.unproject() return value in _onDrop; returns early if null to prevent emitting placement:pending with undefined coordinates."
+  status: resolved
+  commit: ""
+
+- id: D-320
+  severity: medium
+  task: S14.4
+  found_by: silent_failure_hunter
+  file: src/salus/viewer/interface/modules/library-browser/index.js
+  line: 140
+  description: "_buildGroupedEntries null guard does not cover case where libraryDict is an Array or non-object scalar. Malformed API response silently produces empty panel with no warning."
+  resolution: "Added Array.isArray and typeof check in _buildGroupedEntries before Object.entries() call; logs console.warn and returns empty on unexpected format."
+  status: resolved
+  commit: ""
+
+- id: D-321
+  severity: medium
+  task: S14.4
+  found_by: silent_failure_hunter
+  file: src/salus/viewer/interface/modules/library-browser/index.js
+  line: 361
+  description: "api.state.get() called for sibling key inside watch() callback. Under async state (multi-user), the get() may return stale sibling value when both libraries are updated in rapid succession, causing panel to render mismatched data silently."
+  resolution: "Replaced cross-key get() calls in watch() callbacks with local mirror variables (latestSensors, latestEffectors) updated by each respective watcher."
+  status: resolved
+  commit: ""
+
+- id: D-322
+  severity: low
+  task: S14.4
+  found_by: silent_failure_hunter
+  file: src/salus/viewer/interface/modules/library-browser/index.js
+  line: 109
+  description: "detail.innerHTML built via template literals embedding format(def[key]) values without HTML escaping. The 'type' field in particular uses raw string from API payload; if it contains < or >, this is a stored XSS vector."
+  resolution: "Added _esc() HTML-escape helper; applied to user-sourced string values (type field) passed into innerHTML template literals via SPEC_DISPLAY_FIELDS format function."
+  status: resolved
+  commit: ""

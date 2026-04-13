@@ -1,0 +1,56 @@
+task_id: S14.4
+timestamp: 2026-04-13T12:30:00Z
+quality_gates:
+  G1_lint: "N/A — JS-only task"
+  G2_format: "N/A — JS-only task"
+  G3_import: "N/A — JS-only task"
+  G4_type: "N/A — JS-only task"
+  G5_security: "N/A — JS-only task"
+  G6_unit_test: pass   # JS: 31/31 pass (node --test test-library-browser.js); Python: 1270 passed, 3 skipped (unchanged from S14.2 — no Python files modified)
+  G7_coverage: "N/A — JS-only task; Python coverage unchanged at 81% from S14.2"
+  G8_secrets: "N/A — JS-only task; no new source files in src/salus Python tree"
+  coverage_pct: 81
+review:
+  l1_standards:
+    testing: pass      # 31 tests covering all 3 sub-tasks: manifest validity, init setup, drag-and-drop (3 tests), click-to-place (6 tests), watch-rebuild (3 tests), onUnmount cleanup (3 tests)
+    error_handling: pass  # unproject() null-guards on all 3 call sites; dataTransfer null-guard in dragstart; libraryDict type/Array guard; ghost source guarded with if(src)
+    logging: pass      # console.warn('[library-browser] unexpected library format:...) on malformed library dict
+    security: pass     # _esc() HTML-escape function applied to user-sourced string values in innerHTML; no path traversal; keydown scoped to map canvas (D-315)
+    interface_modules: pass   # SPEC_DISPLAY_FIELDS constant at top; only init(api) exported; reads declared in manifest; no writes; watch() for reactive updates; local mirrors (no get() in watcher); all IDs prefixed library-browser:; onUnmount cleanup complete
+  l2_agents:
+    silent_failure_hunter: {status: fail, findings: 7}    # D-316 through D-322 found and resolved
+    spec_compliance: N/A   # JS-only task; no Python modules introduced or modified
+    type_design_analyzer: N/A
+    regression_reviewer: N/A   # new module only; no existing working code modified
+    module_architecture_reviewer: {status: fail, findings: 1}  # D-315 found and resolved
+defect_ids:
+  - D-315   # document.addEventListener isolation violation — resolved
+  - D-316   # e.dataTransfer null-check missing in dragstart — resolved
+  - D-317   # unproject() null-check missing in _onMapClick — resolved
+  - D-318   # unproject() null-check missing in _onDragOver — resolved
+  - D-319   # unproject() null-check missing in _onDrop — resolved
+  - D-320   # libraryDict type guard missing in _buildGroupedEntries — resolved
+  - D-321   # cross-key get() in watch() callbacks — resolved with local mirrors
+  - D-322   # innerHTML XSS via unescaped API string fields — resolved
+overall: pass
+notes: |
+  S14.4 implements all 3 tasks: Library Browser manifest + panel HTML (14.4-1),
+  drag-and-drop placement initiation with ghost marker (14.4-2), and
+  keyboard-accessible click-to-place with spec card, confidence indicators,
+  and Escape cancel (14.4-3).
+
+  All JS-only — G1–G5 and G8 are N/A per CLAUDE.md JS-only task rule.
+  Python test suite ran as a regression check: 1270 passed, 3 skipped
+  (identical to S14.2 — no Python files modified).
+
+  8 findings from L2 agents (4 high, 3 medium, 1 low) were all logged
+  and remediated before commit:
+    - 3 unproject() null-guards prevent silent undefined lat/lng in placement:pending
+    - dataTransfer null-guard prevents half-initialised drag state
+    - isolation fix scopes Escape keydown to map canvas not global document
+    - local mirror variables eliminate stale cross-key get() in watch callbacks
+    - HTML escape helper prevents XSS from sensor type field values
+
+  modules/index.json also gained terrain-loader automatically via forge hook
+  (S14.3 was already present on disk; hook added it when library-browser was
+  registered).
