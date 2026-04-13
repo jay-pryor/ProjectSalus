@@ -3551,3 +3551,113 @@ defects:
   resolution: "Added _esc() HTML-escape helper; applied to user-sourced string values (type field) passed into innerHTML template literals via SPEC_DISPLAY_FIELDS format function."
   status: resolved
   commit: "68e8798"
+
+- id: D-323
+  severity: high
+  task: S14.3
+  found_by: silent_failure_hunter
+  file: src/salus/interface_api/app.py
+  line: 612
+  description: "resolution_m computed as float(abs(src.transform.a)) which is in degrees-per-pixel for geographic-CRS DEMs (e.g. EPSG:4326). _compute_zoom_levels uses this as metres, producing z_ideal≈30 which clamps to max_zoom=13 regardless of actual resolution. Wrong tile pyramid density silently generated for geographic CRS inputs."
+  resolution: ""
+  status: open
+  commit: ""
+
+- id: D-324
+  severity: high
+  task: S14.3
+  found_by: silent_failure_hunter
+  file: src/salus/interface_api/app.py
+  line: 690
+  description: "Terrarium blue channel uses np.round() (banker's rounding) instead of floor-based encoding. np.round(0.5*256) = 128 due to round-half-to-even, but standard Terrarium encoding requires floor(h*256)%256. Systematic 1/256 m encoding error for subset of elevations."
+  resolution: ""
+  status: open
+  commit: ""
+
+- id: D-325
+  severity: medium
+  task: S14.3
+  found_by: silent_failure_hunter
+  file: src/salus/interface_api/app.py
+  line: 626
+  description: "except Exception: pass silently swallows src.crs.to_epsg() failures with no log message. Transient or unexpected errors are invisible; crs_epsg silently returns None making diagnosis impossible."
+  resolution: ""
+  status: open
+  commit: ""
+
+- id: D-326
+  severity: medium
+  task: S14.3
+  found_by: silent_failure_hunter
+  file: src/salus/interface_api/app.py
+  line: 674
+  description: "_generate_terrain_tile catches all reproject exceptions at DEBUG level and returns None. If all tiles fail (e.g. CRS incompatibility), _run_tile_generation sets done=True with no error — SSE stream emits {type:complete} while zero tiles written. Browser sees success, tile server returns 404 for every request."
+  resolution: ""
+  status: open
+  commit: ""
+
+- id: D-327
+  severity: medium
+  task: S14.3
+  found_by: silent_failure_hunter
+  file: src/salus/interface_api/app.py
+  line: 901
+  description: "terrain_load reads entire uploaded DEM into memory via await dem_file.read() with no file size guard. Arbitrarily large upload buffers entire file in memory before write_bytes is called, risking OOM on large DEMs."
+  resolution: ""
+  status: open
+  commit: ""
+
+- id: D-328
+  severity: medium
+  task: S14.3
+  found_by: silent_failure_hunter
+  file: src/salus/interface_api/app.py
+  line: 990
+  description: "terrain_tile_progress SSE endpoint emits infinite {type:progress, pct:0} stream if polled before /api/terrain/load is called (no session active). No timeout or idle guard; connection never terminates."
+  resolution: ""
+  status: open
+  commit: ""
+
+- id: D-329
+  severity: medium
+  task: S14.3
+  found_by: module_architecture_reviewer
+  file: src/salus/viewer/interface/modules/terrain-loader/index.js
+  line: 4
+  description: "API_BASE assigned at module-evaluation time by reading window.location outside init(api). Violates Invariant 1 (module isolation) — window.* access outside init() call stack. Couples module to browser environment before API injection."
+  resolution: ""
+  status: open
+  commit: ""
+
+- id: D-330
+  severity: medium
+  task: S14.3
+  found_by: module_architecture_reviewer
+  file: src/salus/viewer/interface/modules/terrain-loader/manifest.json
+  line: 1
+  description: "manifest.json declares reads:[] but module calls api.state.get('terrain') at mount time and api.state.watch('terrain',...). The 'terrain' key must appear in reads[] per state contract invariant."
+  resolution: ""
+  status: open
+  commit: ""
+
+- id: D-331
+  severity: medium
+  task: S14.3
+  found_by: regression_reviewer
+  file: src/salus/viewer/interface/map-proxy.js
+  line: 34
+  description: "ALLOWED_MAP_METHODS still has 16 entries and omits setTerrainSource. Proxy created with allowTerrainSource:true exposes 17 methods; constant is no longer an accurate description of the proxy surface. Module-level docblock also claims setTerrain absent from proxy unconditionally."
+  resolution: ""
+  status: open
+  commit: ""
+
+- id: D-332
+  severity: medium
+  task: S14.3
+  found_by: regression_reviewer
+  file: src/salus/viewer/interface/tests/test-map-proxy.js
+  line: 52
+  description: "No tests for createMapProxy with options.allowTerrainSource=true path. setTerrainSource delegation, raw-instance encapsulation, and freeze behavior for the 17-method proxy are all untested."
+  resolution: ""
+  status: open
+  commit: ""

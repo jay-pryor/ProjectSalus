@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import io
 import json
 import logging
+import math
 import queue as _queue
 import tempfile
 import threading
@@ -22,7 +24,7 @@ from pathlib import Path
 from typing import Any, AsyncGenerator
 
 import numpy as np
-from fastapi import FastAPI
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
@@ -60,6 +62,30 @@ _effector_cache: list[EffectorDefinition] | None = None
 
 # SSE stream termination event types.
 _SSE_TERMINAL_TYPES: frozenset[str] = frozenset({"complete", "error"})
+
+# ---------------------------------------------------------------------------
+# Terrain session state (S14.3)
+# ---------------------------------------------------------------------------
+
+# Root directory for uploaded DEM/DSM files and pre-generated tile sets.
+_TERRAIN_DATA_DIR: Path = Path(tempfile.gettempdir()) / "salus_terrain"
+
+# Maximum accepted DEM/DSM upload size (500 MB).  Prevents OOM on oversized
+# uploads that would otherwise buffer entirely in memory (D-327).
+_MAX_DEM_UPLOAD_BYTES: int = 500 * 1024 * 1024
+
+# Per-request terrain state shared between the load endpoint and the tile
+# generation background thread.  Protected by _terrain_session_lock.
+_terrain_session_lock: threading.Lock = threading.Lock()
+_terrain_session: dict[str, Any] = {
+    "dem_path": None,
+    "dsm_path": None,
+    "metadata": None,
+    "progress_pct": 0,
+    "done": False,
+    "error": None,
+    "tile_dir": None,
+}
 
 # Maximum seconds to wait on the SSE queue before emitting a timeout error.
 # Prevents the connection from hanging forever if a worker thread exits
@@ -550,6 +576,204 @@ def _run_optimise_pipeline(
 
 
 # ---------------------------------------------------------------------------
+# Terrain tile helpers (S14.3)
+# ---------------------------------------------------------------------------
+
+
+def _compute_zoom_levels(resolution_m: float) -> tuple[int, int]:
+    """Return (min_zoom, max_zoom) for an XYZ tile pyramid at *resolution_m*.
+
+    Targets the zoom level where the WebMercator pixel size is closest to the
+    DEM pixel size.  Clamped to [5, 13] to keep tile counts manageable.
+    """
+    # Pixel size at zoom Z (WebMercator) = 40_075_016.686 / (256 * 2^Z) metres
+    z_ideal = math.log2(max(40_075_016.686 / (256.0 * max(resolution_m, 0.1)), 1.0))
+    max_zoom = int(max(5, min(13, round(z_ideal))))
+    min_zoom = max(0, max_zoom - 5)
+    return min_zoom, max_zoom
+
+
+def _compute_dem_bounds_wgs84(
+    dem_path: Path,
+) -> tuple[list[float], list[float], float, int | None]:
+    """Return WGS84 bounds, centre, resolution (m), and CRS EPSG from a GeoTIFF.
+
+    Returns:
+        (bounds_wgs84, centre_wgs84, resolution_m, crs_epsg)
+        where bounds_wgs84 = [west, south, east, north] (degrees).
+
+    Raises:
+        ValueError: if the DEM has no CRS.
+    """
+    import rasterio  # lazy — avoid adding to app startup time
+    import rasterio.crs
+    import rasterio.warp
+
+    with rasterio.open(dem_path) as src:
+        if src.crs is None:
+            raise ValueError(f"DEM has no CRS defined: {dem_path}")
+
+        # Convert pixel size to metres.  For projected CRS the transform unit is
+        # already metres; for geographic CRS it is degrees — multiply by the
+        # approximate metres-per-degree at the equator so _compute_zoom_levels
+        # receives a consistent unit (D-323).
+        raw_pixel_size = float(abs(src.transform.a))
+        if src.crs.is_geographic:
+            # 1° latitude ≈ 111 320 m (Earth circumference / 360)
+            resolution_m = raw_pixel_size * 111_320.0
+        else:
+            resolution_m = raw_pixel_size
+        wgs84 = rasterio.crs.CRS.from_epsg(4326)
+        west, south, east, north = rasterio.warp.transform_bounds(
+            src.crs,
+            wgs84,
+            src.bounds.left,
+            src.bounds.bottom,
+            src.bounds.right,
+            src.bounds.top,
+        )
+
+        crs_epsg: int | None = None
+        try:
+            crs_epsg = src.crs.to_epsg()
+        except Exception as _epsg_exc:
+            _log.debug("DEM CRS has no EPSG code (%s): %s", dem_path, _epsg_exc)
+
+    bounds_wgs84 = [float(west), float(south), float(east), float(north)]
+    centre_wgs84 = [float((west + east) / 2.0), float((south + north) / 2.0)]
+    return bounds_wgs84, centre_wgs84, resolution_m, crs_epsg
+
+
+def _generate_terrain_tile(dem_path: Path, z: int, x: int, y: int) -> bytes | None:
+    """Generate a Terrarium-encoded PNG for one XYZ tile from a DEM GeoTIFF.
+
+    Returns None if the tile is entirely outside the DEM extent.
+    Terrarium encoding: height = R * 256 + G + B/256 − 32768 (metres).
+    """
+    import mercantile  # lazy — avoid adding to app startup time
+    import rasterio
+    import rasterio.crs
+    import rasterio.transform
+    import rasterio.warp
+    from PIL import Image
+
+    tile_bounds = mercantile.xy_bounds(x, y, z)  # (left, bottom, right, top) EPSG:3857
+    tile_size = 256
+
+    dst_crs = rasterio.crs.CRS.from_epsg(3857)
+    dst_transform = rasterio.transform.from_bounds(
+        tile_bounds.left,
+        tile_bounds.bottom,
+        tile_bounds.right,
+        tile_bounds.top,
+        tile_size,
+        tile_size,
+    )
+    dst_elevation = np.full((tile_size, tile_size), np.nan, dtype=np.float64)
+
+    try:
+        with rasterio.open(dem_path) as src:
+            rasterio.warp.reproject(
+                source=rasterio.band(src, 1),
+                destination=dst_elevation,
+                src_transform=src.transform,
+                src_crs=src.crs,
+                dst_transform=dst_transform,
+                dst_crs=dst_crs,
+                resampling=rasterio.warp.Resampling.bilinear,
+                src_nodata=src.nodata,
+                dst_nodata=np.nan,
+            )
+    except Exception as exc:
+        _log.debug("Tile (%d/%d/%d) reproject failed: %s", z, x, y, exc)
+        return None
+
+    # Tile entirely outside DEM extent — return no-content signal
+    if np.all(np.isnan(dst_elevation)):
+        return None
+
+    # Replace nodata (NaN) with sea level before encoding
+    dst_elevation = np.where(np.isnan(dst_elevation), 0.0, dst_elevation)
+
+    # Encode elevation as Terrarium RGB:
+    #   R = floor(h / 256),  G = floor(h) % 256,  B = floor(h * 256) % 256
+    #   where h = elevation + 32768  (ensures h ≥ 0 for elevations ≥ −32768 m)
+    #   Decoding: height = R*256 + G + B/256 − 32768
+    # Use floor-based encoding throughout (D-324: np.round uses banker's rounding
+    # which introduces systematic error; floor matches the Terrarium reference).
+    h = dst_elevation + 32768.0
+    h_floor = np.floor(h).astype(np.int64)
+    r = (h_floor // 256).clip(0, 255).astype(np.uint8)
+    g = (h_floor % 256).astype(np.uint8)
+    b = (np.floor(h * 256.0).astype(np.int64) % 256).astype(np.uint8)
+    rgb = np.stack([r, g, b], axis=-1)
+
+    img = Image.fromarray(rgb, mode="RGB")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _run_tile_generation(
+    dem_path: Path,
+    tile_dir: Path,
+    min_zoom: int,
+    max_zoom: int,
+    bounds_wgs84: list[float],
+    total_tiles: int,
+) -> None:
+    """Pre-generate all tiles in background; update session progress."""
+    import mercantile  # lazy — avoid adding to app startup time
+
+    try:
+        west, south, east, north = bounds_wgs84
+        generated = 0
+        written = 0
+
+        for z in range(min_zoom, max_zoom + 1):
+            tiles = list(mercantile.tiles(west, south, east, north, zooms=z))
+
+            for tile in tiles:
+                tile_data = _generate_terrain_tile(dem_path, tile.z, tile.x, tile.y)
+                if tile_data is not None:
+                    tile_file = tile_dir / str(tile.z) / str(tile.x) / f"{tile.y}.png"
+                    tile_file.parent.mkdir(parents=True, exist_ok=True)
+                    tile_file.write_bytes(tile_data)
+                    written += 1
+
+                generated += 1
+                pct = int(generated * 100 / max(total_tiles, 1))
+                with _terrain_session_lock:
+                    _terrain_session["progress_pct"] = pct
+
+        # Guard against silent total failure (D-326): if all tiles were skipped
+        # (e.g. DEM CRS incompatible with EPSG:3857 reproject), report an error
+        # instead of falsely claiming completion.
+        if written == 0 and total_tiles > 0:
+            _log.warning(
+                "Terrain tile generation wrote 0/%d tiles — all reprojects failed.",
+                total_tiles,
+            )
+            with _terrain_session_lock:
+                _terrain_session["error"] = (
+                    "All terrain tiles failed to generate (0 of "
+                    f"{total_tiles} written). Check DEM CRS compatibility."
+                )
+                _terrain_session["done"] = True
+            return
+
+        with _terrain_session_lock:
+            _terrain_session["progress_pct"] = 100
+            _terrain_session["done"] = True
+
+    except Exception as exc:
+        _log.exception("Terrain tile generation failed")
+        with _terrain_session_lock:
+            _terrain_session["error"] = str(exc)
+            _terrain_session["done"] = True
+
+
+# ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
@@ -703,3 +927,190 @@ async def report(request: ReportRequest) -> Response:
             tmp_pdf.unlink(missing_ok=True)
 
     return Response(content=pdf_bytes, media_type="application/pdf")
+
+
+# ---------------------------------------------------------------------------
+# Terrain endpoints (S14.3)
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/terrain/load")
+async def terrain_load(
+    dem_file: UploadFile = File(...),
+    dsm_file: UploadFile | None = File(default=None),
+) -> dict[str, Any]:
+    """Upload a DEM (and optional DSM) and start terrain tile generation.
+
+    Saves the uploaded GeoTIFF(s) to a persistent temporary directory,
+    extracts WGS84 bounds and zoom levels, starts background tile generation,
+    and returns the terrain metadata immediately.
+
+    The browser module should poll GET /api/terrain/tile-progress for progress.
+    Tiles are served at GET /api/terrain/tiles/{z}/{x}/{y}.png.
+
+    Returns:
+        Terrain metadata dict matching the ``terrain`` state key schema.
+    """
+    _TERRAIN_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    session_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+    session_dir = _TERRAIN_DATA_DIR / session_id
+    session_dir.mkdir(parents=True)
+    tile_dir = session_dir / "tiles"
+    tile_dir.mkdir()
+
+    # Persist DEM file — guard against oversized uploads (D-327)
+    dem_path = session_dir / "dem.tif"
+    dem_contents = await dem_file.read()
+    if len(dem_contents) > _MAX_DEM_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"DEM file too large: {len(dem_contents) // (1024 * 1024)} MB "
+                f"exceeds {_MAX_DEM_UPLOAD_BYTES // (1024 * 1024)} MB limit."
+            ),
+        )
+    dem_path.write_bytes(dem_contents)
+
+    # Persist optional DSM file
+    dsm_path: Path | None = None
+    if dsm_file is not None:
+        dsm_path = session_dir / "dsm.tif"
+        dsm_contents = await dsm_file.read()
+        if len(dsm_contents) > _MAX_DEM_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"DSM file too large: {len(dsm_contents) // (1024 * 1024)} MB "
+                    f"exceeds {_MAX_DEM_UPLOAD_BYTES // (1024 * 1024)} MB limit."
+                ),
+            )
+        dsm_path.write_bytes(dsm_contents)
+
+    # Extract metadata from the DEM
+    try:
+        bounds_wgs84, centre_wgs84, resolution_m, crs_epsg = _compute_dem_bounds_wgs84(dem_path)
+    except Exception as exc:
+        _log.warning("terrain_load: failed to read DEM metadata: %s", exc)
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    import mercantile  # lazy — avoid adding to app startup time
+
+    min_zoom, max_zoom = _compute_zoom_levels(resolution_m)
+    west, south, east, north = bounds_wgs84
+
+    total_tiles = sum(
+        len(list(mercantile.tiles(west, south, east, north, zooms=z)))
+        for z in range(min_zoom, max_zoom + 1)
+    )
+
+    metadata: dict[str, Any] = {
+        "dem_path": str(dem_path),
+        "dsm_path": str(dsm_path) if dsm_path is not None else None,
+        "crs_epsg": crs_epsg,
+        "bounds_wgs84": bounds_wgs84,
+        "centre_wgs84": centre_wgs84,
+        "resolution_m": resolution_m,
+        "tile_url_template": "/api/terrain/tiles/{z}/{x}/{y}.png",
+        "terrain_tile_count": total_tiles,
+        "terrain_min_zoom": min_zoom,
+        "terrain_max_zoom": max_zoom,
+    }
+
+    with _terrain_session_lock:
+        _terrain_session.update(
+            {
+                "dem_path": dem_path,
+                "dsm_path": dsm_path,
+                "metadata": metadata,
+                "progress_pct": 0,
+                "done": False,
+                "error": None,
+                "tile_dir": tile_dir,
+            }
+        )
+
+    thread = threading.Thread(
+        target=_run_tile_generation,
+        args=(dem_path, tile_dir, min_zoom, max_zoom, bounds_wgs84, total_tiles),
+        daemon=True,
+    )
+    thread.start()
+
+    return metadata
+
+
+@app.get("/api/terrain/tile-progress")
+async def terrain_tile_progress() -> StreamingResponse:
+    """SSE stream for terrain tile generation progress.
+
+    Emits ``{"type": "progress", "pct": N}`` events (N = 0–99) until the
+    background generation thread is complete, then emits
+    ``{"type": "complete", "pct": 100}`` and closes the stream.
+
+    If tile generation fails, emits ``{"type": "error", "message": "..."}`` and
+    closes the stream.
+    """
+
+    async def _generate() -> AsyncGenerator[str, None]:
+        # Guard: if no terrain session is active, report an error immediately
+        # rather than streaming infinite progress=0 events (D-328).
+        with _terrain_session_lock:
+            no_session = _terrain_session["dem_path"] is None
+
+        if no_session:
+            yield _sse_event({"type": "error", "message": "No terrain session active."})
+            return
+
+        while True:
+            with _terrain_session_lock:
+                pct = _terrain_session["progress_pct"]
+                done = _terrain_session["done"]
+                error = _terrain_session["error"]
+
+            if error:
+                yield _sse_event({"type": "error", "message": error})
+                break
+            if done:
+                yield _sse_event({"type": "complete", "pct": 100})
+                break
+            yield _sse_event({"type": "progress", "pct": pct})
+            await asyncio.sleep(0.25)
+
+    return StreamingResponse(_generate(), media_type="text/event-stream")
+
+
+@app.get("/api/terrain/tiles/{z}/{x}/{y}.png")
+async def terrain_tile(z: int, x: int, y: int) -> Response:
+    """Serve a Terrarium-encoded PNG tile for the current terrain session.
+
+    Serves pre-generated tiles from disk when available; falls back to
+    on-demand generation for tiles requested before the background thread
+    has written them.
+
+    Returns 404 if no terrain session is active or the tile is outside the DEM.
+    """
+    with _terrain_session_lock:
+        tile_dir = _terrain_session["tile_dir"]
+        dem_path = _terrain_session["dem_path"]
+
+    if tile_dir is None:
+        return Response(status_code=404)
+
+    # Fast path: serve pre-generated tile from disk
+    tile_path = tile_dir / str(z) / str(x) / f"{y}.png"
+    if tile_path.exists():
+        return Response(content=tile_path.read_bytes(), media_type="image/png")
+
+    # On-demand fallback for tiles requested before pre-generation completes
+    if dem_path is None:
+        return Response(status_code=404)
+
+    loop = asyncio.get_running_loop()
+    tile_data: bytes | None = await loop.run_in_executor(
+        None, _generate_terrain_tile, dem_path, z, x, y
+    )
+
+    if tile_data is None:
+        return Response(status_code=404)
+
+    return Response(content=tile_data, media_type="image/png")

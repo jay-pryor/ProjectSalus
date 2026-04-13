@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createMapProxy, LayerPrefixViolation, ALLOWED_MAP_METHODS } from '../map-proxy.js';
+import { createMapProxy, LayerPrefixViolation, ALLOWED_MAP_METHODS, TERRAIN_LOADER_EXTRA_METHODS } from '../map-proxy.js';
 
 // ---------------------------------------------------------------------------
 // Mock MapLibreGL map
@@ -39,7 +39,7 @@ function makeMockMap() {
     setStyle() { record('setStyle'); },
     remove() { record('remove'); },
     addControl() { record('addControl'); },
-    setTerrain() { record('setTerrain'); },
+    setTerrain(...args) { record('setTerrain', ...args); },
     setBearing() { record('setBearing'); },
     setPitch() { record('setPitch'); },
   };
@@ -261,4 +261,57 @@ test('proxy does not expose setTerrain', () => {
   const mock = makeMockMap();
   const proxy = createMapProxy(mock, 'x');
   assert.equal(proxy.setTerrain, undefined);
+});
+
+// ---------------------------------------------------------------------------
+// allowTerrainSource option (D-332: terrain-loader proxy path tests)
+// ---------------------------------------------------------------------------
+
+test('TERRAIN_LOADER_EXTRA_METHODS contains setTerrainSource', () => {
+  assert.ok(TERRAIN_LOADER_EXTRA_METHODS.has('setTerrainSource'));
+  assert.equal(TERRAIN_LOADER_EXTRA_METHODS.size, 1);
+});
+
+test('proxy without allowTerrainSource does not expose setTerrainSource', () => {
+  const mock = makeMockMap();
+  const proxy = createMapProxy(mock, 'terrain-loader');
+  assert.equal(proxy.setTerrainSource, undefined);
+});
+
+test('proxy with allowTerrainSource=true exposes setTerrainSource', () => {
+  const mock = makeMockMap();
+  const proxy = createMapProxy(mock, 'terrain-loader', { allowTerrainSource: true });
+  assert.equal(typeof proxy.setTerrainSource, 'function');
+});
+
+test('setTerrainSource(sourceId) delegates to mapInstance.setTerrain({source:sourceId})', () => {
+  const mock = makeMockMap();
+  const proxy = createMapProxy(mock, 'terrain-loader', { allowTerrainSource: true });
+  proxy.setTerrainSource('terrain-loader:terrain-dem');
+  assert.equal(mock._calls.length, 1);
+  assert.equal(mock._calls[0].method, 'setTerrain');
+  assert.deepEqual(mock._calls[0].args, [{ source: 'terrain-loader:terrain-dem' }]);
+});
+
+test('setTerrainSource(null) delegates to mapInstance.setTerrain(null)', () => {
+  const mock = makeMockMap();
+  const proxy = createMapProxy(mock, 'terrain-loader', { allowTerrainSource: true });
+  proxy.setTerrainSource(null);
+  assert.equal(mock._calls.length, 1);
+  assert.equal(mock._calls[0].method, 'setTerrain');
+  assert.deepEqual(mock._calls[0].args, [null]);
+});
+
+test('terrain-loader proxy does not expose raw map instance via setTerrainSource', () => {
+  const mock = makeMockMap();
+  const proxy = createMapProxy(mock, 'terrain-loader', { allowTerrainSource: true });
+  for (const key of Object.getOwnPropertyNames(proxy)) {
+    assert.notEqual(proxy[key], mock, `proxy.${key} must not be the raw map instance`);
+  }
+});
+
+test('terrain-loader proxy with setTerrainSource is still frozen', () => {
+  const mock = makeMockMap();
+  const proxy = createMapProxy(mock, 'terrain-loader', { allowTerrainSource: true });
+  assert.throws(() => { proxy._map = mock; }, /Cannot add property/);
 });

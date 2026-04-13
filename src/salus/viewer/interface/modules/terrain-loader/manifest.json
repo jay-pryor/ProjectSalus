@@ -1,0 +1,12 @@
+{
+  "id": "terrain-loader",
+  "label": "Load Terrain",
+  "icon": "🏔",
+  "reads": ["terrain"],
+  "writes": ["terrain"],
+  "prerequisites": [],
+  "emits": ["terrain:loaded"],
+  "subscribes": [],
+  "layer_id_prefix": "terrain-loader",
+  "description": "Load a DEM (and optionally DSM) GeoTIFF. Triggers terrain tile generation and configures the 3D canvas."
+}

@@ -1,0 +1,51 @@
+<!--
+  terrain-loader/panel.html — Terrain Loader panel markup.
+
+  Loaded programmatically by index.js via innerHTML injection.
+  Elements are referenced by ID; do not rename IDs without updating index.js.
+-->
+<div id="terrain-loader-panel" class="module-panel">
+  <h2 class="panel-title">Load Terrain</h2>
+
+  <div class="form-group">
+    <label for="tl-dem-input" class="form-label">DEM file <span class="ext-hint">(.tif / .tiff)</span></label>
+    <input type="file" id="tl-dem-input" accept=".tif,.tiff" class="file-input">
+  </div>
+
+  <div class="form-group">
+    <label for="tl-dsm-input" class="form-label">DSM file <span class="ext-hint">(optional)</span></label>
+    <input type="file" id="tl-dsm-input" accept=".tif,.tiff" class="file-input">
+  </div>
+
+  <div id="tl-crs-display" class="field-display" hidden>
+    <span class="field-label">CRS:</span>
+    <span id="tl-crs-value" class="field-value">—</span>
+  </div>
+
+  <div id="tl-progress-section" class="progress-section" hidden>
+    <p id="tl-status-msg" class="status-msg">Processing…</p>
+    <progress id="tl-progress-bar" class="progress-bar" max="100" value="0"></progress>
+  </div>
+
+  <div id="tl-summary" class="summary-section" hidden>
+    <h3 class="summary-title">Loaded Terrain</h3>
+    <div class="summary-row">
+      <span class="summary-label">CRS EPSG:</span>
+      <span id="tl-sum-crs" class="summary-value">—</span>
+    </div>
+    <div class="summary-row">
+      <span class="summary-label">Resolution:</span>
+      <span id="tl-sum-res" class="summary-value">—</span>
+    </div>
+    <div class="summary-row">
+      <span class="summary-label">Bounds (WGS84):</span>
+      <span id="tl-sum-bounds" class="summary-value">—</span>
+    </div>
+    <div class="summary-row">
+      <span class="summary-label">Tiles:</span>
+      <span id="tl-sum-tiles" class="summary-value">—</span>
+    </div>
+  </div>
+
+  <p id="tl-error-msg" class="error-msg" hidden></p>
+</div>

@@ -4,9 +4,12 @@
  * Architecture: docs/Technical/InterfaceArchitecture.md §2.5 and §2.6 (map:)
  *
  * Invariants enforced:
- *   - Only the 15 listed methods are exposed. Destructive map operations
- *     (setStyle, remove, addControl, setTerrain, setBearing, setPitch) are
- *     absent from the proxy and cannot be reached.
+ *   - Only the 16 listed methods are exposed to regular modules. Destructive
+ *     map operations (setStyle, remove, addControl, setTerrain, setBearing,
+ *     setPitch) are absent from the proxy and cannot be reached.
+ *   - Exception: when options.allowTerrainSource=true (terrain-loader only),
+ *     the proxy additionally exposes setTerrainSource() which delegates to
+ *     setTerrain() internally (architectural exception per S14.3-3).
  *   - addSource(id) and addLayer({id}) must use IDs prefixed with
  *     `{layerIdPrefix}:`. Unprefixed IDs throw LayerPrefixViolation.
  *   - removeSource and removeLayer also enforce the prefix so a module
@@ -27,8 +30,9 @@ export class LayerPrefixViolation extends Error {
 }
 
 // ---------------------------------------------------------------------------
-// Allowed map method names (informational — not used for runtime dispatch,
-// but useful for documentation and testing completeness).
+// Allowed map method names — base set available to all modules.
+// When options.allowTerrainSource=true, setTerrainSource is also present on
+// the proxy (architectural exception for terrain-loader only — D-331).
 // ---------------------------------------------------------------------------
 
 export const ALLOWED_MAP_METHODS = new Set([
@@ -42,6 +46,9 @@ export const ALLOWED_MAP_METHODS = new Set([
   'queryRenderedFeatures',
 ]);
 
+/** Extra method present only when options.allowTerrainSource=true. */
+export const TERRAIN_LOADER_EXTRA_METHODS = new Set(['setTerrainSource']);
+
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
@@ -51,9 +58,14 @@ export const ALLOWED_MAP_METHODS = new Set([
  *
  * @param {object} mapInstance - raw MapLibreGL Map instance (captured in closure)
  * @param {string} layerIdPrefix - module's layer_id_prefix from manifest
+ * @param {object} [options]
+ * @param {boolean} [options.allowTerrainSource=false] - when true, adds the
+ *   setTerrainSource(sourceId) method. This is an architectural exception for the
+ *   terrain-loader module only — no other module should modify the map's terrain
+ *   property. The shell sets this flag explicitly for terrain-loader.
  * @returns {object} restricted map handle
  */
-export function createMapProxy(mapInstance, layerIdPrefix) {
+export function createMapProxy(mapInstance, layerIdPrefix, options = {}) {
   const prefix = layerIdPrefix + ':';
 
   function assertPrefix(id, methodName) {
@@ -67,7 +79,7 @@ export function createMapProxy(mapInstance, layerIdPrefix) {
 
   // Each method is an explicit delegation — no dynamic dispatch, no way to
   // access the raw instance via getOwnPropertyNames or prototype walking.
-  return Object.freeze({
+  const proxy = {
     addSource(id, spec) {
       assertPrefix(id, 'addSource');
       return mapInstance.addSource(id, spec);
@@ -130,5 +142,19 @@ export function createMapProxy(mapInstance, layerIdPrefix) {
         ? mapInstance.queryRenderedFeatures(point, options)
         : mapInstance.queryRenderedFeatures(point);
     },
-  });
+  };
+
+  // Architectural exception: terrain-loader is the only module that may
+  // update the map's 3D terrain source.  The shell enables this via
+  // options.allowTerrainSource; all other modules get no such method.
+  if (options.allowTerrainSource) {
+    proxy.setTerrainSource = function setTerrainSource(sourceId) {
+      // sourceId === null clears the 3D terrain canvas
+      return sourceId === null
+        ? mapInstance.setTerrain(null)
+        : mapInstance.setTerrain({ source: sourceId });
+    };
+  }
+
+  return Object.freeze(proxy);
 }

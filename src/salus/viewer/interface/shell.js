@@ -75,7 +75,11 @@ async function main() {
 
   const moduleRegistry = validManifests.map((manifest) => {
     const prefix = manifest.layer_id_prefix ?? manifest.id;
-    const mapProxy = createMapProxy(map, prefix);
+    const mapProxy = createMapProxy(map, prefix, {
+      // terrain-loader is the only module permitted to call setTerrainSource().
+      // All other modules receive a proxy without this method.
+      allowTerrainSource: manifest.id === 'terrain-loader',
+    });
     const scopedBus = bus.createScopedBus(manifest.id);
     const { api, runUnmount } = createModuleAPI(
       manifest.id,
