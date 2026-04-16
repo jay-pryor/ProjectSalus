@@ -1,0 +1,11 @@
+{
+  "id": "simulation-runner",
+  "label": "Simulation Runner",
+  "reads": ["terrain", "placements", "threat_corridors", "zones"],
+  "writes": ["sim_results"],
+  "prerequisites": ["terrain", "placements"],
+  "emits": ["simulation:started", "simulation:progress", "simulation:complete", "simulation:failed"],
+  "subscribes": [],
+  "layer_id_prefix": "simulation-runner",
+  "description": "Serialise current state into a ScenarioConfig, POST to /api/simulate, stream SSE progress, and write sim_results. The sole writer of the sim_results state key."
+}
