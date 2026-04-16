@@ -3669,9 +3669,9 @@ defects:
   file: src/salus/viewer/interface/modules/budget-tracker/index.js
   line: 38
   description: "cost_aud coerced with ?? 0 instead of Number() || 0 in _buildLookupMap and _calcBreakdown. String values like '1500' pass the ?? guard and produce NaN in arithmetic, silently corrupting totalCost, the progress bar width, and the cost label."
-  resolution: ""
-  status: open
-  commit: ""
+  resolution: "Changed cost_aud: item.cost_aud ?? 0 to cost_aud: Number(item.cost_aud) || 0 in both _buildLookupMap and _calcBreakdown fallback"
+  status: resolved
+  commit: "7e21e51"
 
 - id: D-334
   severity: medium
@@ -3680,9 +3680,9 @@ defects:
   file: src/salus/viewer/interface/modules/budget-tracker/index.js
   line: 391
   description: "Budget input coercion uses Number(...) || 0 which collapses NaN but not Infinity. Number('1e9999') === Infinity passes the guard, causing the progress bar to silently show 0% and the cost label to display '$Infinity'."
-  resolution: ""
-  status: open
-  commit: ""
+  resolution: "Added isFinite() guard: parsed = Number(budgetInput.value) || 0; budget = isFinite(parsed) ? parsed : 0"
+  status: resolved
+  commit: "7e21e51"
 
 - id: D-335
   severity: medium
@@ -3691,9 +3691,9 @@ defects:
   file: src/salus/viewer/interface/modules/budget-tracker/index.js
   line: 455
   description: "onUnmount iterates unsubs with forEach(u => u()) without checking typeof u === 'function'. If any watch()/on() returns null or undefined, u() throws TypeError mid-loop, leaving remaining subscriptions un-cleaned and leaking silently."
-  resolution: ""
-  status: open
-  commit: ""
+  resolution: "Changed to unsubs.forEach(u => { if (typeof u === 'function') u(); })"
+  status: resolved
+  commit: "7e21e51"
 
 - id: D-336
   severity: low
@@ -3702,9 +3702,9 @@ defects:
   file: src/salus/viewer/interface/modules/budget-tracker/index.js
   line: 38
   description: "In _buildLookupMap, inner loop uses (items ?? []) guard but not Array.isArray check. A non-null non-array library category value (e.g. a number or nested object) is not iterable, causing for...of to throw TypeError that propagates out of _render() uncaught."
-  resolution: ""
-  status: open
-  commit: ""
+  resolution: "Changed (items ?? []) to (Array.isArray(items) ? items : []) in inner loop"
+  status: resolved
+  commit: "7e21e51"
 
 - id: D-337
   severity: low
@@ -3713,6 +3713,6 @@ defects:
   file: src/salus/viewer/interface/modules/budget-tracker/index.js
   line: 379
   description: "CSV download creates a detached <a> element via document.createElement('a') and calls .click() on it without appending it to the module's own panel element. This is a document.* operation outside the module's panel DOM scope, technically violating the isolation invariant."
-  resolution: ""
-  status: open
-  commit: ""
+  resolution: "Added panel.appendChild(a) before a.click() and panel.removeChild(a) after, keeping the element within the module's own DOM scope"
+  status: resolved
+  commit: "7e21e51"
