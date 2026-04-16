@@ -4057,3 +4057,80 @@ defects:
     resolution: "Added console.warn in placement:pending handler when evt.definition is null, alerting developer that sensor defaults will be used"
     status: resolved
     commit: 8f8d032
+
+  - id: D-369
+    severity: high
+    task: S14.8
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/simulation-runner/index.js
+    line: 369
+    description: "If the SSE stream ends (done=true) without a 'complete' event — e.g. server closes connection early — the while loop exits silently with no simulation:failed emission, no error logged, isRunning stays true, cancelBtn stays visible, and runBtn stays disabled. The UI is permanently frozen with no recovery path."
+    resolution: "Added streamCompleted flag; after try/finally block, if streamCompleted is false and abort was not triggered, emit simulation:failed with 'Stream ended without a result' and reset UI"
+    status: resolved
+    commit: def32e3
+
+  - id: D-370
+    severity: medium
+    task: S14.8
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/simulation-runner/index.js
+    line: 500
+    description: "watch('terrain', ...) calls _updateChecklist() but not _checkStale(). If the user loads a new DEM after a completed simulation, simCompleted is true but the stale-results banner is never shown. The user sees stale coverage statistics against the new terrain with no warning."
+    resolution: "Added _checkStale() call to terrain watch callback"
+    status: resolved
+    commit: def32e3
+
+  - id: D-371
+    severity: medium
+    task: S14.8
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/simulation-runner/index.js
+    line: 517
+    description: "watch('zones', ...) calls _updateChecklist() but not _checkStale(). If the user modifies zones after a completed simulation, the stale-results banner is not shown even though results are now based on outdated zone definitions. Inconsistent with placements and threat_corridors watches."
+    resolution: "Added _checkStale() call to zones watch callback"
+    status: resolved
+    commit: def32e3
+
+  - id: D-372
+    severity: medium
+    task: S14.8
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/simulation-runner/index.js
+    line: 362
+    description: "The ReadableStreamDefaultReader acquired from response.body.getReader() is never cancelled or released via reader.cancel() before exiting the stream loop. When the AbortController fires (user cancels), the while loop breaks but reader.cancel() is not called, holding the reader lock until GC."
+    resolution: "Wrapped while loop in try/finally; finally block calls reader.cancel() with typeof guard and swallowed exception"
+    status: resolved
+    commit: def32e3
+
+  - id: D-373
+    severity: low
+    task: S14.8
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/simulation-runner/index.js
+    line: 403
+    description: "The 'error' SSE event handler resets isRunning and hides cancelBtn but does not set abortController = null. Inconsistent with _onComplete which nulls it; onUnmount will call abort() on a settled controller."
+    resolution: "Added abortController = null in the error SSE event handler before return"
+    status: resolved
+    commit: def32e3
+
+  - id: D-374
+    severity: low
+    task: S14.8
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/simulation-runner/index.js
+    line: 262
+    description: "_startTimer() does not call _stopTimer() before creating a new interval. If called twice without an intervening _stopTimer(), the old interval handle is orphaned and the timer fires twice per second with no way to cancel the first interval."
+    resolution: "Added _stopTimer() as first call in _startTimer() to make it idempotent"
+    status: resolved
+    commit: def32e3
+
+  - id: D-375
+    severity: low
+    task: S14.8
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/simulation-runner/index.js
+    line: 383
+    description: "Number(data.pct) || 0 silently swallows NaN from a malformed pct field. If the server sends a non-numeric pct, NaN is produced, substituted with 0 via ||, and the progress bar silently stays at 0% with no console warning."
+    resolution: "Replaced || 0 pattern with explicit isNaN guard; added console.warn for malformed pct values"
+    status: resolved
+    commit: def32e3
