@@ -3856,8 +3856,8 @@ defects:
     file: src/salus/viewer/interface/modules/optimiser/index.js
     line: 441
     description: "JSON.parse(evt.data) for the 'complete' SSE event has no try/catch. A SyntaxError on malformed JSON propagates to the outer catch and is treated as a generic failure, preventing api.state.set('optimiser_results') and api.bus.emit('optimiser:complete') from firing. The module emits optimiser:failed even though the backend optimisation succeeded."
-    resolution: ""
-    status: open
+    resolution: "Wrapped JSON.parse in try/catch; on failure throws a descriptive error distinguishing parse failure from optimiser failure"
+    status: resolved
     commit: ""
 
   - id: D-351
@@ -3867,8 +3867,8 @@ defects:
     file: src/salus/viewer/interface/modules/optimiser/index.js
     line: 441
     description: "No shape validation on the parsed 'complete' result object. If the server returns valid JSON that is not an object (null, number, array), all property accesses return undefined silently, api.bus.emit('optimiser:complete', result) fires with a non-object payload, and ghost markers silently show nothing."
-    resolution: ""
-    status: open
+    resolution: "Added guard: if result is not a non-null plain object, throws 'Optimiser complete payload is not an object'"
+    status: resolved
     commit: ""
 
   - id: D-352
@@ -3878,8 +3878,8 @@ defects:
     file: src/salus/viewer/interface/modules/optimiser/manifest.json
     line: 4
     description: "optimiser_results is watched and read via api.state.get() at init, but is only in writes[] not reads[] in manifest.json. MUST Rule 4 requires any key passed to get() or watch() to appear in reads[]."
-    resolution: ""
-    status: open
+    resolution: "Added 'optimiser_results' to reads[] in manifest.json"
+    status: resolved
     commit: ""
 
   - id: D-353
@@ -3889,8 +3889,8 @@ defects:
     file: src/salus/viewer/interface/modules/optimiser/index.js
     line: 447
     description: "_showResults(result) is called directly in the SSE complete handler AND api.state.set('optimiser_results', result) is called on the same line, causing the watch callback to also call _showResults(r). In a synchronous state layer this is a double-render. Per reactive-read architecture, set() should be the sole trigger; the direct call bypasses the watch pattern."
-    resolution: ""
-    status: open
+    resolution: "Removed direct _showResults(result) call from SSE complete handler; updated test mock's state.set to fire watchers synchronously so watch-driven rendering is exercised in tests"
+    status: resolved
     commit: ""
 
   - id: D-354
@@ -3900,8 +3900,8 @@ defects:
     file: src/salus/viewer/interface/modules/optimiser/index.js
     line: 417
     description: "response.body is accessed without a null check (.getReader() called directly). Fetch spec allows response.body to be null in environments where streaming is unsupported. A TypeError from null.getReader() presents as an opaque error rather than a meaningful message."
-    resolution: ""
-    status: open
+    resolution: "Added null guard: if (!response.body) throw new Error('Server response has no body — streaming not supported in this environment')"
+    status: resolved
     commit: ""
 
   - id: D-355
@@ -3911,8 +3911,8 @@ defects:
     file: src/salus/viewer/interface/modules/optimiser/index.js
     line: 409
     description: "JSON.stringify(body) is called without a guard against non-serialisable state values. If latestZones/latestConstraints/latestTerrain contain circular references or BigInt, stringify throws a TypeError that appears to the user as a generic network error rather than a local serialisation failure."
-    resolution: ""
-    status: open
+    resolution: "Wrapped JSON.stringify in try/catch with a distinct message identifying it as a local serialisation error, not a network error"
+    status: resolved
     commit: ""
 
   - id: D-356
@@ -3922,8 +3922,8 @@ defects:
     file: src/salus/viewer/interface/modules/optimiser/index.js
     line: 434
     description: "try/catch around JSON.parse in the 'progress' event handler silently discards all parse errors with /* ignore */ and no console.warn. Malformed progress events go undiagnosed — the progress bar freezes with no feedback and no browser console trace."
-    resolution: ""
-    status: open
+    resolution: "Added console.warn('[optimiser] malformed progress event data:', evt.data) in the catch block"
+    status: resolved
     commit: ""
 
   - id: D-357
@@ -3933,6 +3933,6 @@ defects:
     file: src/salus/viewer/interface/modules/optimiser/index.js
     line: 450
     description: "try/catch around JSON.parse in the 'error' SSE event handler discards parse errors with /* ignore */ and no console.warn. Raw server error payload is silently lost; the user sees only 'Optimiser returned an error' with no diagnostic detail."
-    resolution: ""
-    status: open
+    resolution: "Added console.warn('[optimiser] malformed error event data:', evt.data) in the catch block"
+    status: resolved
     commit: ""

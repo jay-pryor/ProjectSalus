@@ -1,0 +1,42 @@
+task_id: S14.11
+timestamp: 2026-04-16T00:00:00Z
+quality_gates:
+  G1_lint: "N/A — JS-only task"
+  G2_format: "N/A — JS-only task"
+  G3_import: "N/A — JS-only task"
+  G4_type: "N/A — JS-only task"
+  G5_security: "N/A — JS-only task"
+  G6_unit_test: pass
+  G7_coverage: "N/A — JS-only task"
+  G8_secrets: "N/A — JS-only task"
+  coverage_pct: N/A
+  js_tests_passed: 48
+  js_tests_failed: 0
+  python_regression: pass
+review:
+  l1_standards:
+    testing: pass
+    error_handling: pass
+    logging: pass
+    security: pass
+    interface_modules: pass
+  l2_agents:
+    silent_failure_hunter: {status: fail, findings: 8}
+    spec_compliance: {status: pass, findings: 0}
+    type_design_analyzer: N/A
+    regression_reviewer: N/A
+    module_architecture_reviewer: {status: fail, findings: 5}
+defect_ids: [D-350, D-351, D-352, D-353, D-354, D-355, D-356, D-357]
+overall: pass
+notes: >
+  All 8 defects (2 high, 6 medium) found by L2 agents and logged before fixing.
+  Key fixes: JSON.parse try/catch on complete SSE event (D-350), result shape
+  validation (D-351), optimiser_results added to manifest reads[] (D-352),
+  removed direct _showResults call in favour of watch-driven rendering (D-353),
+  response.body null guard (D-354), JSON.stringify serialisation guard (D-355),
+  console.warn for malformed progress/error SSE data (D-356, D-357).
+  Test mock updated so state.set fires watchers synchronously — the watch-driven
+  rendering path is now exercised in tests, not just the direct-call path.
+  Spec compliance: all S14.11-1 through S14.11-4 criteria satisfied (3 info-level
+  manifest additions to reads/writes/emits are required by S14.11-3 functional
+  spec even though not in S14.11-1 manifest table).
