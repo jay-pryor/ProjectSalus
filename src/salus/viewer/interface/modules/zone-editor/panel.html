@@ -1,0 +1,50 @@
+<!--
+  zone-editor/panel.html — Zone Editor panel markup.
+
+  Loaded programmatically by index.js via innerHTML injection.
+  Elements are referenced by ID; do not rename IDs without updating index.js.
+-->
+<div id="ze-panel" class="module-panel">
+  <h2 class="panel-title">Zone Editor</h2>
+
+  <div id="ze-toolbar" class="toolbar">
+    <button id="ze-draw-btn" class="action-btn">Draw Zone</button>
+    <div class="form-group" id="ze-type-group">
+      <label for="ze-zone-type" class="form-label">Zone type</label>
+      <select id="ze-zone-type" class="select-input">
+        <option value="priority">Priority</option>
+        <option value="exclusion">Exclusion</option>
+      </select>
+    </div>
+  </div>
+
+  <p id="ze-draw-hint" class="hint-msg" hidden>Click to place polygon vertices. Double-click to close (min 3 points).</p>
+
+  <div id="ze-form" hidden>
+    <h3 class="form-subtitle">Confirm Zone</h3>
+    <div class="form-group">
+      <label for="ze-zone-name" class="form-label">Zone name</label>
+      <input type="text" id="ze-zone-name" class="text-input" placeholder="Zone 1">
+    </div>
+    <div class="form-group" id="ze-threshold-group" hidden>
+      <label for="ze-threshold" class="form-label">Coverage threshold (%)</label>
+      <input type="number" id="ze-threshold" class="num-input" min="0" max="100" placeholder="80">
+      <p id="ze-threshold-error" class="error-msg" hidden></p>
+    </div>
+    <div class="form-group" id="ze-reason-group" hidden>
+      <label for="ze-reason" class="form-label">Reason (optional)</label>
+      <input type="text" id="ze-reason" class="text-input" placeholder="e.g. Communications mast footprint">
+    </div>
+    <div class="form-actions">
+      <button id="ze-confirm-btn" class="confirm-btn">Confirm</button>
+      <button id="ze-cancel-btn" class="cancel-btn">Cancel</button>
+    </div>
+  </div>
+
+  <div id="ze-edit-bar" hidden>
+    <span id="ze-edit-label" class="edit-label">Editing zone</span>
+    <button id="ze-done-edit-btn" class="done-btn">Done</button>
+  </div>
+
+  <div id="ze-zone-list" class="item-list"></div>
+</div>

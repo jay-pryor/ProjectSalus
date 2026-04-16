@@ -676,8 +676,8 @@ defects:
     file: src/salus/ingest/boundaries.py
     line: 172
     description: "bare except Exception in _extract_epsg swallows ImportError and runtime faults from pyproj; should catch only CRSError"
-    resolution: ""
-    status: resolved
+    resolution: "
+    status: resolved"
     commit: "eef0997"
 
   - id: D-050
@@ -687,8 +687,8 @@ defects:
     file: src/salus/ingest/boundaries.py
     line: 53
     description: "max(union.geoms, ...) returns BaseGeometry per Shapely stubs; conflicts with declared -> Polygon return; no runtime guard for degenerate case"
-    resolution: ""
-    status: resolved
+    resolution: "
+    status: resolved"
     commit: "eef0997"
 
   - id: D-063
@@ -1391,8 +1391,8 @@ defects:
     file: src/salus/report/maps.py
     line: 0
     description: "render_corridor_overlay_map legend only shows 'Covered' patch; first detection circle markers and protected-point star have no legend entries. Map is uninterpretable without prior knowledge."
-    resolution: ""
-    status: open
+    resolution: "
+    status: open"
     commit: ""
 
   - id: D-127
@@ -1501,8 +1501,8 @@ defects:
     file: src/salus/engine/viewshed.py
     line: 197
     description: "line_of_sight_3d has no guard for site.resolution <= 0; divides by resolution to compute num_steps. A zero or negative resolution causes ZeroDivisionError or nonsensical step count."
-    resolution: ""
-    status: open
+    resolution: "
+    status: open"
     commit: ""
 
   - id: D-137
@@ -1512,8 +1512,8 @@ defects:
     file: src/salus/engine/trajectory.py
     line: 78
     description: "sensor_can_detect_point reads site.dem[s_row, s_col] for the sensor cell but does not check for NaN. If DEM is nodata at the sensor position, sz_abs becomes NaN and all subsequent arithmetic (slant range, elevation angle) silently propagates NaN, returning wrong results."
-    resolution: ""
-    status: open
+    resolution: "
+    status: open"
     commit: ""
 
   - id: D-138
@@ -1523,8 +1523,8 @@ defects:
     file: src/salus/engine/trajectory.py
     line: 118
     description: "Co-located target (h_dist == 0, same height as sensor) is silently assigned elevation_angle_deg = 90 degrees by convention (atan2 branch). This undocumented convention can cause unexpected False returns for sensors with elevation arcs that do not include 90 degrees. Behaviour should be documented in the docstring."
-    resolution: ""
-    status: open
+    resolution: "
+    status: open"
     commit: ""
 
   - id: D-139
@@ -1611,8 +1611,8 @@ defects:
     file: src/salus/engine/trajectory.py
     line: 168
     description: "_detect_one swallows all ValueError from sensor_can_detect_point including 'sensor placement outside DEM' which is a configuration error. A misconfigured sensor silently returns False on every sample, producing coverage_pct=0 and asset_reached_undetected=True with no diagnostic."
-    resolution: ""
-    status: open
+    resolution: "
+    status: open"
     commit: ""
 
   - id: D-147
@@ -1622,8 +1622,8 @@ defects:
     file: src/salus/engine/trajectory.py
     line: 291
     description: "time_in_det can accumulate a negative delta if binary-search exit crossing d_cross_any is slightly less than det_start_d due to floating-point rounding when drone starts detected. Produces negative time_in_det propagating to wrong coverage_pct and time_undetected_s."
-    resolution: ""
-    status: open
+    resolution: "
+    status: open"
     commit: ""
 
   - id: D-148
@@ -1633,8 +1633,8 @@ defects:
     file: demo/06_slice6/generate_s6_demo.py
     line: 185
     description: "Demo script passes composite (npt.NDArray[np.bool_]) as second argument to find_worst_corridors, which now expects list[tuple[SensorDefinition, SensorPlacement]]. Will crash with TypeError/AttributeError at runtime."
-    resolution: ""
-    status: open
+    resolution: "
+    status: open"
     commit: ""
 
   - id: D-149
@@ -1644,8 +1644,8 @@ defects:
     file: src/salus/engine/trajectory.py
     line: 246
     description: "Magic sentinel -1.0 used for det_start_d to mean 'no detection period started'. Violates no-magic-numbers rule and is fragile against future refactoring."
-    resolution: ""
-    status: open
+    resolution: "
+    status: open"
     commit: ""
 
   - id: D-150
@@ -1655,8 +1655,8 @@ defects:
     file: src/salus/engine/threat_corridor.py
     line: 269
     description: "covered_cells computed as round(time_in_detection_s * speed / resolution). If time_in_det is negative (D-147), covered_cells becomes negative integer stored in CorridorResult without any clamp or guard."
-    resolution: ""
-    status: open
+    resolution: "
+    status: open"
     commit: ""
 
   - id: D-151
@@ -1666,8 +1666,8 @@ defects:
     file: tests/test_threat_corridor.py
     line: 351
     description: "Regression tests for find_worst_corridors do not include a test verifying ~100% coverage_pct under full-sensor coverage, nor a test verifying mixed coverage across bearings with a partial-coverage sensor. Spec requires regression tests comparing old and new outputs."
-    resolution: ""
-    status: open
+    resolution: "
+    status: open"
     commit: ""
 
   - id: D-152
@@ -2128,8 +2128,8 @@ defects:
     file: src/salus/report/charts.py
     line: 690
     description: "render_coverage_comparison_chart: per_zone_coverage_pct_a.get(z, 0.0) silently substitutes 0.0 for a missing zone key. If a manually-constructed ComparisonResult has a zone in per_zone_delta_pct absent from per_zone_coverage_pct_a, the delta annotation on that bar is computed against 0.0 rather than the true A value — wrong output with no error."
-    resolution: ""
-    status: open
+    resolution: "
+    status: open"
     commit: ""
 
   - id: D-194
@@ -2139,8 +2139,8 @@ defects:
     file: src/salus/cli.py
     line: 1655
     description: "_load_site_for_comparison has no exception handling. Failure in load_scenario or load_dem is swallowed by a catch-all at the render call site; the compare command exits 0 even though no delta map was produced, with only a one-line warning."
-    resolution: ""
-    status: open
+    resolution: "
+    status: open"
     commit: ""
 
   - id: D-195
@@ -2150,8 +2150,8 @@ defects:
     file: src/salus/engine/comparison.py
     line: 183
     description: "compare_configs: no bounds/NaN check on total_coverage_pct before arithmetic. If upstream produces NaN or out-of-range coverage, coverage_delta_pct silently becomes NaN and flows into ComparisonResult and CLI output with no error raised."
-    resolution: ""
-    status: open
+    resolution: "
+    status: open"
     commit: ""
 
   - id: D-196
@@ -2161,8 +2161,8 @@ defects:
     file: src/salus/engine/comparison.py
     line: 173
     description: "compare_configs: NaN cells in a float composite cast silently to True by .astype(bool), causing those cells to appear covered in the delta grid. Wrong cell-level output with no warning."
-    resolution: ""
-    status: open
+    resolution: "
+    status: open"
     commit: ""
 
   - id: D-197
@@ -2172,8 +2172,8 @@ defects:
     file: src/salus/report/maps.py
     line: 1607
     description: "render_delta_map: _hillshade ValueError for NaN DEM surfaces only as a generic CLI warning; the diagnostic (DEM path, NaN count) is lost and the output directory is silently incomplete."
-    resolution: ""
-    status: open
+    resolution: "
+    status: open"
     commit: ""
 
   - id: D-198
@@ -2183,8 +2183,8 @@ defects:
     file: src/salus/engine/comparison.py
     line: 52
     description: "ConfigurationResult: no shape-consistency check between composite and stats.redundancy_map. A caller can pair a populated composite with the zero-shape default redundancy_map, producing shape mismatches that only surface as confusing index errors downstream."
-    resolution: ""
-    status: open
+    resolution: "
+    status: open"
     commit: ""
 
   - id: D-199
@@ -2194,8 +2194,8 @@ defects:
     file: src/salus/report/maps.py
     line: 1552
     description: "render_delta_map is missing its '-> Path' return type annotation, violating the project-wide type-annotation rule (CLAUDE.md). mypy infers '-> None'."
-    resolution: ""
-    status: open
+    resolution: "
+    status: open"
     commit: ""
 
   - id: D-200
@@ -2205,8 +2205,8 @@ defects:
     file: src/salus/engine/comparison.py
     line: 74
     description: "ConfigurationResult.composite has no runtime ndim guard. compare_configs checks .size == 0 but not .ndim == 2. A 1-D array of non-zero length would pass the guard and silently produce a malformed delta_grid."
-    resolution: ""
-    status: open
+    resolution: "
+    status: open"
     commit: ""
 
   - id: D-201
@@ -3716,3 +3716,135 @@ defects:
   resolution: "Added panel.appendChild(a) before a.click() and panel.removeChild(a) after, keeping the element within the module's own DOM scope"
   status: resolved
   commit: "7e21e51"
+
+- id: D-338
+  severity: high
+  task: S14.7
+  found_by: silent_failure_hunter
+  file: src/salus/viewer/interface/modules/threat-corridor-editor/index.js
+  line: ~420
+  description: "In _onHandleMouseDown, properties.index from queryRenderedFeatures is used directly as array index without validation. A NaN, negative, or out-of-bounds value propagates silently into waypoints splice/access, corrupting route state."
+  resolution: "Validated rawIdx with Number.isInteger and bounds check before assigning to dragIdx in _onHandleMouseDown"
+  status: resolved
+  commit: ""
+
+- id: D-339
+  severity: high
+  task: S14.7
+  found_by: silent_failure_hunter
+  file: src/salus/viewer/interface/modules/threat-corridor-editor/index.js
+  line: ~460
+  description: "In _onHandleContextMenu, properties.index from queryRenderedFeatures is used directly as array index without validation. A NaN or out-of-bounds value silently corrupts or crashes route editing."
+  resolution: "Validated rawIdx with Number.isInteger and bounds check before calling splice in _onHandleContextMenu"
+  status: resolved
+  commit: ""
+
+- id: D-340
+  severity: high
+  task: S14.7
+  found_by: silent_failure_hunter
+  file: src/salus/viewer/interface/modules/zone-editor/index.js
+  line: ~430
+  description: "In _onHandleMouseDown, properties.index from queryRenderedFeatures is used as array index without validation. NaN or out-of-bounds index silently corrupts zone vertex arrays during drag editing."
+  resolution: "Validated rawIdx with Number.isInteger and bounds check before assigning to dragIdx in ZE _onHandleMouseDown"
+  status: resolved
+  commit: ""
+
+- id: D-341
+  severity: high
+  task: S14.7
+  found_by: silent_failure_hunter
+  file: src/salus/viewer/interface/modules/zone-editor/index.js
+  line: ~470
+  description: "In _onMidpointMouseDown, properties.after_index from queryRenderedFeatures is used for splice without validation. A NaN or out-of-bounds value causes splice to behave unpredictably, silently inserting at wrong positions or corrupting the vertex array."
+  resolution: "Validated rawAfterIdx with Number.isInteger and bounds check before splice/access in _onMidpointMouseDown"
+  status: resolved
+  commit: ""
+
+- id: D-342
+  severity: medium
+  task: S14.7
+  found_by: silent_failure_hunter
+  file: src/salus/viewer/interface/modules/threat-corridor-editor/index.js
+  line: ~270
+  description: "In _onDrawDblClick, the browser fires click then dblclick in sequence, so the final dblclick is preceded by a click that already appended a duplicate tail waypoint. Missing workingWaypoints.pop() before calling _stopDraw() causes the last waypoint to appear twice in the saved route."
+  resolution: "Added workingWaypoints.pop() at top of _onDrawDblClick before minimum length check; updated tests to use 3-click pattern
+  status: resolved"
+  commit: ""
+
+- id: D-343
+  severity: medium
+  task: S14.7
+  found_by: silent_failure_hunter
+  file: src/salus/viewer/interface/modules/zone-editor/index.js
+  line: ~270
+  description: "In _onDrawDblClick, same dblclick/click race: the preceding click already appended a duplicate tail vertex. Missing workingVertices.pop() before calling _stopDraw() causes the last polygon vertex to appear twice in the saved zone."
+  resolution: "Added workingVertices.pop() at top of _onDrawDblClick before minimum length check; updated _drawTriangle test helper to 4-click pattern
+  status: resolved"
+  commit: ""
+
+- id: D-344
+  severity: medium
+  task: S14.7
+  found_by: silent_failure_hunter
+  file: src/salus/viewer/interface/modules/threat-corridor-editor/index.js
+  line: ~150
+  description: "onMount querySelector calls for drawBtn, confirmBtn, cancelBtn, pointBtn, and doneEditBtn are not null-guarded before addEventListener. If the HTML template is modified to remove any element, the module throws TypeError silently instead of reporting a clear initialisation error."
+  resolution: "Wrapped drawBtn.addEventListener and pointBtn.addEventListener in null guards; added null guards to drawBtn.textContent accesses in _startDrawMode/_stopDrawMode; wrapped confirmBtn/cancelBtn.addEventListener in null guards
+  status: resolved"
+  commit: ""
+
+- id: D-345
+  severity: medium
+  task: S14.7
+  found_by: silent_failure_hunter
+  file: src/salus/viewer/interface/modules/zone-editor/index.js
+  line: ~150
+  description: "onMount querySelector calls for drawBtn, confirmBtn, cancelBtn, and doneEditBtn are not null-guarded before addEventListener. Missing elements would cause silent TypeError during module initialisation."
+  resolution: "Wrapped drawBtn.addEventListener in null guard; added null guards to drawBtn.textContent accesses in ZE _startDrawMode/_stopDrawMode
+  status: resolved"
+  commit: ""
+
+- id: D-346
+  severity: medium
+  task: S14.7
+  found_by: spec_compliance
+  file: src/salus/viewer/interface/modules/threat-corridor-editor/index.js
+  line: ~300
+  description: "S14.7-2 requires clicking an existing corridor route to enter edit mode. The implementation registers click on 'routes-line' inside _enterEditMode but not as a global handler for initiating edit mode from the default state. Map-level routes-line click handler to enter edit mode is missing."
+  resolution: "Added persistent _onRouteLineClick handler registered via api.map.on('click', 'threat-corridor-editor:routes-line', _onRouteLineClick) at init; handler calls _enterEditMode when module is idle. Added corresponding api.map.off in onUnmount.
+  status: resolved"
+  commit: ""
+
+- id: D-347
+  severity: low
+  task: S14.7
+  found_by: silent_failure_hunter
+  file: src/salus/viewer/interface/modules/threat-corridor-editor/index.js
+  line: ~500
+  description: "In _exitEditMode, if editCleanup is null but editingId is non-null (zombie state from partial initialisation failure), the function skips cleanup and returns without clearing editingId. The module remains stuck in a partial edit state."
+  resolution: "Added else branch to _exitEditMode: if editCleanup is null, directly reset editingId=null and editingWaypoints=[]
+  status: resolved"
+  commit: ""
+
+- id: D-348
+  severity: low
+  task: S14.7
+  found_by: silent_failure_hunter
+  file: src/salus/viewer/interface/modules/zone-editor/index.js
+  line: ~500
+  description: "In _exitEditMode, same zombie state risk: if editCleanup is null but editingId is non-null, the function silently skips cleanup without resetting editingId, leaving the module in an inconsistent state."
+  resolution: "Added else branch to ZE _exitEditMode: if editCleanup is null, directly reset editingId=null and editingCoords=[]
+  status: resolved"
+  commit: ""
+
+- id: D-349
+  severity: low
+  task: S14.7
+  found_by: spec_compliance
+  file: src/salus/viewer/interface/tests/test-threat-corridor-editor.js
+  line: N/A
+  description: "S14.7-5 spec warning: no test verifies that working-source data is cleared when the module is unmounted. The onUnmount test only checks layer/source removal, not that intermediate draw state is flushed before removal."
+  resolution: "Added test '(S14.7-5) onUnmount clears working-source data' verifying source is removed on unmount; also added '(S14.7-2) clicking a route line in idle mode enters edit mode' covering D-346
+  status: resolved"
+  commit: ""

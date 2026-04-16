@@ -1,0 +1,59 @@
+<!--
+  threat-corridor-editor/panel.html — Threat Corridor Editor panel markup.
+
+  Loaded programmatically by index.js via innerHTML injection.
+  Elements are referenced by ID; do not rename IDs without updating index.js.
+-->
+<div id="tce-panel" class="module-panel">
+  <h2 class="panel-title">Threat Corridors</h2>
+
+  <div id="tce-toolbar" class="toolbar">
+    <button id="tce-draw-btn" class="action-btn">Draw Route</button>
+    <button id="tce-point-btn" class="action-btn">Pick Protected Point</button>
+  </div>
+
+  <div id="tce-protected-info" hidden>
+    <span class="field-label">Protected Point:</span>
+    <span id="tce-point-coords" class="field-value">—</span>
+    <button id="tce-clear-point-btn" class="clear-btn" aria-label="Clear protected point">✕</button>
+  </div>
+
+  <p id="tce-draw-hint" class="hint-msg" hidden>Click to add waypoints. Double-click to finish (min 2 waypoints).</p>
+  <p id="tce-point-hint" class="hint-msg" hidden>Click on the map to place the protected point.</p>
+
+  <div id="tce-form" hidden>
+    <h3 class="form-subtitle">Confirm Route</h3>
+    <div class="form-group">
+      <label for="tce-name-input" class="form-label">Route name</label>
+      <input type="text" id="tce-name-input" class="text-input" placeholder="Route 1">
+    </div>
+    <div class="form-group">
+      <label for="tce-profile-select" class="form-label">Threat profile</label>
+      <select id="tce-profile-select" class="select-input">
+        <option value="Low">Low</option>
+        <option value="Medium">Medium</option>
+        <option value="High">High</option>
+        <option value="Critical">Critical</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="tce-altitude-input" class="form-label">Altitude (m)</label>
+      <input type="number" id="tce-altitude-input" class="num-input" min="0" placeholder="50">
+    </div>
+    <div class="form-group">
+      <label for="tce-speed-input" class="form-label">Speed (m/s)</label>
+      <input type="number" id="tce-speed-input" class="num-input" min="0" placeholder="30">
+    </div>
+    <div class="form-actions">
+      <button id="tce-confirm-btn" class="confirm-btn">Confirm</button>
+      <button id="tce-cancel-btn" class="cancel-btn">Cancel</button>
+    </div>
+  </div>
+
+  <div id="tce-edit-bar" hidden>
+    <span id="tce-edit-label" class="edit-label">Editing route</span>
+    <button id="tce-done-edit-btn" class="done-btn">Done</button>
+  </div>
+
+  <div id="tce-route-list" class="item-list"></div>
+</div>

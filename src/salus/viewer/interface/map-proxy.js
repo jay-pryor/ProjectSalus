@@ -16,6 +16,37 @@
  *     cannot accidentally remove another module's layers.
  *   - The raw map instance is captured in a closure. There is no property
  *     on the returned object that exposes it.
+ *
+ * ---------------------------------------------------------------------------
+ * S14.7-5 Architectural Decision: drawing interaction approach
+ * ---------------------------------------------------------------------------
+ * The threat-corridor-editor and zone-editor modules require polygon and
+ * route drawing on the map canvas. The spec offered two options:
+ *
+ *   Option A — Expose addDrawControl(mode)/removeDrawControl() on the proxy
+ *              and use a bundled maplibre-gl-draw library.
+ *
+ *   Option B — Use api.map.on('click'/'dblclick') directly and manage draw
+ *              state inside each module with vanilla JS.
+ *
+ * We chose Option B for the following reasons:
+ *   1. addControl is a destructive method (it modifies the map DOM and
+ *      lifecycle). Exposing it — even as addDrawControl — weakens the
+ *      proxy's isolation guarantee.
+ *   2. maplibre-gl-draw requires bundling a significant external dependency
+ *      that may conflict with the MapLibreGL version in the shell.
+ *   3. The drawing interactions required (click to add point, dblclick to
+ *      close, drag to move vertex) map directly onto the 'click', 'dblclick',
+ *      'mousedown', 'mousemove', and 'mouseup' events already permitted by
+ *      the proxy. No new proxy surface is needed.
+ *   4. Module cleanup via api.map.off() is already the established pattern
+ *      for listener removal in onUnmount.
+ *
+ * If a richer drawing UX (snapping, undo, touch) is required in future, the
+ * correct upgrade path is to add a dedicated map.addDrawControl() proxy method
+ * with its own allowDrawControl flag (mirroring allowTerrainSource) and a
+ * corresponding entry in DRAW_EXTRA_METHODS — not to remove this decision.
+ * ---------------------------------------------------------------------------
  */
 
 // ---------------------------------------------------------------------------
