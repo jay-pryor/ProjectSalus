@@ -1,0 +1,11 @@
+{
+  "id": "budget-tracker",
+  "label": "Budget Tracker",
+  "reads": ["placements", "sensor_library", "effector_library"],
+  "writes": ["constraints"],
+  "prerequisites": [],
+  "emits": ["constraint:updated"],
+  "subscribes": ["placement:added", "placement:removed"],
+  "layer_id_prefix": "budget-tracker",
+  "description": "Track procurement cost against a budget and set constraints for the Optimiser."
+}

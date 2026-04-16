@@ -3661,3 +3661,58 @@ defects:
   resolution: "Added 7 new tests covering: TERRAIN_LOADER_EXTRA_METHODS content, proxy without option has no setTerrainSource, proxy with option exposes it, setTerrainSource(id) delegates to setTerrain({source:id}), setTerrainSource(null) delegates to setTerrain(null), raw instance not exposed, frozen proxy with 17 methods."
   status: resolved
   commit: "b6fe2e3"
+
+- id: D-333
+  severity: medium
+  task: S14.6
+  found_by: silent_failure_hunter
+  file: src/salus/viewer/interface/modules/budget-tracker/index.js
+  line: 38
+  description: "cost_aud coerced with ?? 0 instead of Number() || 0 in _buildLookupMap and _calcBreakdown. String values like '1500' pass the ?? guard and produce NaN in arithmetic, silently corrupting totalCost, the progress bar width, and the cost label."
+  resolution: ""
+  status: open
+  commit: ""
+
+- id: D-334
+  severity: medium
+  task: S14.6
+  found_by: silent_failure_hunter
+  file: src/salus/viewer/interface/modules/budget-tracker/index.js
+  line: 391
+  description: "Budget input coercion uses Number(...) || 0 which collapses NaN but not Infinity. Number('1e9999') === Infinity passes the guard, causing the progress bar to silently show 0% and the cost label to display '$Infinity'."
+  resolution: ""
+  status: open
+  commit: ""
+
+- id: D-335
+  severity: medium
+  task: S14.6
+  found_by: silent_failure_hunter
+  file: src/salus/viewer/interface/modules/budget-tracker/index.js
+  line: 455
+  description: "onUnmount iterates unsubs with forEach(u => u()) without checking typeof u === 'function'. If any watch()/on() returns null or undefined, u() throws TypeError mid-loop, leaving remaining subscriptions un-cleaned and leaking silently."
+  resolution: ""
+  status: open
+  commit: ""
+
+- id: D-336
+  severity: low
+  task: S14.6
+  found_by: silent_failure_hunter
+  file: src/salus/viewer/interface/modules/budget-tracker/index.js
+  line: 38
+  description: "In _buildLookupMap, inner loop uses (items ?? []) guard but not Array.isArray check. A non-null non-array library category value (e.g. a number or nested object) is not iterable, causing for...of to throw TypeError that propagates out of _render() uncaught."
+  resolution: ""
+  status: open
+  commit: ""
+
+- id: D-337
+  severity: low
+  task: S14.6
+  found_by: module_architecture_reviewer
+  file: src/salus/viewer/interface/modules/budget-tracker/index.js
+  line: 379
+  description: "CSV download creates a detached <a> element via document.createElement('a') and calls .click() on it without appending it to the module's own panel element. This is a document.* operation outside the module's panel DOM scope, technically violating the isolation invariant."
+  resolution: ""
+  status: open
+  commit: ""
