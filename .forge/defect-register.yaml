@@ -3726,7 +3726,7 @@ defects:
   description: "In _onHandleMouseDown, properties.index from queryRenderedFeatures is used directly as array index without validation. A NaN, negative, or out-of-bounds value propagates silently into waypoints splice/access, corrupting route state."
   resolution: "Validated rawIdx with Number.isInteger and bounds check before assigning to dragIdx in _onHandleMouseDown"
   status: resolved
-  commit: ""
+  commit: "020f3a5"
 
 - id: D-339
   severity: high
@@ -3737,7 +3737,7 @@ defects:
   description: "In _onHandleContextMenu, properties.index from queryRenderedFeatures is used directly as array index without validation. A NaN or out-of-bounds value silently corrupts or crashes route editing."
   resolution: "Validated rawIdx with Number.isInteger and bounds check before calling splice in _onHandleContextMenu"
   status: resolved
-  commit: ""
+  commit: "020f3a5"
 
 - id: D-340
   severity: high
@@ -3748,7 +3748,7 @@ defects:
   description: "In _onHandleMouseDown, properties.index from queryRenderedFeatures is used as array index without validation. NaN or out-of-bounds index silently corrupts zone vertex arrays during drag editing."
   resolution: "Validated rawIdx with Number.isInteger and bounds check before assigning to dragIdx in ZE _onHandleMouseDown"
   status: resolved
-  commit: ""
+  commit: "020f3a5"
 
 - id: D-341
   severity: high
@@ -3759,7 +3759,7 @@ defects:
   description: "In _onMidpointMouseDown, properties.after_index from queryRenderedFeatures is used for splice without validation. A NaN or out-of-bounds value causes splice to behave unpredictably, silently inserting at wrong positions or corrupting the vertex array."
   resolution: "Validated rawAfterIdx with Number.isInteger and bounds check before splice/access in _onMidpointMouseDown"
   status: resolved
-  commit: ""
+  commit: "020f3a5"
 
 - id: D-342
   severity: medium
@@ -3768,9 +3768,9 @@ defects:
   file: src/salus/viewer/interface/modules/threat-corridor-editor/index.js
   line: ~270
   description: "In _onDrawDblClick, the browser fires click then dblclick in sequence, so the final dblclick is preceded by a click that already appended a duplicate tail waypoint. Missing workingWaypoints.pop() before calling _stopDraw() causes the last waypoint to appear twice in the saved route."
-  resolution: "Added workingWaypoints.pop() at top of _onDrawDblClick before minimum length check; updated tests to use 3-click pattern
-  status: resolved"
-  commit: ""
+  resolution: "Added workingWaypoints.pop() at top of _onDrawDblClick before minimum length check; updated tests to use 3-click pattern"
+  status: resolved
+  commit: "020f3a5"
 
 - id: D-343
   severity: medium
@@ -3779,9 +3779,9 @@ defects:
   file: src/salus/viewer/interface/modules/zone-editor/index.js
   line: ~270
   description: "In _onDrawDblClick, same dblclick/click race: the preceding click already appended a duplicate tail vertex. Missing workingVertices.pop() before calling _stopDraw() causes the last polygon vertex to appear twice in the saved zone."
-  resolution: "Added workingVertices.pop() at top of _onDrawDblClick before minimum length check; updated _drawTriangle test helper to 4-click pattern
-  status: resolved"
-  commit: ""
+  resolution: "Added workingVertices.pop() at top of _onDrawDblClick before minimum length check; updated _drawTriangle test helper to 4-click pattern"
+  status: resolved
+  commit: "020f3a5"
 
 - id: D-344
   severity: medium
@@ -3790,9 +3790,9 @@ defects:
   file: src/salus/viewer/interface/modules/threat-corridor-editor/index.js
   line: ~150
   description: "onMount querySelector calls for drawBtn, confirmBtn, cancelBtn, pointBtn, and doneEditBtn are not null-guarded before addEventListener. If the HTML template is modified to remove any element, the module throws TypeError silently instead of reporting a clear initialisation error."
-  resolution: "Wrapped drawBtn.addEventListener and pointBtn.addEventListener in null guards; added null guards to drawBtn.textContent accesses in _startDrawMode/_stopDrawMode; wrapped confirmBtn/cancelBtn.addEventListener in null guards
-  status: resolved"
-  commit: ""
+  resolution: "Wrapped drawBtn.addEventListener and pointBtn.addEventListener in null guards; added null guards to drawBtn.textContent accesses in _startDrawMode/_stopDrawMode; wrapped confirmBtn/cancelBtn.addEventListener in null guards"
+  status: resolved
+  commit: "020f3a5"
 
 - id: D-345
   severity: medium
@@ -3801,9 +3801,9 @@ defects:
   file: src/salus/viewer/interface/modules/zone-editor/index.js
   line: ~150
   description: "onMount querySelector calls for drawBtn, confirmBtn, cancelBtn, and doneEditBtn are not null-guarded before addEventListener. Missing elements would cause silent TypeError during module initialisation."
-  resolution: "Wrapped drawBtn.addEventListener in null guard; added null guards to drawBtn.textContent accesses in ZE _startDrawMode/_stopDrawMode
-  status: resolved"
-  commit: ""
+  resolution: "Wrapped drawBtn.addEventListener in null guard; added null guards to drawBtn.textContent accesses in ZE _startDrawMode/_stopDrawMode"
+  status: resolved
+  commit: "020f3a5"
 
 - id: D-346
   severity: medium
@@ -3812,9 +3812,9 @@ defects:
   file: src/salus/viewer/interface/modules/threat-corridor-editor/index.js
   line: ~300
   description: "S14.7-2 requires clicking an existing corridor route to enter edit mode. The implementation registers click on 'routes-line' inside _enterEditMode but not as a global handler for initiating edit mode from the default state. Map-level routes-line click handler to enter edit mode is missing."
-  resolution: "Added persistent _onRouteLineClick handler registered via api.map.on('click', 'threat-corridor-editor:routes-line', _onRouteLineClick) at init; handler calls _enterEditMode when module is idle. Added corresponding api.map.off in onUnmount.
-  status: resolved"
-  commit: ""
+  resolution: "Added persistent _onRouteLineClick handler registered via api.map.on('click', 'threat-corridor-editor:routes-line', _onRouteLineClick) at init; handler calls _enterEditMode when module is idle. Added corresponding api.map.off in onUnmount."
+  status: resolved
+  commit: "020f3a5"
 
 - id: D-347
   severity: low
@@ -3823,9 +3823,9 @@ defects:
   file: src/salus/viewer/interface/modules/threat-corridor-editor/index.js
   line: ~500
   description: "In _exitEditMode, if editCleanup is null but editingId is non-null (zombie state from partial initialisation failure), the function skips cleanup and returns without clearing editingId. The module remains stuck in a partial edit state."
-  resolution: "Added else branch to _exitEditMode: if editCleanup is null, directly reset editingId=null and editingWaypoints=[]
-  status: resolved"
-  commit: ""
+  resolution: "Added else branch to _exitEditMode: if editCleanup is null, directly reset editingId=null and editingWaypoints=[]"
+  status: resolved
+  commit: "020f3a5"
 
 - id: D-348
   severity: low
@@ -3834,9 +3834,9 @@ defects:
   file: src/salus/viewer/interface/modules/zone-editor/index.js
   line: ~500
   description: "In _exitEditMode, same zombie state risk: if editCleanup is null but editingId is non-null, the function silently skips cleanup without resetting editingId, leaving the module in an inconsistent state."
-  resolution: "Added else branch to ZE _exitEditMode: if editCleanup is null, directly reset editingId=null and editingCoords=[]
-  status: resolved"
-  commit: ""
+  resolution: "Added else branch to ZE _exitEditMode: if editCleanup is null, directly reset editingId=null and editingCoords=[]"
+  status: resolved
+  commit: "020f3a5"
 
 - id: D-349
   severity: low
@@ -3845,6 +3845,94 @@ defects:
   file: src/salus/viewer/interface/tests/test-threat-corridor-editor.js
   line: N/A
   description: "S14.7-5 spec warning: no test verifies that working-source data is cleared when the module is unmounted. The onUnmount test only checks layer/source removal, not that intermediate draw state is flushed before removal."
-  resolution: "Added test '(S14.7-5) onUnmount clears working-source data' verifying source is removed on unmount; also added '(S14.7-2) clicking a route line in idle mode enters edit mode' covering D-346
-  status: resolved"
-  commit: ""
+  resolution: "Added test '(S14.7-5) onUnmount clears working-source data' verifying source is removed on unmount; also added '(S14.7-2) clicking a route line in idle mode enters edit mode' covering D-346"
+  status: resolved
+  commit: "020f3a5"
+
+  - id: D-350
+    severity: high
+    task: S14.11
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/optimiser/index.js
+    line: 441
+    description: "JSON.parse(evt.data) for the 'complete' SSE event has no try/catch. A SyntaxError on malformed JSON propagates to the outer catch and is treated as a generic failure, preventing api.state.set('optimiser_results') and api.bus.emit('optimiser:complete') from firing. The module emits optimiser:failed even though the backend optimisation succeeded."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-351
+    severity: high
+    task: S14.11
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/optimiser/index.js
+    line: 441
+    description: "No shape validation on the parsed 'complete' result object. If the server returns valid JSON that is not an object (null, number, array), all property accesses return undefined silently, api.bus.emit('optimiser:complete', result) fires with a non-object payload, and ghost markers silently show nothing."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-352
+    severity: medium
+    task: S14.11
+    found_by: module_architecture_reviewer
+    file: src/salus/viewer/interface/modules/optimiser/manifest.json
+    line: 4
+    description: "optimiser_results is watched and read via api.state.get() at init, but is only in writes[] not reads[] in manifest.json. MUST Rule 4 requires any key passed to get() or watch() to appear in reads[]."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-353
+    severity: medium
+    task: S14.11
+    found_by: module_architecture_reviewer
+    file: src/salus/viewer/interface/modules/optimiser/index.js
+    line: 447
+    description: "_showResults(result) is called directly in the SSE complete handler AND api.state.set('optimiser_results', result) is called on the same line, causing the watch callback to also call _showResults(r). In a synchronous state layer this is a double-render. Per reactive-read architecture, set() should be the sole trigger; the direct call bypasses the watch pattern."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-354
+    severity: medium
+    task: S14.11
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/optimiser/index.js
+    line: 417
+    description: "response.body is accessed without a null check (.getReader() called directly). Fetch spec allows response.body to be null in environments where streaming is unsupported. A TypeError from null.getReader() presents as an opaque error rather than a meaningful message."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-355
+    severity: medium
+    task: S14.11
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/optimiser/index.js
+    line: 409
+    description: "JSON.stringify(body) is called without a guard against non-serialisable state values. If latestZones/latestConstraints/latestTerrain contain circular references or BigInt, stringify throws a TypeError that appears to the user as a generic network error rather than a local serialisation failure."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-356
+    severity: medium
+    task: S14.11
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/optimiser/index.js
+    line: 434
+    description: "try/catch around JSON.parse in the 'progress' event handler silently discards all parse errors with /* ignore */ and no console.warn. Malformed progress events go undiagnosed — the progress bar freezes with no feedback and no browser console trace."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-357
+    severity: medium
+    task: S14.11
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/optimiser/index.js
+    line: 450
+    description: "try/catch around JSON.parse in the 'error' SSE event handler discards parse errors with /* ignore */ and no console.warn. Raw server error payload is silently lost; the user sees only 'Optimiser returned an error' with no diagnostic detail."
+    resolution: ""
+    status: open
+    commit: ""
