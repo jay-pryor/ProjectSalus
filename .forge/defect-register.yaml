@@ -3936,3 +3936,124 @@ defects:
     resolution: "Added console.warn('[optimiser] malformed error event data:', evt.data) in the catch block"
     status: resolved
     commit: 1af5f62
+
+  - id: D-358
+    severity: high
+    task: S14.5
+    found_by: module_architecture_reviewer
+    file: src/salus/viewer/interface/modules/placement-editor/index.js
+    line: 758
+    description: "importFileInput._fire('click') is not a DOM method — _fire is only present in the test mock. In a real browser this throws TypeError: importFileInput._fire is not a function, completely breaking file import."
+    resolution: "Changed importFileInput._fire('click') to importFileInput.click() — the correct DOM API"
+    status: resolved
+    commit: ""
+
+  - id: D-359
+    severity: high
+    task: S14.5
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/placement-editor/index.js
+    line: "88,118"
+    description: "Division by Math.cos(lat * PI/180) in _buildBearingLinesFC (line 88) and _buildWedgesFC (line 118) produces Infinity when lat=±90 (cosLat=0), emitting GeoJSON coordinates of [Infinity, lat] that can crash MapLibre or produce invisible geometry silently."
+    resolution: "Added cosLat guard (if cosLat === 0) continue in both _buildBearingLinesFC and _buildWedgesFC; cosLat computed before the guard in both functions"
+    status: resolved
+    commit: ""
+
+  - id: D-360
+    severity: high
+    task: S14.5
+    found_by: module_architecture_reviewer
+    file: src/salus/viewer/interface/modules/optimiser/manifest.json
+    line: 5
+    description: "Sole-writer violation: optimiser manifest declares 'placements' in writes[], but placement-editor is designated as the sole writer of the placements state key. Two modules writing the same key violates the architecture contract."
+    resolution: "Removed 'placements' from optimiser/manifest.json writes[] — optimiser now writes only 'optimiser_results'"
+    status: resolved
+    commit: ""
+
+  - id: D-361
+    severity: medium
+    task: S14.5
+    found_by: spec_compliance
+    file: src/salus/viewer/interface/modules/placement-editor/index.js
+    line: 646
+    description: "_onCircleMouseleave restores cursor to '' (default arrow) when not in pending mode, but spec requires 'pointer' while hovering a sensor circle. After mouseleave the cursor should return to 'pointer' (to signal the sensor was clickable), not reset to default."
+    resolution: "Changed cursor fallback in _onCircleMouseleave from '' to 'pointer'"
+    status: resolved
+    commit: ""
+
+  - id: D-362
+    severity: medium
+    task: S14.5
+    found_by: spec_compliance
+    file: src/salus/viewer/interface/modules/placement-editor/index.js
+    line: 612
+    description: "_onCircleClick calls _renderList() but does not scroll the newly-selected row into view. Spec requires the placement list to scroll to the selected item so it is visible when a circle is clicked on the map."
+    resolution: "Added listContainer.querySelector('[data-testid=...]').scrollIntoView({block:'nearest'}) after _renderList() in _onCircleClick; test mock updated with querySelector support"
+    status: resolved
+    commit: ""
+
+  - id: D-363
+    severity: medium
+    task: S14.5
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/placement-editor/index.js
+    line: 765
+    description: "FileReader has no onerror handler. If the FileReader fails (e.g. file unreadable, disk error), the error is swallowed silently — no feedback shown to the user and importErrorEl remains hidden."
+    resolution: "Added reader.onerror handler that sets importErrorEl.textContent and shows it; MockFileReader in test updated to support onerror"
+    status: resolved
+    commit: ""
+
+  - id: D-364
+    severity: medium
+    task: S14.5
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/placement-editor/index.js
+    line: 741
+    description: "Export button handler calls JSON.stringify and new Blob without try/catch. If latestPlacements contains non-serialisable values, JSON.stringify throws a TypeError that propagates as an unhandled exception with no user feedback."
+    resolution: "Wrapped JSON.stringify call in try/catch with console.error and early return in export handler"
+    status: resolved
+    commit: ""
+
+  - id: D-365
+    severity: medium
+    task: S14.5
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/placement-editor/index.js
+    line: "593,594"
+    description: "_onMapMouseup falls back to placements[dragIndex].lat/lng when e.lngLat is null, but does not guard against dragIndex being out of bounds at the fallback point. If placements has changed between mousedown and mouseup, placements[dragIndex] is undefined and .lat throws."
+    resolution: "Stored original=placements[dragIndex] before computing newLat/newLng; added null guard that aborts if either coord is null/undefined"
+    status: resolved
+    commit: ""
+
+  - id: D-366
+    severity: medium
+    task: S14.5
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/placement-editor/index.js
+    line: 727
+    description: "modalApplyBtn click handler iterates optimiserProposed with for...of and calls api.bus.emit('placement:added', p) for each entry, but does not guard against null/non-object entries in the array. A null entry causes spread and emit to fail."
+    resolution: "Added filter(p => p != null && typeof p === 'object') before merging proposed placements and emitting events"
+    status: resolved
+    commit: ""
+
+  - id: D-367
+    severity: medium
+    task: S14.5
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/placement-editor/index.js
+    line: 684
+    description: "placeBtn click handler uses pendingDef.lat and pendingDef.lng directly without isFinite guards. If these arrive as NaN or Infinity from a malformed placement:pending event, a placement with invalid coordinates is added to state silently."
+    resolution: "Added Number.isFinite guard at top of placeBtn click handler — returns early if lat or lng are not finite"
+    status: resolved
+    commit: ""
+
+  - id: D-368
+    severity: medium
+    task: S14.5
+    found_by: spec_compliance
+    file: src/salus/viewer/interface/modules/placement-editor/index.js
+    line: 822
+    description: "placement:pending bus handler only guards evt.lat and evt.lng but not evt.definition. _enterPendingMode accesses evt.definition?.name and evt.definition?.default_bearing safely, but placeBtn handler accesses evt.definition?.type and evt.definition?.azimuth_coverage_deg — a null definition produces silent defaults without warning."
+    resolution: "Added console.warn in placement:pending handler when evt.definition is null, alerting developer that sensor defaults will be used"
+    status: resolved
+    commit: ""

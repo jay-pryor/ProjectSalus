@@ -322,13 +322,14 @@ test('manifest reads all required state keys', async () => {
   }
 });
 
-test('manifest writes optimiser_results and placements', async () => {
+test('manifest writes optimiser_results (sole writer of that key)', async () => {
   const raw = await readFile(
     path.resolve(__dirname, '../modules/optimiser/manifest.json'), 'utf8'
   );
   const m = JSON.parse(raw);
   assert.ok(m.writes.includes('optimiser_results'), 'writes must include optimiser_results');
-  assert.ok(m.writes.includes('placements'), 'writes must include placements');
+  // placements is intentionally NOT in optimiser writes[] — placement-editor is the sole writer
+  assert.ok(!m.writes.includes('placements'), 'optimiser must not declare placements as a write (sole-writer violation D-360)');
 });
 
 test('manifest prerequisites are terrain and zones', async () => {
