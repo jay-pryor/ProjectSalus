@@ -4397,7 +4397,7 @@ defects:
     description: "fetch('/api/compare') has no watchdog timeout — a hung backend (large Shapely unary_union) leaves the UI spinning with no user-visible error, and diffFetchInflight stays pinned indefinitely."
     resolution: "Added _COMPARE_TIMEOUT_MS (30s) watchdog via setTimeout+ctrl.abort; on timeout surface a user-facing error message and unpin diffFetchInflight."
     status: resolved
-    commit: ""
+    commit: ebc3d83
 
   - id: D-400
     severity: medium
@@ -4408,7 +4408,7 @@ defects:
     description: "On /api/compare failure the error branch populates a_only/b_only/both with _EMPTY_FC. In overlay mode, an empty diff is indistinguishable from a legitimately-identical pair of scenarios. Silent degradation: the user cannot tell 'identical' from 'backend failed'."
     resolution: "Only write to diff sources on success; on failure retain previous diff sources and display the error banner so user can distinguish 'no diff' (identical) from 'backend failed' (banner visible)."
     status: resolved
-    commit: ""
+    commit: ebc3d83
 
   - id: D-401
     severity: medium
@@ -4419,7 +4419,7 @@ defects:
     description: "AbortController.abort() calls wrapped in try/catch with empty swallow. Two locations: _fetchDiff (line 635) and onUnmount (~line 922). If the proxy ever changes shape, the failure is silent."
     resolution: "Replaced empty catch (_) with console.warn so the abort failure is observable in dev tools. Both locations updated."
     status: resolved
-    commit: ""
+    commit: ebc3d83
 
   - id: D-402
     severity: medium
@@ -4430,7 +4430,7 @@ defects:
     description: "_dividerLngFromFraction wraps api.map.unproject in two try/catch blocks with no logging. If unproject starts throwing, the swipe filter silently falls back to 'no filter' — both scenarios render on both sides and the user cannot distinguish from a correct render."
     resolution: "Added _logUnprojectFailure one-shot helper; both unproject try/catch blocks call it, so the degradation is visible in dev tools without log spam."
     status: resolved
-    commit: ""
+    commit: ebc3d83
 
   - id: D-403
     severity: medium
@@ -4441,7 +4441,7 @@ defects:
     description: "_geometries_from_features buffer(0) fallback: on cleanup exception a warning is logged but the RAW (possibly-invalid) geometry is appended to geoms. Downstream unary_union/difference may silently corrupt the diff."
     resolution: "If geometry is invalid we attempt buffer(0); if it raises or yields an empty geometry we SKIP the feature entirely rather than append an invalid shape."
     status: resolved
-    commit: ""
+    commit: ebc3d83
 
   - id: D-404
     severity: critical
@@ -4452,7 +4452,7 @@ defects:
     description: "_sse_event emits only 'data: {...}' without the 'event: <type>' line. JS _parseSseBuffer defaults eventType to 'message' when the event: line is missing, so simulation-runner and optimiser dispatch branches ('progress'/'complete'/'error') never match — every SSE event is silently discarded in production. Test mocks include the event: line, masking the bug."
     resolution: "Added event_type = str(data.get('type', 'message')) and 'event: {type}\\ndata: {json}\\n\\n' formatting. Added test_simulate_sse_events_carry_event_line regression test to assert the event: line is present and matches data.type on every event."
     status: resolved
-    commit: ""
+    commit: ebc3d83
 
   - id: D-405
     severity: critical
@@ -4463,4 +4463,4 @@ defects:
     description: "_run_simulate_pipeline emitted the SimResultsPayload shape (top-level total_coverage_pct, base64 PNG fields) instead of the interface schema defined in docs/Technical/InterfaceArchitecture.md §3 (layers / sensor_placements / stats). Every interface module that reads sim_results (simulation-runner, coverage-viewer, scenario-comparison) would find the required fields absent in production. Test fixtures used the interface schema, masking the bug."
     resolution: "Rewrote _run_simulate_pipeline to build a SimulationResults and call export_viewer_data(skip_terrain_tiles=True), then emit the interface schema result. Added skip_terrain_tiles kwarg to export_viewer_data (terrain tiles are served via /api/terrain on the live interface). Removed the PNG rendering code. stats dict carries both naming variants (coverage_pct and total_coverage_pct; largest_gap_area_m2 and largest_contiguous_gap_m2) for cross-module compatibility. Updated test_simulate_sse_stream_terminates_with_complete to assert layers/sensor_placements/stats."
     status: resolved
-    commit: ""
+    commit: ebc3d83
