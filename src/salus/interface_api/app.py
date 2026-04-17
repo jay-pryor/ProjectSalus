@@ -11,7 +11,6 @@ origins.  No authentication is required.
 from __future__ import annotations
 
 import asyncio
-import base64
 import io
 import json
 import logging
@@ -204,6 +203,42 @@ class ReportRequest(BaseModel):
     """Threat corridor results (informational; unused if not in sim_results)."""
 
 
+class CompareRequest(BaseModel):
+    """Request body for ``POST /api/compare``.
+
+    Two composite coverage GeoJSON FeatureCollections.  The endpoint returns
+    the spatial A-only, B-only, and intersection FeatureCollections computed
+    via Shapely polygon boolean operations.
+    """
+
+    a_composite: dict[str, Any] = Field(
+        default_factory=lambda: {"type": "FeatureCollection", "features": []}
+    )
+    """Scenario A composite coverage FeatureCollection."""
+
+    b_composite: dict[str, Any] = Field(
+        default_factory=lambda: {"type": "FeatureCollection", "features": []}
+    )
+    """Scenario B composite coverage FeatureCollection."""
+
+
+class CompareResponse(BaseModel):
+    """Response body for ``POST /api/compare``.
+
+    Three GeoJSON FeatureCollections representing the spatial diff of the
+    two input composite coverage layers.
+    """
+
+    a_only: dict[str, Any]
+    """Features covered by A but not B (rendered red in the overlay view)."""
+
+    b_only: dict[str, Any]
+    """Features covered by B but not A (rendered green in the overlay view)."""
+
+    both: dict[str, Any]
+    """Features covered by both scenarios (rendered grey in the overlay view)."""
+
+
 # ---------------------------------------------------------------------------
 # Library cache helpers
 # ---------------------------------------------------------------------------
@@ -251,8 +286,14 @@ def _get_effector_defs() -> list[EffectorDefinition]:
 
 
 def _sse_event(data: dict[str, Any]) -> str:
-    """Format a dict as an SSE data line."""
-    return f"data: {json.dumps(data)}\n\n"
+    """Format a dict as a complete SSE event.
+
+    The JS parser in simulation-runner/optimiser reads ``event:`` to dispatch
+    on type; without this line every event would default to ``'message'`` and
+    be silently dropped by the dispatch branches (D-404).
+    """
+    event_type = str(data.get("type", "message"))
+    return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"
 
 
 def _queue_get_with_timeout(
@@ -288,23 +329,6 @@ async def _drain_queue(q: _queue.Queue[dict[str, Any]]) -> AsyncGenerator[str, N
 # ---------------------------------------------------------------------------
 
 
-def _render_to_b64_api(render_func: Any, *args: Any, **kwargs: Any) -> str | None:
-    """Call a render function with a temp file and return base64-encoded PNG."""
-    tmp_path: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-            tmp_path = Path(f.name)
-        render_func(*args, output_path=tmp_path, **kwargs)
-        data = tmp_path.read_bytes()
-        return base64.b64encode(data).decode()
-    except Exception as exc:
-        _log.warning("Map render failed (%s): %s", getattr(render_func, "__name__", "?"), exc)
-        return None
-    finally:
-        if tmp_path is not None:
-            tmp_path.unlink(missing_ok=True)
-
-
 def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -315,12 +339,18 @@ def _run_simulate_pipeline(
 ) -> None:
     """Run the full simulation pipeline in a background thread.
 
-    Emits SSE progress events to *q* and finishes with a ``complete`` or
-    ``error`` event containing a :class:`SimResultsPayload`-compatible dict.
+    Emits SSE progress events to *q* and finishes with a ``complete`` event
+    containing the *interface schema* defined in
+    docs/Technical/InterfaceArchitecture.md §3 (``layers``, ``sensor_placements``,
+    ``stats``, ``corridor_results``, ``kill_chain_results``, ``saturation_result``,
+    ``sanitised``, ``generated_at``).  Base64 PNGs are NOT produced here — the
+    live interface renders coverage client-side from vectorised GeoJSON layers,
+    and the PDF report endpoint (``/api/report``) renders its own PNGs
+    independently from the data the caller posts to it.
     """
     try:
-        from salus.report.maps import render_composite_coverage_map, render_gap_map
-        from salus.report.pdf import generate_executive_summary
+        from salus.report.pdf import SimulationResults
+        from salus.viewer.export import export_viewer_data
 
         q.put({"type": "progress", "message": "Loading sensor library…", "pct": 5})
         sensor_defs = _get_sensor_defs()
@@ -378,93 +408,59 @@ def _run_simulate_pipeline(
         q.put({"type": "progress", "message": "Computing coverage statistics…", "pct": 70})
         stats = compute_coverage_stats(site, layer_coverages, composite, gaps, site.zones)
 
-        q.put({"type": "progress", "message": "Rendering coverage maps…", "pct": 80})
-        sensor_positions = [
-            (p.position_x, p.position_y)
-            for p in config.sensor_placements
-            if sensor_map.get(p.sensor_name) is not None
-        ]
-
-        composite_map_b64 = (
-            _render_to_b64_api(
-                render_composite_coverage_map,
-                site,
-                layer_coverages,
-                title="Composite Coverage",
-                sensor_positions=sensor_positions,
-            )
-            if layer_coverages
-            else None
+        # Build the full SimulationResults so the viewer-export path can
+        # vectorise coverage layers and build the sensor_placements
+        # FeatureCollection in the canonical interface schema (D-405).
+        sim_bundle = SimulationResults(
+            site=site,
+            scenario=config,
+            composite=composite,
+            layer_coverages=layer_coverages,
+            stats=stats,
+            sensor_defs=sensor_defs,
+            effector_defs=effector_defs,
+            gaps=gaps,
         )
 
-        # D-312 fix: initialise tmp_gap before the try block to avoid NameError in finally.
-        gap_map_b64 = (
-            _render_to_b64_api(
-                render_gap_map,
-                site,
-                composite,
-                gaps,
-                title="Coverage Gap Analysis",
-                sensor_positions=sensor_positions,
-            )
-            if layer_coverages
-            else None
+        q.put(
+            {"type": "progress", "message": "Vectorising coverage layers…", "pct": 85},
         )
-
-        layer_maps_b64: dict[str, str] = {}
-        for stype, arr in layer_coverages.items():
-            b64 = _render_to_b64_api(
-                render_composite_coverage_map,
-                site,
-                {stype: arr},
-                title=f"{stype.value} Layer Coverage",
-                sensor_positions=sensor_positions,
-            )
-            if b64 is not None:
-                layer_maps_b64[stype.value] = b64
-
-        executive_summary = generate_executive_summary(stats, [], None)
-        assumptions = _build_minimal_assumptions(config)
+        # skip_terrain_tiles=True — the interface serves terrain via /api/terrain
+        viewer_data = export_viewer_data(sim_bundle, skip_terrain_tiles=True)
 
         q.put({"type": "progress", "message": "Simulation complete.", "pct": 100})
 
-        per_layer_pct = {k.value: v for k, v in stats.per_layer_coverage_pct.items()}
+        # Build the interface-schema result.  We include BOTH naming variants
+        # for coverage and largest-gap so both simulation-runner (reads
+        # ``stats.coverage_pct``/``stats.largest_gap_area_m2``) and
+        # scenario-comparison (reads ``stats.total_coverage_pct`` from loaded
+        # viewer_data.js files) find what they expect without extra adapters.
+        stats_payload: dict[str, Any] = dict(viewer_data.stats)
+        total_coverage = stats_payload.get("total_coverage_pct")
+        if total_coverage is not None and "coverage_pct" not in stats_payload:
+            stats_payload["coverage_pct"] = total_coverage
+        largest_contig = stats_payload.get("largest_contiguous_gap_m2")
+        if largest_contig is not None and "largest_gap_area_m2" not in stats_payload:
+            stats_payload["largest_gap_area_m2"] = largest_contig
 
         result: dict[str, Any] = {
-            "scenario_name": Path(config.site_dem_path).stem,
-            "generated_at": _now_iso(),
-            "total_coverage_pct": stats.total_coverage_pct,
-            "gap_area_m2": stats.gap_area_m2,
-            "largest_contiguous_gap_m2": stats.largest_contiguous_gap_m2,
-            "per_layer_coverage_pct": per_layer_pct,
-            "per_zone_coverage_pct": dict(stats.per_zone_coverage_pct),
-            "composite_map_b64": composite_map_b64,
-            "gap_map_b64": gap_map_b64,
-            "layer_maps_b64": layer_maps_b64,
-            "kill_chain_chart_b64": None,
-            "saturation_chart_b64": None,
-            "executive_summary": executive_summary,
-            "assumptions": assumptions,
+            "scenario_name": viewer_data.scenario_name,
+            "generated_at": viewer_data.generated_at,
+            "bounds_wgs84": list(viewer_data.bounds_wgs84),
+            "centre_wgs84": list(viewer_data.centre_wgs84),
+            "layers": viewer_data.layers,
+            "sensor_placements": viewer_data.sensor_placements,
+            "stats": stats_payload,
+            "corridor_results": viewer_data.corridor_results,
+            "kill_chain_results": viewer_data.kill_chain_results,
+            "saturation_result": viewer_data.saturation_result,
+            "sanitised": viewer_data.sanitised,
         }
         q.put({"type": "complete", "result": result})
 
     except Exception as exc:
         _log.exception("Simulation pipeline failed")
         q.put({"type": "error", "message": str(exc)})
-
-
-def _build_minimal_assumptions(config: ScenarioConfig) -> dict[str, list[str]]:
-    """Build a minimal assumptions dict from a scenario config."""
-    return {
-        "Terrain Model": [
-            f"DEM source: {Path(config.site_dem_path).name}",
-            "Binary detection model (no Pd curves)",
-        ],
-        "Propagation Model": [
-            "No multipath or atmospheric effects modelled",
-            "Straight-line LOS only",
-        ],
-    }
 
 
 def _run_optimise_pipeline(
@@ -842,6 +838,143 @@ async def optimise(request: OptimiserRequest) -> StreamingResponse:
     )
     thread.start()
     return StreamingResponse(_drain_queue(q), media_type="text/event-stream")
+
+
+# ---------------------------------------------------------------------------
+# S14.12: Spatial diff helpers
+# ---------------------------------------------------------------------------
+
+
+def _geometries_from_features(
+    features: list[dict[str, Any]],
+    scenario_label: str,
+) -> list[Any]:
+    """Convert a GeoJSON Feature list into Shapely geometries.
+
+    Invalid features are skipped with a warning; a malformed collection never
+    raises, which means a partially-corrupt scenario still yields a best-effort
+    diff rather than a 500.  ``scenario_label`` is only used in log messages.
+    """
+    from shapely.geometry import shape as _shape
+
+    geoms: list[Any] = []
+    for idx, feat in enumerate(features):
+        if not isinstance(feat, dict):
+            _log.warning("%s: feature %d is not a dict, skipping.", scenario_label, idx)
+            continue
+        geom_dict = feat.get("geometry")
+        if not geom_dict:
+            continue
+        try:
+            g = _shape(geom_dict)
+        except Exception as exc:
+            _log.warning(
+                "%s: feature %d geometry could not be parsed (%s), skipping.",
+                scenario_label,
+                idx,
+                exc,
+            )
+            continue
+        if g.is_empty:
+            continue
+        # Buffer(0) cleans up self-intersections that would otherwise break diffs.
+        # D-403: if buffer(0) fails on an invalid geometry we SKIP the feature
+        # rather than appending the raw invalid shape; keeping a known-invalid
+        # geometry risks silently corrupting the downstream polygon booleans.
+        if not g.is_valid:
+            try:
+                g = g.buffer(0)
+            except Exception as exc:
+                _log.warning(
+                    "%s: feature %d is invalid and buffer(0) cleanup failed "
+                    "(%s); skipping feature rather than risking diff corruption.",
+                    scenario_label,
+                    idx,
+                    exc,
+                )
+                continue
+            if g.is_empty:
+                continue
+        geoms.append(g)
+    return geoms
+
+
+def _geometry_to_feature_collection(geom: Any) -> dict[str, Any]:
+    """Wrap a Shapely geometry as a GeoJSON FeatureCollection.
+
+    An empty or None geometry yields an empty FeatureCollection rather than
+    a feature with a null geometry.
+    """
+    from shapely.geometry import mapping as _mapping
+
+    if geom is None or geom.is_empty:
+        return {"type": "FeatureCollection", "features": []}
+
+    # Multi-part geometries → one feature per component (keeps polygon boundaries
+    # distinct for MapLibre rendering).  Single geometries become a single feature.
+    geom_type = geom.geom_type
+    features: list[dict[str, Any]]
+    if geom_type in {"MultiPolygon", "MultiLineString", "MultiPoint", "GeometryCollection"}:
+        features = []
+        for sub in geom.geoms:
+            if sub.is_empty:
+                continue
+            features.append(
+                {"type": "Feature", "geometry": _mapping(sub), "properties": {}},
+            )
+    else:
+        features = [{"type": "Feature", "geometry": _mapping(geom), "properties": {}}]
+
+    return {"type": "FeatureCollection", "features": features}
+
+
+@app.post("/api/compare")
+async def compare(request: CompareRequest) -> CompareResponse:
+    """Compute the spatial diff between two composite coverage FeatureCollections.
+
+    Request body: :class:`CompareRequest` JSON with ``a_composite`` and
+    ``b_composite`` GeoJSON FeatureCollections.
+
+    Response: :class:`CompareResponse` JSON containing three FeatureCollections
+    (``a_only``, ``b_only``, ``both``).  Empty inputs are supported — an empty
+    scenario yields empty diff layers rather than an error.
+    """
+    from shapely.geometry import GeometryCollection
+    from shapely.ops import unary_union
+
+    a_features = request.a_composite.get("features", []) if request.a_composite else []
+    b_features = request.b_composite.get("features", []) if request.b_composite else []
+
+    if not isinstance(a_features, list) or not isinstance(b_features, list):
+        raise HTTPException(
+            status_code=422,
+            detail="a_composite/b_composite.features must be a list.",
+        )
+
+    try:
+        a_geoms = _geometries_from_features(a_features, "scenario A")
+        b_geoms = _geometries_from_features(b_features, "scenario B")
+
+        a_union: Any = unary_union(a_geoms) if a_geoms else GeometryCollection()
+        b_union: Any = unary_union(b_geoms) if b_geoms else GeometryCollection()
+
+        # difference() and intersection() short-circuit on empty inputs
+        a_only = a_union.difference(b_union) if not a_union.is_empty else GeometryCollection()
+        b_only = b_union.difference(a_union) if not b_union.is_empty else GeometryCollection()
+        both = (
+            a_union.intersection(b_union)
+            if (not a_union.is_empty and not b_union.is_empty)
+            else GeometryCollection()
+        )
+    except Exception as exc:
+        _log.exception("Compare spatial operation failed")
+        raise HTTPException(status_code=500, detail=f"Compare failed: {exc}")
+
+    return CompareResponse(
+        a_only=_geometry_to_feature_collection(a_only),
+        b_only=_geometry_to_feature_collection(b_only),
+        both=_geometry_to_feature_collection(both),
+    )
 
 
 @app.post("/api/report")

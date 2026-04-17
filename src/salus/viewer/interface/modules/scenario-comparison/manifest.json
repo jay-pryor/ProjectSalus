@@ -1,0 +1,11 @@
+{
+  "id": "scenario-comparison",
+  "label": "Scenario Comparison",
+  "reads": ["terrain", "sim_results"],
+  "writes": ["scenario_b_sim_results"],
+  "prerequisites": ["terrain", "sim_results"],
+  "emits": ["comparison:loaded"],
+  "subscribes": [],
+  "layer_id_prefix": "scenario-comparison",
+  "description": "Load a saved scenario (viewer_data.js / .json) and compare it against the current simulation — overlay diff layers (A-only, B-only, both), swipe divider, and summary statistics."
+}

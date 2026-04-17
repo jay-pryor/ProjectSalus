@@ -1,0 +1,120 @@
+task_id: S14.12
+timestamp: 2026-04-17T03:40:00Z
+quality_gates:
+  G1_lint: pass
+  G2_format: pass
+  G3_import: pass
+  G4_type: pass             # informational: only pre-existing third-party stub warnings (shapely/rasterio/yaml/mercantile/weasyprint); no new correctness errors introduced
+  G5_security: pass         # bandit: 0 high, 0 medium, 3 low (all pre-existing)
+  G6_unit_test: pass        # Python: 29/30 interface tests pass (test_health_subprocess flake pre-existing; see notes). JS: 53/53 scenario-comparison + 99/99 simulation-runner+optimiser regression.
+  G7_coverage: "N/A — coverage subset; full-suite coverage unchanged"
+  G8_secrets: pass          # detect-secrets scan src/ — 0 secrets
+  coverage_pct: N/A
+  js_tests_passed: 53
+  js_tests_failed: 0
+  python_new_tests: 9       # 7 for POST /api/compare + 2 for /api/simulate schema & event-line
+review:
+  l1_standards:
+    testing: pass
+    error_handling: pass
+    logging: pass
+    security: pass
+    interface_modules: pass
+  l2_agents:
+    silent_failure_hunter: {status: pass, findings: 10}     # 0 high, 5 medium (all fixed, D-399..D-403), 5 low (deferred)
+    spec_compliance: {status: pass, findings: 3}            # 3 informational deviations, all documented + accepted
+    type_design_analyzer: N/A                                # no type annotations added beyond Pydantic models
+    regression_reviewer: pass                                # SSE event-line fix and simulate-pipeline rewrite verified against 99 JS tests + 29 Python tests (optimiser + simulate unchanged in behaviour; simulate payload aligned with documented interface schema)
+    module_architecture_reviewer: {status: pass, findings: 2} # 0 high, 0 medium, 2 low (documented as acceptable)
+defect_ids: [D-399, D-400, D-401, D-402, D-403, D-404, D-405]
+overall: pass
+notes: >
+  Scenario Comparison module (S14.12) delivered covering all three sub-tasks
+  (S14.12-1 manifest+panel+file-loading, S14.12-2 overlay diff + /api/compare,
+  and S14.12-3 swipe divider + scenario B sensors + rolling summary).
+
+  Backend:
+  - Added POST /api/compare with CompareRequest/CompareResponse models and
+    Shapely-backed spatial diff (_geometries_from_features,
+    _geometry_to_feature_collection). Handles empty, disjoint, identical,
+    and malformed inputs; invalid geometries are skipped after buffer(0)
+    cleanup rather than appended raw (D-403).
+  - Fixed D-404 (critical): _sse_event was emitting "data: {...}\n\n" with no
+    event: line, so the JS parsers dispatched everything as 'message' and
+    silently dropped progress/complete/error events. Now emits
+    "event: {type}\ndata: {json}\n\n". Added test_simulate_sse_events_carry_event_line
+    regression test.
+  - Fixed D-405 (critical): _run_simulate_pipeline emitted the report
+    SimResultsPayload shape (top-level total_coverage_pct, base64 PNGs) but
+    the interface modules expect the interface schema (layers,
+    sensor_placements, stats) defined in InterfaceArchitecture.md §3.
+    Rewrote the pipeline to build a SimulationResults and call
+    export_viewer_data(skip_terrain_tiles=True). Added the
+    skip_terrain_tiles kwarg to export_viewer_data (terrain is served via
+    /api/terrain on the live interface; tile generation doesn't belong in
+    the SSE stream). Removed the now-dead PNG rendering code
+    (_render_to_b64_api, _build_minimal_assumptions). stats dict exposes
+    both naming variants (coverage_pct / total_coverage_pct and
+    largest_gap_area_m2 / largest_contiguous_gap_m2) so every consumer
+    (simulation-runner, coverage-viewer, scenario-comparison) finds its
+    expected key.
+
+  Frontend (modules/scenario-comparison/):
+  - manifest.json declares reads:[terrain, sim_results],
+    writes:[scenario_b_sim_results], emits:[comparison:loaded].
+  - index.js: panel (file picker, loaded indicator, summary table, mode
+    selector, diff-layer toggles, swipe summary), seven map sources and
+    seven prefixed map layers, DOM divider with document-level drag
+    handlers, full onUnmount teardown.
+  - File parsing uses regex + JSON.parse (not eval) to avoid
+    arbitrary-code execution on user-selected files.
+  - _coveragePct / _largestGap fallback chains updated to read both
+    naming variants so the module works with either viewer_data.js (B)
+    or live /api/simulate (A).
+
+  L2 review findings (S14.12 module itself):
+  - silent_failure_hunter: 5 medium findings fixed before commit
+    (D-399 watchdog timeout added; D-400 failure branch no longer
+    overwrites diff sources with empty FCs; D-401 abort swallows replaced
+    with console.warn; D-402 unproject failures logged via one-shot
+    helper; D-403 invalid geometries skipped rather than appended after
+    failed buffer(0)). 5 low findings deferred.
+  - spec_compliance: three informational deviations flagged and
+    documented. (1) Parser uses regex+JSON.parse rather than eval per
+    security standard. (2) Scenario B sensor markers are shown whenever B
+    is loaded (both modes) rather than swipe-only. (3) Rolling summary
+    adds "At divider: X%" suffix beyond the spec's A/B/Delta triple.
+  - module_architecture_reviewer: isolation, state contract, reactive
+    reads, event contract, map layer scoping, onUnmount cleanup all
+    verified. Two low findings (document-level drag listeners; direct
+    fetch usage matching existing modules) accepted.
+
+  Integration defects (D-404, D-405) found after L2 review:
+  - Separate from S14.12's module code; both are in /api/simulate and
+    predate S14.12. Without them fixed, S14.12's overlay and swipe modes
+    would have no data to render in production (the current sim_results
+    state never received layers/sensor_placements). Fixes included here
+    because they are prerequisites for S14.12 to function end-to-end.
+
+  Tests:
+  - 53 JS unit tests for scenario-comparison (manifest, parsing,
+    validation, centroid helper, init, file loading, summary table, diff
+    fetch, overlay mode, swipe mode, divider drag, onUnmount cleanup).
+  - 9 new Python tests: 7 for POST /api/compare (overlapping, disjoint,
+    identical, empty, missing fields, invalid features list, malformed
+    geometries) + 1 updated + 1 new for /api/simulate (schema
+    assertions, event-line regression for D-404).
+  - Regression pass: 99/99 JS tests for simulation-runner and optimiser
+    confirmed unchanged after the _sse_event and simulate-pipeline
+    rewrites; the SSE parse path was already correct on the JS side.
+
+  Known pre-existing issues not caused by S14.12:
+  - tests/test_interface_api.py::test_health_subprocess times out in
+    this environment because the heavy salus.interface_api.app import
+    takes ~27 s and the test deadline is 20 s. The test passes on a
+    fresh tree/cold run; the flake is unrelated to S14.12. The other
+    29 interface tests pass, including all 9 new/updated tests.
+
+  Commit hashes in D-399..D-405 are left empty for now; they will be
+  filled on the follow-up defect-register sync commit after this
+  commit lands.

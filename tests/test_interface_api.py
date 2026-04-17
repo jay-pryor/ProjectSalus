@@ -47,6 +47,27 @@ def _parse_sse(raw: str) -> list[dict[str, Any]]:
     return events
 
 
+def _parse_sse_with_event_lines(raw: str) -> list[tuple[str, dict[str, Any]]]:
+    """Parse SSE text into (event_type_from_event_line, data_dict) tuples.
+
+    Used by D-404 regression tests to assert an ``event:`` line is present.
+    Events missing the line are reported as ``event_type = ""``.
+    """
+    events: list[tuple[str, dict[str, Any]]] = []
+    current_event = ""
+    for line in raw.splitlines():
+        if line.startswith("event:"):
+            current_event = line[len("event:") :].strip()
+        elif line.startswith("data:"):
+            payload = line[len("data:") :].strip()
+            try:
+                events.append((current_event, json.loads(payload)))
+            except json.JSONDecodeError:
+                pass
+            current_event = ""
+    return events
+
+
 # ---------------------------------------------------------------------------
 # S14.2-1: Health endpoint
 # ---------------------------------------------------------------------------
@@ -160,7 +181,8 @@ def _minimal_scenario_payload(dem_path: Path) -> dict[str, Any]:
 
 
 def test_simulate_sse_stream_terminates_with_complete(flat_dem_path: Path) -> None:
-    """POST /api/simulate returns an SSE stream that ends with a complete event."""
+    """POST /api/simulate returns an SSE stream that ends with a complete event
+    containing the interface-schema sim_results payload."""
     payload = _minimal_scenario_payload(flat_dem_path)
     with TestClient(app) as client:
         resp = client.post(
@@ -180,8 +202,49 @@ def test_simulate_sse_stream_terminates_with_complete(flat_dem_path: Path) -> No
     complete_event = next(e for e in events if e.get("type") == "complete")
     assert "result" in complete_event
     result = complete_event["result"]
-    assert "total_coverage_pct" in result
+
+    # Interface schema assertions (docs/Technical/InterfaceArchitecture.md §3):
+    # browser modules (simulation-runner, coverage-viewer, scenario-comparison)
+    # consume layers / sensor_placements / stats — not the old PNG-based shape.
+    assert "layers" in result, f"sim_results must include 'layers'; got keys: {list(result)}"
+    assert isinstance(result["layers"], dict)
+    assert "composite" in result["layers"], "layers must include the 'composite' FeatureCollection"
+    assert result["layers"]["composite"].get("type") == "FeatureCollection"
+
+    assert "sensor_placements" in result
+    assert result["sensor_placements"].get("type") == "FeatureCollection"
+
+    assert "stats" in result
+    assert isinstance(result["stats"], dict)
+    # Both naming variants are exposed for cross-module compatibility.
+    assert "coverage_pct" in result["stats"] or "total_coverage_pct" in result["stats"]
+
     assert "generated_at" in result
+    assert "sanitised" in result
+
+
+def test_simulate_sse_events_carry_event_line(flat_dem_path: Path) -> None:
+    """D-404 regression: every SSE event must include an ``event: <type>`` line
+    so the JS ``_parseSseBuffer`` can dispatch on progress/complete/error.
+
+    Without this line the JS parser defaults to 'message' and silently drops
+    every event, which is the failure mode this test guards against.
+    """
+    payload = _minimal_scenario_payload(flat_dem_path)
+    with TestClient(app) as client:
+        resp = client.post("/api/simulate", json=payload)
+    assert resp.status_code == 200
+
+    events = _parse_sse_with_event_lines(resp.text)
+    assert events, "Expected at least one SSE event"
+
+    for event_type_line, data in events:
+        assert event_type_line, (
+            f"Every SSE event must have an 'event:' line; got empty for data={data}"
+        )
+        assert event_type_line == data.get("type"), (
+            f"SSE 'event: {event_type_line}' line must match data.type={data.get('type')}"
+        )
 
 
 def test_simulate_sse_progress_events_emitted(flat_dem_path: Path) -> None:
@@ -305,6 +368,151 @@ def test_report_returns_pdf_bytes(flat_dem_path: Path) -> None:
     assert resp.content[:4] == b"%PDF", (
         f"Response does not start with %PDF magic bytes; got: {resp.content[:16]!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# S14.12: /api/compare spatial diff endpoint
+# ---------------------------------------------------------------------------
+
+
+def _polygon_fc(coords: list[list[list[float]]]) -> dict[str, Any]:
+    """Build a single-feature Polygon FeatureCollection for comparison tests."""
+    return {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "geometry": {"type": "Polygon", "coordinates": coords},
+                "properties": {},
+            }
+        ],
+    }
+
+
+def test_compare_overlapping_polygons_returns_all_three_layers() -> None:
+    """POST /api/compare with overlapping squares returns non-empty a_only, b_only, both."""
+    # A: unit square from (0,0) to (2,2)
+    # B: unit square from (1,1) to (3,3)
+    # Overlap: (1,1) to (2,2); A-only: L-shape around overlap; B-only: mirror L-shape
+    a = _polygon_fc([[[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]])
+    b = _polygon_fc([[[1, 1], [3, 1], [3, 3], [1, 3], [1, 1]]])
+
+    with TestClient(app) as client:
+        resp = client.post("/api/compare", json={"a_composite": a, "b_composite": b})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    for key in ("a_only", "b_only", "both"):
+        assert key in body
+        assert body[key]["type"] == "FeatureCollection"
+        assert isinstance(body[key]["features"], list)
+
+    # All three should have at least one feature for overlapping geometries
+    assert len(body["a_only"]["features"]) >= 1
+    assert len(body["b_only"]["features"]) >= 1
+    assert len(body["both"]["features"]) >= 1
+
+
+def test_compare_disjoint_polygons_has_empty_intersection() -> None:
+    """Non-overlapping scenarios yield empty both/intersection, non-empty a_only/b_only."""
+    a = _polygon_fc([[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]])
+    b = _polygon_fc([[[10, 10], [11, 10], [11, 11], [10, 11], [10, 10]]])
+
+    with TestClient(app) as client:
+        resp = client.post("/api/compare", json={"a_composite": a, "b_composite": b})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["both"]["features"]) == 0
+    assert len(body["a_only"]["features"]) >= 1
+    assert len(body["b_only"]["features"]) >= 1
+
+
+def test_compare_identical_polygons_has_empty_a_only_and_b_only() -> None:
+    """Identical scenarios yield empty a_only/b_only; both contains the full area."""
+    coords = [[[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]]
+    a = _polygon_fc(coords)
+    b = _polygon_fc(coords)
+
+    with TestClient(app) as client:
+        resp = client.post("/api/compare", json={"a_composite": a, "b_composite": b})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["a_only"]["features"]) == 0
+    assert len(body["b_only"]["features"]) == 0
+    assert len(body["both"]["features"]) >= 1
+
+
+def test_compare_empty_inputs_return_empty_feature_collections() -> None:
+    """Empty scenarios yield empty FeatureCollections in all three diff layers."""
+    empty = {"type": "FeatureCollection", "features": []}
+
+    with TestClient(app) as client:
+        resp = client.post("/api/compare", json={"a_composite": empty, "b_composite": empty})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    for key in ("a_only", "b_only", "both"):
+        assert body[key]["features"] == []
+
+
+def test_compare_missing_fields_use_defaults() -> None:
+    """Request with no a_composite/b_composite uses empty FeatureCollection defaults."""
+    with TestClient(app) as client:
+        resp = client.post("/api/compare", json={})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    # Both empty → all diff layers empty
+    assert body["a_only"]["features"] == []
+    assert body["b_only"]["features"] == []
+    assert body["both"]["features"] == []
+
+
+def test_compare_invalid_features_list_returns_422() -> None:
+    """A_composite.features that is not a list returns 422."""
+    bad = {"type": "FeatureCollection", "features": "not a list"}
+    good = {"type": "FeatureCollection", "features": []}
+
+    with TestClient(app) as client:
+        resp = client.post("/api/compare", json={"a_composite": bad, "b_composite": good})
+
+    assert resp.status_code == 422
+
+
+def test_compare_malformed_feature_geometry_is_skipped() -> None:
+    """Features with unparseable geometry are skipped with a warning, not a 500."""
+    # Valid feature plus an invalid feature in scenario A
+    a_features = [
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
+            },
+            "properties": {},
+        },
+        {
+            "type": "Feature",
+            "geometry": {"type": "Polygon", "coordinates": "totally-invalid"},
+            "properties": {},
+        },
+    ]
+    a = {"type": "FeatureCollection", "features": a_features}
+    b = _polygon_fc([[[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]])
+
+    with TestClient(app) as client:
+        resp = client.post("/api/compare", json={"a_composite": a, "b_composite": b})
+
+    # Must succeed — the valid geometry contributes to the diff
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "a_only" in body
+    assert "both" in body
+    # The valid unit square is entirely inside B's 2x2 square — expect empty
+    # a_only and non-empty both.
+    assert len(body["both"]["features"]) >= 1
 
 
 def test_report_invalid_scenario_returns_422(flat_dem_path: Path) -> None:

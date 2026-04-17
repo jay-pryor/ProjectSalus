@@ -129,7 +129,11 @@ class ViewerData:
 # ---------------------------------------------------------------------------
 
 
-def export_viewer_data(sim_results: SimulationResults) -> ViewerData:
+def export_viewer_data(
+    sim_results: SimulationResults,
+    *,
+    skip_terrain_tiles: bool = False,
+) -> ViewerData:
     """Convert simulation results to a :class:`ViewerData` suitable for the viewer.
 
     Performs three expensive operations:
@@ -140,6 +144,12 @@ def export_viewer_data(sim_results: SimulationResults) -> ViewerData:
     Args:
         sim_results: Completed simulation results containing site DEM, coverage
             arrays, and optional analysis results.
+        skip_terrain_tiles: When True, skip terrain tile generation entirely
+            and return an empty ``terrain_tiles`` dict.  Used by the live
+            interface (``/api/simulate``), which serves tiles through the
+            dedicated ``/api/terrain/tiles`` endpoint rather than the
+            simulate-complete SSE payload.  Default False preserves the
+            existing ``salus viewer`` CLI behaviour.
 
     Returns:
         :class:`ViewerData` ready for optional sanitisation and packaging.
@@ -250,11 +260,16 @@ def export_viewer_data(sim_results: SimulationResults) -> ViewerData:
     )
 
     # Terrain tiles
-    _log.info("Generating terrain tiles (zoom %d–%d)…", _TERRAIN_MIN_ZOOM, _TERRAIN_MAX_ZOOM)
-    terrain_tiles = _generate_terrain_tiles(
-        site, src_crs, site_transform, bounds_wgs84, _TERRAIN_MIN_ZOOM, _TERRAIN_MAX_ZOOM
-    )
-    _log.info("Generated %d terrain tiles", len(terrain_tiles))
+    terrain_tiles: dict[str, str]
+    if skip_terrain_tiles:
+        _log.info("Skipping terrain tile generation (skip_terrain_tiles=True).")
+        terrain_tiles = {}
+    else:
+        _log.info("Generating terrain tiles (zoom %d–%d)…", _TERRAIN_MIN_ZOOM, _TERRAIN_MAX_ZOOM)
+        terrain_tiles = _generate_terrain_tiles(
+            site, src_crs, site_transform, bounds_wgs84, _TERRAIN_MIN_ZOOM, _TERRAIN_MAX_ZOOM
+        )
+        _log.info("Generated %d terrain tiles", len(terrain_tiles))
 
     return ViewerData(
         scenario_name=scenario_name,
