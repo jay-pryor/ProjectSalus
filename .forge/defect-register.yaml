@@ -4265,7 +4265,7 @@ defects:
     description: "fitBounds wrapped in catch(_){} swallows all exceptions silently, including NaN-bounds produced by _waypointsBounds on malformed waypoint data. Map does not pan and no error is logged."
     resolution: "Added console.warn before suppressing fitBounds exception; added Number.isFinite guard on bounds before calling fitBounds."
     status: resolved
-    commit: ""
+    commit: 9db7621
 
   - id: D-388
     severity: medium
@@ -4276,7 +4276,7 @@ defects:
     description: "kc.available_time_s || 0 and kc.required_time_s || 0 use || operator which masks NaN; should use ?? operator to only guard against null/undefined."
     resolution: "Changed kc.available_time_s || 0 and kc.required_time_s || 0 to ?? 0 operator to avoid NaN masking."
     status: resolved
-    commit: ""
+    commit: 9db7621
 
   - id: D-389
     severity: medium
@@ -4287,7 +4287,7 @@ defects:
     description: "Number(frac) in _renderEffectorChartSvg can produce NaN; Math.max(NaN * chartH, 1) returns NaN (not 1), producing an invisible SVG bar with no visual error indicator."
     resolution: "Clamped frac with Math.min(1, Math.max(0, Number(frac) || 0)) before computing bar height; eliminates NaN propagation."
     status: resolved
-    commit: ""
+    commit: 9db7621
 
   - id: D-390
     severity: low
@@ -4298,7 +4298,7 @@ defects:
     description: "parseInt(corridorSelect.value, 10) || 0 uses || which conflates NaN with 0; should use Number.isNaN guard as per other modules in this codebase."
     resolution: "Replaced parseInt(...) || 0 with explicit Number.isNaN guard: const parsed = parseInt(...); selectedIdx = Number.isNaN(parsed) ? 0 : parsed;"
     status: resolved
-    commit: ""
+    commit: 9db7621
 
   - id: D-391
     severity: low
@@ -4309,7 +4309,7 @@ defects:
     description: "_onSimResultsChanged and _onThreatCorridorsChanged are defined but never called; watch callbacks are independent inline lambdas duplicating the same logic. Dead code maintenance hazard."
     resolution: "Removed dead _onSimResultsChanged and _onThreatCorridorsChanged functions; watch callbacks are standalone."
     status: resolved
-    commit: ""
+    commit: 9db7621
 
   - id: D-392
     severity: low
@@ -4320,7 +4320,7 @@ defects:
     description: "simulation:complete handler resets slider but relies on implicit ordering (sim_results watch fires after bus event) for rendering. If ordering changes, stale data rendered at N=1 with no error."
     resolution: "Added _renderPanel(_SLIDER_MIN) directly in simulation:complete handler; no longer relies on watch ordering."
     status: resolved
-    commit: ""
+    commit: 9db7621
 
   - id: D-393
     severity: medium
@@ -4331,7 +4331,7 @@ defects:
     description: "Saturation threshold displays '6 targets' instead of the spec-required wording 'System saturates at N simultaneous threats.'"
     resolution: "Changed threshold text to 'System saturates at N simultaneous threats' per spec S14.10-3."
     status: resolved
-    commit: ""
+    commit: 9db7621
 
   - id: D-394
     severity: medium
@@ -4385,5 +4385,60 @@ defects:
     line: 53
     description: "Approach vectors only implement green=engaged and red=unengaged; orange=engaged-after-reload not implemented. Per-N engagement status not in saturation_result."
     resolution: "Deferred: saturation_result does not include per-N per-vector engagement-after-reload data. Requires backend API extension."
+    status: open
+    commit: ""
+
+  - id: D-399
+    severity: medium
+    task: S14.12
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/scenario-comparison/index.js
+    line: 654
+    description: "fetch('/api/compare') has no watchdog timeout — a hung backend (large Shapely unary_union) leaves the UI spinning with no user-visible error, and diffFetchInflight stays pinned indefinitely."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-400
+    severity: medium
+    task: S14.12
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/scenario-comparison/index.js
+    line: 671
+    description: "On /api/compare failure the error branch populates a_only/b_only/both with _EMPTY_FC. In overlay mode, an empty diff is indistinguishable from a legitimately-identical pair of scenarios. Silent degradation: the user cannot tell 'identical' from 'backend failed'."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-401
+    severity: medium
+    task: S14.12
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/scenario-comparison/index.js
+    line: 635
+    description: "AbortController.abort() calls wrapped in try/catch with empty swallow. Two locations: _fetchDiff (line 635) and onUnmount (~line 922). If the proxy ever changes shape, the failure is silent."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-402
+    severity: medium
+    task: S14.12
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/scenario-comparison/index.js
+    line: 702
+    description: "_dividerLngFromFraction wraps api.map.unproject in two try/catch blocks with no logging. If unproject starts throwing, the swipe filter silently falls back to 'no filter' — both scenarios render on both sides and the user cannot distinguish from a correct render."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-403
+    severity: medium
+    task: S14.12
+    found_by: silent_failure_hunter
+    file: src/salus/interface_api/app.py
+    line: 922
+    description: "_geometries_from_features buffer(0) fallback: on cleanup exception a warning is logged but the RAW (possibly-invalid) geometry is appended to geoms. Downstream unary_union/difference may silently corrupt the diff."
+    resolution: ""
     status: open
     commit: ""
