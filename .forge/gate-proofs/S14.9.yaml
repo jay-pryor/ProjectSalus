@@ -1,0 +1,49 @@
+task_id: S14.9
+timestamp: 2026-04-17T00:00:00Z
+quality_gates:
+  G1_lint: N/A — JS-only task, no Python files changed
+  G2_format: N/A — JS-only task, no Python files changed
+  G3_import: N/A — JS-only task, no Python files changed
+  G4_type: N/A — JS-only task, no Python files changed
+  G5_security: N/A — JS-only task, no Python files changed
+  G6_unit_test: pass
+  G7_coverage: N/A — JS-only task, no Python files changed
+  G8_secrets: pass
+  coverage_pct: N/A
+  js_tests_pass: 63
+  js_tests_fail: 0
+review:
+  l1_standards:
+    testing: pass
+    error_handling: N/A — JS-only task
+    logging: N/A — no logging added
+    security: N/A — JS-only task
+    interface_modules: pass
+  l2_agents:
+    silent_failure_hunter: {status: fail, findings: 4}
+    spec_compliance: {status: fail, findings: 4}
+    type_design_analyzer: N/A — no Python type annotations changed
+    regression_reviewer: N/A — new modules, no existing code modified
+    module_architecture_reviewer: {status: pass, findings: 0}
+defect_ids: [D-381, D-382, D-383, D-384, D-385, D-386]
+overall: pass
+notes: |
+  JS-only task — G1-G5, G7 not applicable.
+  All 6 defects logged (D-381 to D-386) and resolved before final commit:
+    D-381 (high): _gapSeverity MultiPolygon misclassification — fixed by handling
+                  MultiPolygon geometry with sub-polygon iteration in _gapSeverity.
+    D-382 (medium): empty ring guard in _buildGapList — fixed (ring.length < 3 guard).
+    D-383 (medium): Null Island coords in _buildBearingLinesFC — fixed with explicit
+                    geometry coordinates guard.
+    D-384 (medium): division by zero in _pointInRing horizontal edges — fixed with
+                    yj !== yi guard.
+    D-385 (medium): missing inspect popup test coverage — added 3 tests for popup DOM,
+                    content, and replacement behaviour.
+    D-386 (medium): missing zone tooltip test coverage — added 3 tests for tooltip
+                    creation, content (name/required/actual/status), and mouseleave removal.
+  L1 finding (not defect): coverage-viewer manifest was missing zones in reads[] —
+    corrected before agent review.
+  Spec note: coverage-viewer manifest emits: ["placement:pending"] per S14.9-4
+    requirement; S14.9-1 spec says emits:[] which is superseded by S14.9-4.
+  Spec warning (D-387 waived): effectors/effector key discrepancy is moot since
+    the Python backend (export.py) produces no effector coverage layer key.

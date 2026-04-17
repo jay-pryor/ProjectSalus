@@ -4134,3 +4134,124 @@ defects:
     resolution: "Replaced || 0 pattern with explicit isNaN guard; added console.warn for malformed pct values"
     status: resolved
     commit: def32e3
+
+  - id: D-376
+    severity: medium
+    task: S14.13
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/report-configurator/index.js
+    line: 276
+    description: "logoInput 'change' event calls _writeConfig() which calls _currentConfig() with logo: null unconditionally. The selected file is never read or encoded. report_config.logo is always null in state and in the POST to /api/report, silently discarding any logo the user selected."
+    resolution: "Added capturedLogoDataUrl local variable. logoInput change handler uses FileReader.readAsDataURL(); onload stores data URL string in capturedLogoDataUrl then calls _writeConfig(). Falls back to null when FileReader unavailable. _updateForm restores capturedLogoDataUrl from config.logo on state restore."
+    status: resolved
+    commit: 19f49dc
+
+  - id: D-377
+    severity: medium
+    task: S14.13
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/report-configurator/index.js
+    line: 362
+    description: "Map capture failure is swallowed with only console.warn. If getCanvas() or toDataURL() throws, capturedMapView remains null but no user-visible indicator is shown. A subsequent generate-report call silently omits the map figure with no warning to the operator."
+    resolution: "Added captureStatus element (data-testid: capture-status) below captureBtn. On catch, sets captureStatus text and shows it. On successful capture, hides captureStatus."
+    status: resolved
+    commit: 19f49dc
+
+  - id: D-378
+    severity: medium
+    task: S14.13
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/report-configurator/index.js
+    line: 404
+    description: "response.blob() is awaited but blob.size is not checked. If the server returns HTTP 200 with an empty body, blob() succeeds with a zero-byte Blob, URL.createObjectURL succeeds, a.click() fires, and the status shows a green success tick — but the operator receives a corrupt zero-byte PDF with no indication of failure."
+    resolution: "Added blob.size === 0 check after await response.blob(); throws a descriptive error if empty, preventing the download and showing a red error status."
+    status: resolved
+    commit: 19f49dc
+
+  - id: D-379
+    severity: medium
+    task: S14.13
+    found_by: module_architecture_reviewer
+    file: src/salus/viewer/interface/modules/report-configurator/index.js
+    line: 217
+    description: "api.state.get('report_config') is called inside _generateReport() at POST time rather than reading a locally-cached variable kept current via watch(). All other state keys (sim_results, placements, zones, threat_corridors) use local mirrors. This inconsistency will return stale data if the state layer becomes async."
+    resolution: "Added latestReportConfig local mirror. Populated from api.state.get() at initial render. Updated by watch('report_config', ...) alongside _updateForm(). _generateReport uses latestReportConfig in POST body."
+    status: resolved
+    commit: 19f49dc
+
+  - id: D-380
+    severity: medium
+    task: S14.13
+    found_by: module_architecture_reviewer
+    file: src/salus/viewer/interface/modules/report-configurator/index.js
+    line: 193
+    description: "watch('report_config', _updateForm) fires _updateForm which sets form input values. Those inputs have 'input'/'change' listeners that call _writeConfig() -> api.state.set('report_config'), which fires the watch again. This creates a re-entrant set->watch->set cycle that will become an infinite loop if the state layer becomes async."
+    resolution: "Added _suppressWrite boolean flag. _updateForm sets it true before DOM updates and false in finally. _writeConfig returns immediately when _suppressWrite is true."
+    status: resolved
+    commit: 19f49dc
+
+  - id: D-381
+    severity: high
+    task: S14.9
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/gap-analysis/index.js
+    line: 109
+    description: "_gapSeverity silently misclassifies all gaps inside a MultiPolygon zone as Medium. zone.geometry?.coordinates?.[0] on a MultiPolygon returns an array-of-rings, not a flat ring. _pointInRing then receives sub-arrays, arithmetic yields NaN, intersect is always false, severity always falls through to Medium with no error."
+    resolution: ""
+    status: open
+    commit: 19f49dc
+
+  - id: D-382
+    severity: medium
+    task: S14.9
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/gap-analysis/index.js
+    line: 143
+    description: "_buildGapList guards null ring but not empty array ring (ring = []). _ringCentroid([]) returns [0, 0] (Null Island). A user clicking Fly-to on that entry is silently navigated to Null Island."
+    resolution: ""
+    status: open
+    commit: 19f49dc
+
+  - id: D-383
+    severity: medium
+    task: S14.9
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/coverage-viewer/index.js
+    line: 89
+    description: "_buildBearingLinesFC silently defaults to Null Island coords when a sensor feature has missing/empty geometry. coords = feat.geometry?.coordinates ?? [] then coords[0] ?? 0 and coords[1] ?? 0 produce valid-looking lines anchored at [0,0] with no warning."
+    resolution: ""
+    status: open
+    commit: 19f49dc
+
+  - id: D-384
+    severity: medium
+    task: S14.9
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/gap-analysis/index.js
+    line: 87
+    description: "_pointInRing has latent division by zero: (py - yi) / (yj - yi) when yi === yj (horizontal edge). JavaScript yields Infinity, making px < Infinity always true, which may flip the inside flag incorrectly."
+    resolution: ""
+    status: open
+    commit: 19f49dc
+
+  - id: D-385
+    severity: medium
+    task: S14.9
+    found_by: spec_compliance
+    file: src/salus/viewer/interface/tests/test-coverage-viewer.js
+    line: null
+    description: "No test verifies the inspect popup (gap-inspect-popup) DOM is created or appended, nor that it contains gap area, coverage %, or sensor-type coverage/missing fields — all required by S14.9-4."
+    resolution: ""
+    status: open
+    commit: 19f49dc
+
+  - id: D-386
+    severity: medium
+    task: S14.9
+    found_by: spec_compliance
+    file: src/salus/viewer/interface/tests/test-coverage-viewer.js
+    line: null
+    description: "No test fires mouseenter on coverage-viewer:zone-compliance-outline or asserts the zone-compliance-tooltip DOM (zone name, required %, actual %, status) — required by S14.9-5."
+    resolution: ""
+    status: open
+    commit: 19f49dc

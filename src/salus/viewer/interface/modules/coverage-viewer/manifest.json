@@ -1,0 +1,11 @@
+{
+  "id": "coverage-viewer",
+  "label": "Coverage Viewer",
+  "reads": ["terrain", "placements", "sim_results", "zones"],
+  "writes": [],
+  "prerequisites": ["terrain", "sim_results"],
+  "emits": ["placement:pending"],
+  "subscribes": ["simulation:complete"],
+  "layer_id_prefix": "coverage-viewer",
+  "description": "Display simulation results as toggleable coverage layers on the 3D terrain, with per-zone compliance indicators, gap click-to-inspect, and bearing-line overlays."
+}
