@@ -1,0 +1,11 @@
+{
+  "id": "report-configurator",
+  "label": "Report Configurator",
+  "reads": ["sim_results", "placements", "zones", "threat_corridors", "report_config"],
+  "writes": ["report_config"],
+  "prerequisites": ["sim_results"],
+  "emits": ["report:generated"],
+  "subscribes": [],
+  "layer_id_prefix": "report-configurator",
+  "description": "Configure and generate the customer PDF report. Writes report_config from form inputs and POSTs to /api/report to produce a downloadable PDF."
+}
