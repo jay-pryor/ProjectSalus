@@ -4197,9 +4197,9 @@ defects:
     file: src/salus/viewer/interface/modules/gap-analysis/index.js
     line: 109
     description: "_gapSeverity silently misclassifies all gaps inside a MultiPolygon zone as Medium. zone.geometry?.coordinates?.[0] on a MultiPolygon returns an array-of-rings, not a flat ring. _pointInRing then receives sub-arrays, arithmetic yields NaN, intersect is always false, severity always falls through to Medium with no error."
-    resolution: ""
-    status: open
-    commit: 19f49dc
+    resolution: "Fixed _gapSeverity to handle MultiPolygon by iterating sub-polygon outer rings"
+    status: resolved
+    commit: b75c052
 
   - id: D-382
     severity: medium
@@ -4208,9 +4208,9 @@ defects:
     file: src/salus/viewer/interface/modules/gap-analysis/index.js
     line: 143
     description: "_buildGapList guards null ring but not empty array ring (ring = []). _ringCentroid([]) returns [0, 0] (Null Island). A user clicking Fly-to on that entry is silently navigated to Null Island."
-    resolution: ""
-    status: open
-    commit: 19f49dc
+    resolution: "Changed ring guard to if (!ring || ring.length < 3) continue"
+    status: resolved
+    commit: b75c052
 
   - id: D-383
     severity: medium
@@ -4219,9 +4219,9 @@ defects:
     file: src/salus/viewer/interface/modules/coverage-viewer/index.js
     line: 89
     description: "_buildBearingLinesFC silently defaults to Null Island coords when a sensor feature has missing/empty geometry. coords = feat.geometry?.coordinates ?? [] then coords[0] ?? 0 and coords[1] ?? 0 produce valid-looking lines anchored at [0,0] with no warning."
-    resolution: ""
-    status: open
-    commit: 19f49dc
+    resolution: "Added explicit coords guard: if (!coords || coords[0] == null || coords[1] == null) continue"
+    status: resolved
+    commit: b75c052
 
   - id: D-384
     severity: medium
@@ -4230,9 +4230,9 @@ defects:
     file: src/salus/viewer/interface/modules/gap-analysis/index.js
     line: 87
     description: "_pointInRing has latent division by zero: (py - yi) / (yj - yi) when yi === yj (horizontal edge). JavaScript yields Infinity, making px < Infinity always true, which may flip the inside flag incorrectly."
-    resolution: ""
-    status: open
-    commit: 19f49dc
+    resolution: "Added yj !== yi guard to skip horizontal edges in ray-cast intersect test"
+    status: resolved
+    commit: b75c052
 
   - id: D-385
     severity: medium
@@ -4241,9 +4241,9 @@ defects:
     file: src/salus/viewer/interface/tests/test-coverage-viewer.js
     line: null
     description: "No test verifies the inspect popup (gap-inspect-popup) DOM is created or appended, nor that it contains gap area, coverage %, or sensor-type coverage/missing fields — all required by S14.9-4."
-    resolution: ""
-    status: open
-    commit: 19f49dc
+    resolution: "Added 3 tests: popup created in container, content (area/coverage), replacement"
+    status: resolved
+    commit: b75c052
 
   - id: D-386
     severity: medium
@@ -4252,6 +4252,138 @@ defects:
     file: src/salus/viewer/interface/tests/test-coverage-viewer.js
     line: null
     description: "No test fires mouseenter on coverage-viewer:zone-compliance-outline or asserts the zone-compliance-tooltip DOM (zone name, required %, actual %, status) — required by S14.9-5."
+    resolution: "Added 3 tests: tooltip on mouseenter, content (name/required/actual/status), mouseleave removal"
+    status: resolved
+    commit: b75c052
+
+  - id: D-387
+    severity: medium
+    task: S14.10
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/kill-chain-analyser/index.js
+    line: 251
+    description: "fitBounds wrapped in catch(_){} swallows all exceptions silently, including NaN-bounds produced by _waypointsBounds on malformed waypoint data. Map does not pan and no error is logged."
     resolution: ""
     status: open
-    commit: 19f49dc
+    commit: ""
+
+  - id: D-388
+    severity: medium
+    task: S14.10
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/kill-chain-analyser/index.js
+    line: 93
+    description: "kc.available_time_s || 0 and kc.required_time_s || 0 use || operator which masks NaN; should use ?? operator to only guard against null/undefined."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-389
+    severity: medium
+    task: S14.10
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/saturation-analyser/index.js
+    line: 86
+    description: "Number(frac) in _renderEffectorChartSvg can produce NaN; Math.max(NaN * chartH, 1) returns NaN (not 1), producing an invisible SVG bar with no visual error indicator."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-390
+    severity: low
+    task: S14.10
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/kill-chain-analyser/index.js
+    line: 521
+    description: "parseInt(corridorSelect.value, 10) || 0 uses || which conflates NaN with 0; should use Number.isNaN guard as per other modules in this codebase."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-391
+    severity: low
+    task: S14.10
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/kill-chain-analyser/index.js
+    line: 505
+    description: "_onSimResultsChanged and _onThreatCorridorsChanged are defined but never called; watch callbacks are independent inline lambdas duplicating the same logic. Dead code maintenance hazard."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-392
+    severity: low
+    task: S14.10
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/saturation-analyser/index.js
+    line: 451
+    description: "simulation:complete handler resets slider but relies on implicit ordering (sim_results watch fires after bus event) for rendering. If ordering changes, stale data rendered at N=1 with no error."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-393
+    severity: medium
+    task: S14.10
+    found_by: spec_compliance
+    file: src/salus/viewer/interface/modules/saturation-analyser/index.js
+    line: 401
+    description: "Saturation threshold displays '6 targets' instead of the spec-required wording 'System saturates at N simultaneous threats.'"
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-394
+    severity: medium
+    task: S14.10
+    found_by: spec_compliance
+    file: src/salus/viewer/interface/modules/kill-chain-analyser/index.js
+    line: 90
+    description: "Gantt chart renders two generic rows (Available, Required) instead of individual D-T-I-D-E-A phase segments. Per-phase durations are not present in kill_chain_results serialisation from the backend API; this deferred pending backend API extension to include phase breakdown."
+    resolution: "Deferred: kill_chain_results does not include per-phase durations (track_time_s, identify_time_s, decide_time_s, engage_time_s, assess_time_s). Requires _serialise_kill_chain() in export.py to be extended. Matches static app.js which also uses two-row format."
+    status: open
+    commit: ""
+
+  - id: D-395
+    severity: medium
+    task: S14.10
+    found_by: spec_compliance
+    file: src/salus/viewer/interface/modules/kill-chain-analyser/index.js
+    line: 373
+    description: "Sensor name not shown alongside first detection range. kill_chain_results serialisation does not include sensor name field."
+    resolution: "Deferred: _serialise_kill_chain() in export.py does not include first_detection_sensor_name. Requires backend API extension."
+    status: open
+    commit: ""
+
+  - id: D-396
+    severity: medium
+    task: S14.10
+    found_by: spec_compliance
+    file: src/salus/viewer/interface/modules/kill-chain-analyser/index.js
+    line: 254
+    description: "Only one detection-event circle shown (at first_detection_range_m); spec requires a circle per DetectionEvent with sensor name and time. DetectionEvent positions not included in kill_chain_results."
+    resolution: "Deferred: kill_chain_results does not include DetectionEvent list with positions. Requires backend API extension."
+    status: open
+    commit: ""
+
+  - id: D-397
+    severity: medium
+    task: S14.10
+    found_by: spec_compliance
+    file: src/salus/viewer/interface/modules/saturation-analyser/index.js
+    line: 224
+    description: "Overwhelmed effectors source is intentionally empty; spec requires red pulsing ring markers on overwhelmed effectors. Effector positions not in sim_results from current API."
+    resolution: "Deferred: sim_results does not include effector_placements with positions. Requires backend API extension to SimResultsPayload."
+    status: open
+    commit: ""
+
+  - id: D-398
+    severity: medium
+    task: S14.10
+    found_by: spec_compliance
+    file: src/salus/viewer/interface/modules/saturation-analyser/index.js
+    line: 53
+    description: "Approach vectors only implement green=engaged and red=unengaged; orange=engaged-after-reload not implemented. Per-N engagement status not in saturation_result."
+    resolution: "Deferred: saturation_result does not include per-N per-vector engagement-after-reload data. Requires backend API extension."
+    status: open
+    commit: ""
