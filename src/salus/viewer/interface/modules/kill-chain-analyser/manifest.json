@@ -1,0 +1,11 @@
+{
+  "id": "kill-chain-analyser",
+  "label": "Kill Chain",
+  "reads": ["terrain", "sim_results", "threat_corridors"],
+  "writes": [],
+  "prerequisites": ["terrain", "sim_results"],
+  "emits": [],
+  "subscribes": ["simulation:complete"],
+  "layer_id_prefix": "kill-chain-analyser",
+  "description": "Displays D-T-I-D-E-A kill chain timeline per threat corridor. Corridor selector from threat_corridors state; timeline data from sim_results.kill_chain_results."
+}

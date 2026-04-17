@@ -1,0 +1,11 @@
+{
+  "id": "saturation-analyser",
+  "label": "Saturation",
+  "reads": ["terrain", "sim_results"],
+  "writes": [],
+  "prerequisites": ["terrain", "sim_results"],
+  "emits": [],
+  "subscribes": ["simulation:complete"],
+  "layer_id_prefix": "saturation-analyser",
+  "description": "Displays multi-target saturation analysis: effector utilisation bar chart, saturation threshold, and approach vector map for the selected simultaneous threat count."
+}

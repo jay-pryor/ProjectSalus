@@ -4263,8 +4263,8 @@ defects:
     file: src/salus/viewer/interface/modules/kill-chain-analyser/index.js
     line: 251
     description: "fitBounds wrapped in catch(_){} swallows all exceptions silently, including NaN-bounds produced by _waypointsBounds on malformed waypoint data. Map does not pan and no error is logged."
-    resolution: ""
-    status: open
+    resolution: "Added console.warn before suppressing fitBounds exception; added Number.isFinite guard on bounds before calling fitBounds."
+    status: resolved
     commit: ""
 
   - id: D-388
@@ -4274,8 +4274,8 @@ defects:
     file: src/salus/viewer/interface/modules/kill-chain-analyser/index.js
     line: 93
     description: "kc.available_time_s || 0 and kc.required_time_s || 0 use || operator which masks NaN; should use ?? operator to only guard against null/undefined."
-    resolution: ""
-    status: open
+    resolution: "Changed kc.available_time_s || 0 and kc.required_time_s || 0 to ?? 0 operator to avoid NaN masking."
+    status: resolved
     commit: ""
 
   - id: D-389
@@ -4285,8 +4285,8 @@ defects:
     file: src/salus/viewer/interface/modules/saturation-analyser/index.js
     line: 86
     description: "Number(frac) in _renderEffectorChartSvg can produce NaN; Math.max(NaN * chartH, 1) returns NaN (not 1), producing an invisible SVG bar with no visual error indicator."
-    resolution: ""
-    status: open
+    resolution: "Clamped frac with Math.min(1, Math.max(0, Number(frac) || 0)) before computing bar height; eliminates NaN propagation."
+    status: resolved
     commit: ""
 
   - id: D-390
@@ -4296,8 +4296,8 @@ defects:
     file: src/salus/viewer/interface/modules/kill-chain-analyser/index.js
     line: 521
     description: "parseInt(corridorSelect.value, 10) || 0 uses || which conflates NaN with 0; should use Number.isNaN guard as per other modules in this codebase."
-    resolution: ""
-    status: open
+    resolution: "Replaced parseInt(...) || 0 with explicit Number.isNaN guard: const parsed = parseInt(...); selectedIdx = Number.isNaN(parsed) ? 0 : parsed;"
+    status: resolved
     commit: ""
 
   - id: D-391
@@ -4307,8 +4307,8 @@ defects:
     file: src/salus/viewer/interface/modules/kill-chain-analyser/index.js
     line: 505
     description: "_onSimResultsChanged and _onThreatCorridorsChanged are defined but never called; watch callbacks are independent inline lambdas duplicating the same logic. Dead code maintenance hazard."
-    resolution: ""
-    status: open
+    resolution: "Removed dead _onSimResultsChanged and _onThreatCorridorsChanged functions; watch callbacks are standalone."
+    status: resolved
     commit: ""
 
   - id: D-392
@@ -4318,8 +4318,8 @@ defects:
     file: src/salus/viewer/interface/modules/saturation-analyser/index.js
     line: 451
     description: "simulation:complete handler resets slider but relies on implicit ordering (sim_results watch fires after bus event) for rendering. If ordering changes, stale data rendered at N=1 with no error."
-    resolution: ""
-    status: open
+    resolution: "Added _renderPanel(_SLIDER_MIN) directly in simulation:complete handler; no longer relies on watch ordering."
+    status: resolved
     commit: ""
 
   - id: D-393
@@ -4329,8 +4329,8 @@ defects:
     file: src/salus/viewer/interface/modules/saturation-analyser/index.js
     line: 401
     description: "Saturation threshold displays '6 targets' instead of the spec-required wording 'System saturates at N simultaneous threats.'"
-    resolution: ""
-    status: open
+    resolution: "Changed threshold text to 'System saturates at N simultaneous threats' per spec S14.10-3."
+    status: resolved
     commit: ""
 
   - id: D-394
