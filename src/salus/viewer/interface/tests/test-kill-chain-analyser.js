@@ -210,13 +210,10 @@ function makeApi({ sim_results = null, threat_corridors = null, terrain = null }
 
 const TERRAIN = { bounds_wgs84: [138.5, -35.1, 139.0, -34.7] };
 
-const THREAT_CORRIDORS = {
-  routes: [
-    { id: 'r1', label: 'North approach', color: '#ef4444', waypoints: [[138.7, -34.9], [138.75, -34.8]] },
-    { id: 'r2', label: 'East approach',  color: '#3b82f6', waypoints: [[138.9, -34.95], [138.75, -34.8]] },
-  ],
-  protected_point: [138.75, -34.8],
-};
+const THREAT_CORRIDORS = [
+  { id: 'r1', label: 'North approach', color: '#ef4444', waypoints: [[138.7, -34.9], [138.75, -34.8]], protected_point: [138.75, -34.8] },
+  { id: 'r2', label: 'East approach',  color: '#3b82f6', waypoints: [[138.9, -34.95], [138.75, -34.8]], protected_point: [138.75, -34.8] },
+];
 
 const KILL_CHAIN_RESULTS = [
   {
@@ -496,10 +493,8 @@ test('gap warning is shown when engagement is not feasible', () => {
     kill_chain_results: [KILL_CHAIN_RESULTS[1]], // infeasible
     saturation_result: null,
   };
-  const corridors = {
-    routes: [THREAT_CORRIDORS.routes[1]],
-    protected_point: THREAT_CORRIDORS.protected_point,
-  };
+  // threat_corridors is a flat ThreatCorridor[] (canonical shape).
+  const corridors = [THREAT_CORRIDORS[1]];
   const api = makeApi({ sim_results: simResults, threat_corridors: corridors });
   init(api);
   const panel = api._mounted[0];
@@ -512,10 +507,7 @@ test('margin indicator shows negative margin in red', () => {
     kill_chain_results: [KILL_CHAIN_RESULTS[1]], // negative margin
     saturation_result: null,
   };
-  const corridors = {
-    routes: [THREAT_CORRIDORS.routes[1]],
-    protected_point: THREAT_CORRIDORS.protected_point,
-  };
+  const corridors = [THREAT_CORRIDORS[1]];
   const api = makeApi({ sim_results: simResults, threat_corridors: corridors });
   init(api);
   const panel = api._mounted[0];

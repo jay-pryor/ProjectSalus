@@ -278,7 +278,17 @@ function tick(ms = 30) {
 // Sample data
 // ---------------------------------------------------------------------------
 
-const SAMPLE_ZONES = { zones: [{ id: 'z1', type: 'priority', name: 'Zone A' }] };
+// Canonical zones shape — {priority: PriorityZone[], exclusion: ExclusionZone[]}
+// matching what zone-editor writes since I-6 (D-410).
+const SAMPLE_ZONES = {
+  priority: [{
+    id: 'z1',
+    label: 'Zone A',
+    geometry: { type: 'Polygon', coordinates: [[[0, 0], [1, 0], [1, 1], [0, 0]]] },
+    min_coverage_pct: 80,
+  }],
+  exclusion: [],
+};
 const SAMPLE_CONSTRAINTS = { max_cost_aud: 500000, max_sensors: 4, max_effectors: 2, allowed_sensor_ids: null };
 const SAMPLE_PLACEMENTS = [
   { sensor_name: 'Radar Alpha', lat: -34.9, lng: 138.6 },
@@ -784,7 +794,15 @@ test('stale watch on zones state triggers stale notice when results exist', () =
   init(api);
   const panel = api._mounted[0];
   const staleNotice = findByTestId(panel, 'results-stale-notice');
-  api._triggerWatch('zones', { zones: [...SAMPLE_ZONES.zones, { id: 'z2', type: 'exclusion' }] });
+  api._triggerWatch('zones', {
+    priority: SAMPLE_ZONES.priority,
+    exclusion: [{
+      id: 'z2',
+      label: 'Exclusion B',
+      geometry: { type: 'Polygon', coordinates: [[[2, 2], [3, 2], [3, 3], [2, 2]]] },
+      reason: 'test',
+    }],
+  });
   assert.equal(staleNotice.style.display, 'block');
 });
 

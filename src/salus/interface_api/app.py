@@ -15,6 +15,7 @@ import io
 import json
 import logging
 import math
+import os
 import queue as _queue
 import tempfile
 import threading
@@ -69,22 +70,106 @@ _SSE_TERMINAL_TYPES: frozenset[str] = frozenset({"complete", "error"})
 # Root directory for uploaded DEM/DSM files and pre-generated tile sets.
 _TERRAIN_DATA_DIR: Path = Path(tempfile.gettempdir()) / "salus_terrain"
 
+# Paths outside these directories must not be opened via /api/simulate or
+# /api/optimise.  The canonical source of DEM/DSM files at runtime is
+# ``_TERRAIN_DATA_DIR`` (populated by ``/api/terrain/load``).  Additional
+# trusted roots can be registered via the ``SALUS_ALLOWED_DEM_DIRS``
+# environment variable (colon-separated list of absolute directory paths) —
+# used by tests and demo runners that serve DEMs from fixture locations.
+_ALLOWED_DEM_DIRS: list[Path] = [_TERRAIN_DATA_DIR]
+_env_dirs = os.environ.get("SALUS_ALLOWED_DEM_DIRS", "")
+for _d in _env_dirs.split(os.pathsep):
+    _d = _d.strip()
+    if not _d:
+        continue
+    try:
+        _ALLOWED_DEM_DIRS.append(Path(_d).resolve(strict=False))
+    except (OSError, ValueError) as _exc:
+        _log.warning("Ignoring SALUS_ALLOWED_DEM_DIRS entry %r: %s", _d, _exc)
+
+
+def _register_allowed_dem_dir(path: Path) -> None:
+    """Add a directory to the DEM/DSM path allowlist at runtime.
+
+    Used by pytest fixtures so that DEMs created under ``tmp_path`` pass the
+    path-traversal guard.  Callers supply an absolute directory; duplicates
+    are accepted and skipped transparently.
+    """
+    try:
+        resolved = path.resolve(strict=False)
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"Cannot register allowed DEM dir {path!r}: {exc}") from exc
+    if resolved not in _ALLOWED_DEM_DIRS:
+        _ALLOWED_DEM_DIRS.append(resolved)
+
+
+def _validate_dem_path(raw_path: str | Path | None) -> Path | None:
+    """Resolve *raw_path* and ensure it lives under an allowed directory.
+
+    Returns the resolved Path on success, ``None`` if *raw_path* is ``None``.
+    Raises :class:`fastapi.HTTPException` 400 for malformed input, 403 for
+    paths that escape the allowlist (path-traversal guard).
+    """
+    if raw_path is None:
+        return None
+    try:
+        resolved = Path(raw_path).resolve(strict=False)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid path {raw_path!r}: {exc}")
+
+    for allowed in _ALLOWED_DEM_DIRS:
+        try:
+            resolved.relative_to(allowed)
+            return resolved
+        except ValueError:
+            continue
+
+    # Log the attempted path (not the full filesystem structure) — useful to
+    # spot recon probes without leaking layout via response bodies.
+    _log.warning("Rejected DEM path outside allowlist: %s", resolved)
+    raise HTTPException(
+        status_code=403,
+        detail="DEM path is outside the allowed directories.",
+    )
+
+
 # Maximum accepted DEM/DSM upload size (500 MB).  Prevents OOM on oversized
 # uploads that would otherwise buffer entirely in memory (D-327).
 _MAX_DEM_UPLOAD_BYTES: int = 500 * 1024 * 1024
 
-# Per-request terrain state shared between the load endpoint and the tile
-# generation background thread.  Protected by _terrain_session_lock.
+# Per-session terrain state shared between the load endpoint and the tile
+# generation background thread.  The map is keyed by session_id so two
+# concurrent loads do not clobber each other's progress / tile_dir / dem_path.
+# ``_terrain_latest_session_id`` is only used by the legacy (unqualified)
+# tile endpoints — new clients pass session_id explicitly.
+# Both are protected by ``_terrain_session_lock``.
 _terrain_session_lock: threading.Lock = threading.Lock()
-_terrain_session: dict[str, Any] = {
-    "dem_path": None,
-    "dsm_path": None,
-    "metadata": None,
-    "progress_pct": 0,
-    "done": False,
-    "error": None,
-    "tile_dir": None,
-}
+_terrain_sessions: dict[str, dict[str, Any]] = {}
+_terrain_latest_session_id: str | None = None
+
+
+def _new_terrain_session_state() -> dict[str, Any]:
+    """Default per-session state record — created once per /api/terrain/load call."""
+    return {
+        "dem_path": None,
+        "dsm_path": None,
+        "metadata": None,
+        "progress_pct": 0,
+        "done": False,
+        "error": None,
+        "tile_dir": None,
+    }
+
+
+def _resolve_terrain_session_id(session_id: str | None) -> str | None:
+    """Return *session_id* if it identifies a live session, else the most recent
+    one (legacy clients that omit the session_id query param).  Returns ``None``
+    when no terrain sessions have ever been loaded."""
+    with _terrain_session_lock:
+        if session_id is not None and session_id in _terrain_sessions:
+            return session_id
+        return _terrain_latest_session_id
+
 
 # Maximum seconds to wait on the SSE queue before emitting a timeout error.
 # Prevents the connection from hanging forever if a worker thread exits
@@ -162,8 +247,13 @@ class OptimiserRequest(BaseModel):
     effector_library_filter: list[str] = Field(default_factory=list)
     """Names of effectors from the bundled library (informational; unused in placement)."""
 
-    zones: list[dict[str, Any]] = Field(default_factory=list)
-    """Zone definitions (used for weighted placement scoring)."""
+    zones: dict[str, Any] | list[dict[str, Any]] = Field(default_factory=list)
+    """Zone definitions (used for weighted placement scoring).
+
+    Accepted as either the canonical ``{priority: PriorityZone[], exclusion: ExclusionZone[]}``
+    interface shape (zone-editor's writer since I-6/D-410) or the legacy flat
+    list.  Optimiser flow does not currently consume zones server-side, but
+    accepting the canonical shape avoids 422-ing every request from the live UI."""
 
     constraints: OptimiserConstraints = Field(default_factory=OptimiserConstraints)
     """Placement and coverage constraints."""
@@ -184,23 +274,35 @@ class ReportRequest(BaseModel):
     """Request body for ``POST /api/report``.
 
     Field names follow the spec-defined schema from InterfaceArchitecture.md
-    Section 6.
+    Section 6.  The report POST body is assembled by the client from live
+    interface state, so all scenario-side fields are dicts-of-unknown-shape
+    here: the backend normalises them (see :func:`_parse_report_request`).
     """
 
-    report_config: dict[str, Any]
-    """ScenarioConfig-compatible JSON object (scenario metadata for the report)."""
+    report_config: dict[str, Any] = Field(default_factory=dict)
+    """UI report configuration: ``{client_name, sanitise_level, include_modules, logo_path}``.
+    Not a ScenarioConfig — the interface does not carry a site DEM path in
+    this payload, and the scenario is reconstructed from ``placements``
+    server-side."""
 
-    sim_results: SimResultsPayload
-    """Pre-computed simulation results from ``POST /api/simulate``."""
+    sim_results: dict[str, Any] = Field(default_factory=dict)
+    """Pre-computed simulation results from ``POST /api/simulate``.  Accepted
+    in either the interface schema (nested ``stats``) or the legacy flat
+    :class:`SimResultsPayload` shape — :func:`_extract_sim_stats` handles both."""
 
-    placements: list[dict[str, Any]] = Field(default_factory=list)
-    """Additional sensor placements (merged with scenario placements)."""
+    placements: dict[str, Any] | list[dict[str, Any]] = Field(default_factory=list)
+    """Sensor/effector placements.  Accepted as either the canonical
+    ``{sensors, effectors}`` interface shape or a legacy flat list."""
 
-    zones: list[dict[str, Any]] = Field(default_factory=list)
-    """Zone definitions (informational; used in appendix)."""
+    zones: dict[str, Any] | list[dict[str, Any]] = Field(default_factory=dict)
+    """Zone definitions (informational; used in appendix).  Either the
+    canonical ``{priority, exclusion}`` shape or a legacy flat list."""
 
     threat_corridors: list[dict[str, Any]] = Field(default_factory=list)
     """Threat corridor results (informational; unused if not in sim_results)."""
+
+    map_screenshot: str | None = None
+    """Optional base64-encoded PNG map capture from the interface."""
 
 
 class CompareRequest(BaseModel):
@@ -711,6 +813,7 @@ def _generate_terrain_tile(dem_path: Path, z: int, x: int, y: int) -> bytes | No
 
 
 def _run_tile_generation(
+    session_id: str,
     dem_path: Path,
     tile_dir: Path,
     min_zoom: int,
@@ -718,8 +821,21 @@ def _run_tile_generation(
     bounds_wgs84: list[float],
     total_tiles: int,
 ) -> None:
-    """Pre-generate all tiles in background; update session progress."""
+    """Pre-generate all tiles in background; update progress for *session_id*.
+
+    Two concurrent /api/terrain/load calls now update disjoint session
+    records — previously both threads updated the single global
+    ``_terrain_session`` dict which produced interleaved progress values
+    and a dangling tile_dir for the losing load.
+    """
     import mercantile  # lazy — avoid adding to app startup time
+
+    def _update(key: str, value: object) -> None:
+        """Atomically update one field of this session, if the session still exists."""
+        with _terrain_session_lock:
+            session = _terrain_sessions.get(session_id)
+            if session is not None:
+                session[key] = value
 
     try:
         west, south, east, north = bounds_wgs84
@@ -739,8 +855,7 @@ def _run_tile_generation(
 
                 generated += 1
                 pct = int(generated * 100 / max(total_tiles, 1))
-                with _terrain_session_lock:
-                    _terrain_session["progress_pct"] = pct
+                _update("progress_pct", pct)
 
         # Guard against silent total failure (D-326): if all tiles were skipped
         # (e.g. DEM CRS incompatible with EPSG:3857 reproject), report an error
@@ -751,22 +866,25 @@ def _run_tile_generation(
                 total_tiles,
             )
             with _terrain_session_lock:
-                _terrain_session["error"] = (
-                    "All terrain tiles failed to generate (0 of "
-                    f"{total_tiles} written). Check DEM CRS compatibility."
-                )
-                _terrain_session["done"] = True
+                session = _terrain_sessions.get(session_id)
+                if session is not None:
+                    session["error"] = (
+                        "All terrain tiles failed to generate (0 of "
+                        f"{total_tiles} written). Check DEM CRS compatibility."
+                    )
+                    session["done"] = True
             return
 
         with _terrain_session_lock:
-            _terrain_session["progress_pct"] = 100
-            _terrain_session["done"] = True
+            session = _terrain_sessions.get(session_id)
+            if session is not None:
+                session["progress_pct"] = 100
+                session["done"] = True
 
     except Exception as exc:
         _log.exception("Terrain tile generation failed")
-        with _terrain_session_lock:
-            _terrain_session["error"] = str(exc)
-            _terrain_session["done"] = True
+        _update("error", str(exc))
+        _update("done", True)
 
 
 # ---------------------------------------------------------------------------
@@ -811,6 +929,23 @@ async def simulate(config: ScenarioConfig) -> StreamingResponse:
     ``"complete"`` event carries a ``result`` field containing a
     :class:`SimResultsPayload`-compatible dict.
     """
+    # Path-traversal guard — refuse requests that reference files outside
+    # the DEM allowlist before any background work begins.  We pin the
+    # resolved (canonical) path back onto the config so the worker thread
+    # opens the same file the validator inspected (closes a small TOCTOU
+    # window where a symlink could be swapped between validate and open).
+    resolved_dem = _validate_dem_path(config.site_dem_path)
+    if resolved_dem is not None:
+        config.site_dem_path = resolved_dem
+    if config.site_dsm_path is not None:
+        resolved_dsm = _validate_dem_path(config.site_dsm_path)
+        if resolved_dsm is not None:
+            config.site_dsm_path = resolved_dsm
+    if config.boundary_path is not None:
+        resolved_bdy = _validate_dem_path(config.boundary_path)
+        if resolved_bdy is not None:
+            config.boundary_path = resolved_bdy
+
     q: _queue.Queue[dict[str, Any]] = _queue.Queue()
     thread = threading.Thread(
         target=_run_simulate_pipeline,
@@ -830,6 +965,12 @@ async def optimise(request: OptimiserRequest) -> StreamingResponse:
     Response: ``text/event-stream`` SSE terminating in a ``"complete"`` event
     with ``result`` containing :class:`OptimiserResultsPayload`-compatible dict.
     """
+    # Path-traversal guard — same policy as /api/simulate.  Pin the resolved
+    # path back onto the request so the worker opens the validated file.
+    resolved_terrain = _validate_dem_path(request.terrain)
+    if resolved_terrain is not None:
+        request.terrain = str(resolved_terrain)
+
     q: _queue.Queue[dict[str, Any]] = _queue.Queue()
     thread = threading.Thread(
         target=_run_optimise_pipeline,
@@ -977,65 +1118,186 @@ async def compare(request: CompareRequest) -> CompareResponse:
     )
 
 
+def _extract_sim_stats(sim_results: dict[str, Any]) -> dict[str, Any]:
+    """Extract coverage stats from either the interface schema or the legacy payload.
+
+    The interface schema nests the stats fields under ``stats``; the legacy
+    :class:`SimResultsPayload` shape keeps them at the top level.  We accept both.
+    A non-empty nested ``stats`` dict is authoritative; an empty nested dict
+    (``{"stats": {}}``) falls back to top-level fields rather than silently
+    returning an empty dict (D-416).
+    """
+    nested = sim_results.get("stats")
+    if isinstance(nested, dict) and nested:
+        return dict(nested)
+    return dict(sim_results)
+
+
+def _parse_sensor_placements(
+    raw: dict[str, Any] | list[dict[str, Any]],
+) -> tuple[list[SensorPlacement], int]:
+    """Normalise a placements payload (dict or list) into validated SensorPlacement objects.
+
+    Invalid entries are logged and skipped rather than rejecting the whole request —
+    a single malformed placement should not block report generation — but we also
+    return the count of skipped entries so the caller can raise if every entry was
+    invalid (D-414, prevents the silent empty-PDF failure).
+    """
+    if isinstance(raw, dict):
+        entries = raw.get("sensors", []) or []
+    elif isinstance(raw, list):
+        entries = raw
+    else:
+        _log.warning(
+            "placements payload is not dict|list (got %s) — treating as empty.",
+            type(raw).__name__,
+        )
+        entries = []
+
+    placements: list[SensorPlacement] = []
+    skipped = 0
+    for i, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            _log.warning("Placement %d is not a dict (got %s) — skipping.", i, type(entry).__name__)
+            skipped += 1
+            continue
+        try:
+            placements.append(SensorPlacement.model_validate(entry))
+        except Exception as exc:
+            _log.warning("Placement %d failed validation (%s) — skipping.", i, exc)
+            skipped += 1
+    return placements, skipped
+
+
 @app.post("/api/report")
 async def report(request: ReportRequest) -> Response:
     """Generate a PDF report from pre-computed simulation results.
 
-    Request body: :class:`ReportRequest` JSON containing ``report_config`` and
-    ``sim_results`` (from a prior ``/api/simulate`` call).
+    Request body: :class:`ReportRequest` JSON containing ``report_config``
+    (UI config), ``sim_results`` (from a prior ``/api/simulate`` call), and
+    the placement / zone / corridor state from the interface.
+
+    The ScenarioConfig that :class:`ReportData` requires is reconstructed
+    here from the placements field and a placeholder DEM path — the interface
+    does not upload a DEM alongside the report and the PDF renderer only
+    needs ``scenario.sensor_placements`` plus ``scenario.site_dem_path``
+    (used for the scenario-name stem fallback).
 
     Response: PDF binary stream (``application/pdf``).
     """
-    try:
-        scenario = ScenarioConfig.model_validate(request.report_config)
-    except Exception as exc:
+    sim_results = request.sim_results or {}
+    stats_raw = _extract_sim_stats(sim_results)
+    placements, skipped_placements = _parse_sensor_placements(request.placements)
+
+    # If every placement entry failed validation we refuse the request rather
+    # than emit a clean PDF with zero placements (D-414 — silent-fail trap).
+    raw_count = (
+        len(request.placements.get("sensors", []) or [])
+        if isinstance(request.placements, dict)
+        else len(request.placements)
+        if isinstance(request.placements, list)
+        else 0
+    )
+    if raw_count > 0 and not placements:
         return Response(
-            content=json.dumps({"error": f"Invalid report_config: {exc}"}),
+            content=json.dumps(
+                {
+                    "error": "All sensor placements failed validation; refusing to "
+                    f"render a PDF with zero placements (input had {raw_count})."
+                }
+            ),
             status_code=422,
             media_type="application/json",
         )
+    if skipped_placements > 0:
+        _log.warning(
+            "report request: %d of %d placements skipped due to validation errors.",
+            skipped_placements,
+            raw_count,
+        )
 
-    sr = request.sim_results
-
-    # Reconstruct CoverageStats from the serialisable payload.
-    # redundancy_map is not used in PDF templates — a 1×1 zero array is sufficient.
+    # Reconstruct CoverageStats from whichever keys appear.  Both the
+    # interface schema (total_coverage_pct / largest_contiguous_gap_m2) and
+    # the D-405 aliases (coverage_pct / largest_gap_area_m2) are accepted.
+    per_layer_raw = stats_raw.get("per_layer_coverage_pct") or {}
     per_layer_pct: dict[SensorType, float] = {}
-    for k, v in sr.per_layer_coverage_pct.items():
-        try:
-            per_layer_pct[SensorType(k)] = v
-        except ValueError:
-            _log.warning("Unknown sensor type key '%s' in sim_results — skipping.", k)
+    if isinstance(per_layer_raw, dict):
+        for k, v in per_layer_raw.items():
+            try:
+                per_layer_pct[SensorType(k)] = float(v)
+            except (ValueError, TypeError):
+                _log.warning("Unknown sensor type key '%s' in sim_results — skipping.", k)
+    elif per_layer_raw:
+        # Truthy but not a dict (e.g. a list) — log so the silent drop is visible (D-417).
+        _log.warning(
+            "per_layer_coverage_pct is not a dict (got %s) — coverage by layer dropped.",
+            type(per_layer_raw).__name__,
+        )
+
+    per_zone_raw = stats_raw.get("per_zone_coverage_pct") or {}
+
+    def _num(*keys: str, default: float = 0.0) -> float:
+        for key in keys:
+            val = stats_raw.get(key)
+            if val is not None:
+                try:
+                    return float(val)
+                except (ValueError, TypeError):
+                    continue
+        return default
 
     stats = CoverageStats(
-        total_coverage_pct=sr.total_coverage_pct,
+        total_coverage_pct=_num("total_coverage_pct", "coverage_pct"),
         per_layer_coverage_pct=per_layer_pct,
-        per_zone_coverage_pct=dict(sr.per_zone_coverage_pct),
-        gap_area_m2=sr.gap_area_m2,
+        per_zone_coverage_pct=dict(per_zone_raw) if isinstance(per_zone_raw, dict) else {},
+        gap_area_m2=_num("gap_area_m2"),
         redundancy_map=np.zeros((1, 1), dtype=np.intp),
-        largest_contiguous_gap_m2=sr.largest_contiguous_gap_m2,
+        largest_contiguous_gap_m2=_num("largest_contiguous_gap_m2", "largest_gap_area_m2"),
     )
 
     sensor_defs = _get_sensor_defs()
     effector_defs = _get_effector_defs()
 
-    scenario_name = sr.scenario_name or Path(str(scenario.site_dem_path)).stem
-    generated_at = sr.generated_at or _now_iso()
+    scenario_name = sim_results.get("scenario_name") or stats_raw.get("scenario_name") or "scenario"
+    generated_at = sim_results.get("generated_at") or _now_iso()
+
+    # Build a minimal ScenarioConfig for the ReportData.scenario field.
+    # render_pdf does not open the DEM; it only reads scenario.sensor_placements
+    # and (at most) scenario.site_dem_path.stem for a name fallback.
+    placeholder_dem = Path(tempfile.gettempdir()) / f"{scenario_name}.tif"
+    scenario = ScenarioConfig(
+        site_dem_path=placeholder_dem,
+        sensor_placements=placements,
+    )
+
+    # Legacy SimResultsPayload-style pre-rendered PNG fields, if the client
+    # happened to send them (most interface callers do not — the PDF re-renders
+    # its own maps).  None values are tolerated downstream.
+    composite_b64 = sim_results.get("composite_map_b64")
+    gap_b64 = sim_results.get("gap_map_b64")
+    layer_b64_raw = sim_results.get("layer_maps_b64") or {}
+    layer_maps_b64 = dict(layer_b64_raw) if isinstance(layer_b64_raw, dict) else {}
+    kill_chain_b64 = sim_results.get("kill_chain_chart_b64")
+    saturation_b64 = sim_results.get("saturation_chart_b64")
+    executive_summary = sim_results.get("executive_summary") or ""
+    assumptions_raw = sim_results.get("assumptions") or {}
+    assumptions = dict(assumptions_raw) if isinstance(assumptions_raw, dict) else {}
 
     report_data = ReportData(
         scenario_name=scenario_name,
         generated_at=generated_at,
         stats=stats,
-        executive_summary=sr.executive_summary or "",
-        assumptions=dict(sr.assumptions),
+        executive_summary=executive_summary,
+        assumptions=assumptions,
         sensor_defs=sensor_defs,
         effector_defs=effector_defs,
-        sensor_placements=scenario.sensor_placements,
+        sensor_placements=placements,
         scenario=scenario,
-        composite_map_b64=sr.composite_map_b64,
-        gap_map_b64=sr.gap_map_b64,
-        layer_maps_b64=dict(sr.layer_maps_b64),
-        kill_chain_chart_b64=sr.kill_chain_chart_b64,
-        saturation_chart_b64=sr.saturation_chart_b64,
+        composite_map_b64=composite_b64 if isinstance(composite_b64, str) else None,
+        gap_map_b64=gap_b64 if isinstance(gap_b64, str) else None,
+        layer_maps_b64=layer_maps_b64,
+        kill_chain_chart_b64=kill_chain_b64 if isinstance(kill_chain_b64, str) else None,
+        saturation_chart_b64=saturation_b64 if isinstance(saturation_b64, str) else None,
         corridor_results=[],
         kill_chain_results=[],
         saturation_result=None,
@@ -1137,34 +1399,42 @@ async def terrain_load(
     )
 
     metadata: dict[str, Any] = {
+        "session_id": session_id,
         "dem_path": str(dem_path),
         "dsm_path": str(dsm_path) if dsm_path is not None else None,
         "crs_epsg": crs_epsg,
         "bounds_wgs84": bounds_wgs84,
         "centre_wgs84": centre_wgs84,
         "resolution_m": resolution_m,
-        "tile_url_template": "/api/terrain/tiles/{z}/{x}/{y}.png",
+        # Session-qualified tile URL — avoids the pre-S14 race where a second
+        # /api/terrain/load would redirect the first session's tile requests to
+        # the second session's DEM.
+        "tile_url_template": f"/api/terrain/sessions/{session_id}/tiles/{{z}}/{{x}}/{{y}}.png",
+        # Session-qualified progress URL — the legacy unsessioned endpoint
+        # would report the latest session's progress to every client (D-426).
+        "tile_progress_url": f"/api/terrain/sessions/{session_id}/tile-progress",
         "terrain_tile_count": total_tiles,
         "terrain_min_zoom": min_zoom,
         "terrain_max_zoom": max_zoom,
     }
 
+    global _terrain_latest_session_id
     with _terrain_session_lock:
-        _terrain_session.update(
+        session_state = _new_terrain_session_state()
+        session_state.update(
             {
                 "dem_path": dem_path,
                 "dsm_path": dsm_path,
                 "metadata": metadata,
-                "progress_pct": 0,
-                "done": False,
-                "error": None,
                 "tile_dir": tile_dir,
             }
         )
+        _terrain_sessions[session_id] = session_state
+        _terrain_latest_session_id = session_id
 
     thread = threading.Thread(
         target=_run_tile_generation,
-        args=(dem_path, tile_dir, min_zoom, max_zoom, bounds_wgs84, total_tiles),
+        args=(session_id, dem_path, tile_dir, min_zoom, max_zoom, bounds_wgs84, total_tiles),
         daemon=True,
     )
     thread.start()
@@ -1172,69 +1442,65 @@ async def terrain_load(
     return metadata
 
 
-@app.get("/api/terrain/tile-progress")
-async def terrain_tile_progress() -> StreamingResponse:
-    """SSE stream for terrain tile generation progress.
+def _read_session_progress(session_id: str) -> tuple[int, bool, str | None]:
+    """Snapshot (progress_pct, done, error) for *session_id* under the lock.
 
-    Emits ``{"type": "progress", "pct": N}`` events (N = 0–99) until the
-    background generation thread is complete, then emits
-    ``{"type": "complete", "pct": 100}`` and closes the stream.
-
-    If tile generation fails, emits ``{"type": "error", "message": "..."}`` and
-    closes the stream.
-    """
-
-    async def _generate() -> AsyncGenerator[str, None]:
-        # Guard: if no terrain session is active, report an error immediately
-        # rather than streaming infinite progress=0 events (D-328).
-        with _terrain_session_lock:
-            no_session = _terrain_session["dem_path"] is None
-
-        if no_session:
-            yield _sse_event({"type": "error", "message": "No terrain session active."})
-            return
-
-        while True:
-            with _terrain_session_lock:
-                pct = _terrain_session["progress_pct"]
-                done = _terrain_session["done"]
-                error = _terrain_session["error"]
-
-            if error:
-                yield _sse_event({"type": "error", "message": error})
-                break
-            if done:
-                yield _sse_event({"type": "complete", "pct": 100})
-                break
-            yield _sse_event({"type": "progress", "pct": pct})
-            await asyncio.sleep(0.25)
-
-    return StreamingResponse(_generate(), media_type="text/event-stream")
-
-
-@app.get("/api/terrain/tiles/{z}/{x}/{y}.png")
-async def terrain_tile(z: int, x: int, y: int) -> Response:
-    """Serve a Terrarium-encoded PNG tile for the current terrain session.
-
-    Serves pre-generated tiles from disk when available; falls back to
-    on-demand generation for tiles requested before the background thread
-    has written them.
-
-    Returns 404 if no terrain session is active or the tile is outside the DEM.
+    Uses ``.get()`` rather than bracket lookup so a future change to the
+    session-state schema cannot kill the SSE connection mid-stream (D-418).
     """
     with _terrain_session_lock:
-        tile_dir = _terrain_session["tile_dir"]
-        dem_path = _terrain_session["dem_path"]
+        session = _terrain_sessions.get(session_id)
+        if session is None:
+            return 0, True, "Session no longer exists."
+        return (
+            int(session.get("progress_pct", 0)),
+            bool(session.get("done", False)),
+            session.get("error"),
+        )
 
+
+def _read_session_tile_paths(session_id: str) -> tuple[Path | None, Path | None]:
+    """Snapshot (tile_dir, dem_path) for *session_id* under the lock."""
+    with _terrain_session_lock:
+        session = _terrain_sessions.get(session_id)
+        if session is None:
+            return None, None
+        return session.get("tile_dir"), session.get("dem_path")
+
+
+async def _stream_terrain_progress(session_id: str | None) -> AsyncGenerator[str, None]:
+    """Yield SSE progress events for *session_id* (or the latest session)."""
+    resolved = _resolve_terrain_session_id(session_id)
+    if resolved is None:
+        yield _sse_event({"type": "error", "message": "No terrain session active."})
+        return
+
+    while True:
+        pct, done, error = _read_session_progress(resolved)
+        if error:
+            yield _sse_event({"type": "error", "message": error})
+            return
+        if done:
+            yield _sse_event({"type": "complete", "pct": 100})
+            return
+        yield _sse_event({"type": "progress", "pct": pct})
+        await asyncio.sleep(0.25)
+
+
+async def _serve_terrain_tile(session_id: str | None, z: int, x: int, y: int) -> Response:
+    """Serve a tile for *session_id* (or the latest session) — disk first, then on-demand."""
+    resolved = _resolve_terrain_session_id(session_id)
+    if resolved is None:
+        return Response(status_code=404)
+
+    tile_dir, dem_path = _read_session_tile_paths(resolved)
     if tile_dir is None:
         return Response(status_code=404)
 
-    # Fast path: serve pre-generated tile from disk
     tile_path = tile_dir / str(z) / str(x) / f"{y}.png"
     if tile_path.exists():
         return Response(content=tile_path.read_bytes(), media_type="image/png")
 
-    # On-demand fallback for tiles requested before pre-generation completes
     if dem_path is None:
         return Response(status_code=404)
 
@@ -1242,8 +1508,47 @@ async def terrain_tile(z: int, x: int, y: int) -> Response:
     tile_data: bytes | None = await loop.run_in_executor(
         None, _generate_terrain_tile, dem_path, z, x, y
     )
-
     if tile_data is None:
         return Response(status_code=404)
-
     return Response(content=tile_data, media_type="image/png")
+
+
+@app.get("/api/terrain/tile-progress")
+async def terrain_tile_progress() -> StreamingResponse:
+    """SSE stream for the most recently loaded terrain session's tile generation.
+
+    Emits ``{"type": "progress", "pct": N}`` events (N = 0–99) until the
+    background generation thread is complete, then emits
+    ``{"type": "complete", "pct": 100}`` and closes the stream.
+
+    If tile generation fails, emits ``{"type": "error", "message": "..."}`` and
+    closes the stream.
+
+    Concurrent ``/api/terrain/load`` calls now write into per-session records
+    (D-406); use the sessioned variant below if you need a specific session.
+    """
+    return StreamingResponse(_stream_terrain_progress(None), media_type="text/event-stream")
+
+
+@app.get("/api/terrain/sessions/{session_id}/tile-progress")
+async def terrain_tile_progress_sessioned(session_id: str) -> StreamingResponse:
+    """SSE progress stream scoped to *session_id*.  See ``terrain_tile_progress``."""
+    return StreamingResponse(_stream_terrain_progress(session_id), media_type="text/event-stream")
+
+
+@app.get("/api/terrain/tiles/{z}/{x}/{y}.png")
+async def terrain_tile(z: int, x: int, y: int) -> Response:
+    """Serve a Terrarium-encoded PNG tile for the most recently loaded terrain.
+
+    Returns 404 if no terrain session has been loaded or the tile is outside
+    the DEM.  Prefer the sessioned endpoint below — concurrent loads tag tile
+    URLs with their session id so a slow client cannot read another client's
+    DEM (D-406).
+    """
+    return await _serve_terrain_tile(None, z, x, y)
+
+
+@app.get("/api/terrain/sessions/{session_id}/tiles/{z}/{x}/{y}.png")
+async def terrain_tile_sessioned(session_id: str, z: int, x: int, y: int) -> Response:
+    """Serve a Terrarium tile scoped to *session_id*.  See ``terrain_tile``."""
+    return await _serve_terrain_tile(session_id, z, x, y)

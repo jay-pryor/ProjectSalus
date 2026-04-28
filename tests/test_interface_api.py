@@ -262,10 +262,12 @@ def test_simulate_sse_progress_events_emitted(flat_dem_path: Path) -> None:
         assert 0 <= evt["pct"] <= 100
 
 
-def test_simulate_invalid_dem_path_yields_error_event() -> None:
-    """POST /api/simulate with a non-existent DEM path yields an error event."""
+def test_simulate_missing_dem_file_yields_error_event(tmp_path: Path) -> None:
+    """POST /api/simulate with a path inside the allowlist but pointing at
+    a non-existent file yields an error event (not a 403)."""
+    missing = tmp_path / "does_not_exist.tif"
     payload = {
-        "site_dem_path": "/nonexistent/path/terrain.tif",
+        "site_dem_path": str(missing),
         "sensor_placements": [],
     }
     with TestClient(app) as client:
@@ -274,6 +276,19 @@ def test_simulate_invalid_dem_path_yields_error_event() -> None:
     events = _parse_sse(resp.text)
     types = [e.get("type") for e in events]
     assert "error" in types, f"Expected error event; got types: {types}"
+
+
+def test_simulate_rejects_path_outside_allowlist() -> None:
+    """POST /api/simulate with a DEM path outside the allowed directories
+    returns 403 before any pipeline work begins (path-traversal guard)."""
+    payload = {
+        "site_dem_path": "/etc/passwd",
+        "sensor_placements": [],
+    }
+    with TestClient(app) as client:
+        resp = client.post("/api/simulate", json=payload)
+    assert resp.status_code == 403
+    assert "allowed" in resp.text.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -338,23 +353,37 @@ def test_optimise_unknown_sensor_yields_error(flat_dem_path: Path) -> None:
 
 
 def _minimal_report_request(dem_path: Path) -> dict[str, Any]:
-    """Build a minimal ReportRequest payload using spec-defined field names."""
+    """Build a minimal ReportRequest payload using spec-defined field names.
+
+    report_config is the UI configuration shape (client_name, sanitise_level,
+    include_modules, logo_path) — not a ScenarioConfig.  Scenario placements
+    are sent in the top-level ``placements`` field.
+    """
+    # dem_path is not part of the report request — the interface never uploads
+    # a DEM alongside a report — but it is kept in the fixture argument so
+    # the signature matches older callers.  Silence the unused-arg warning.
+    _ = dem_path
     return {
         "report_config": {
-            "site_dem_path": str(dem_path),
-            "sensor_placements": [],
+            "client_name": "Test Client",
+            "sanitise_level": "none",
+            "include_modules": [],
+            "logo_path": None,
         },
         "sim_results": {
             "scenario_name": "test_flat",
             "generated_at": "2026-04-13T00:00:00Z",
-            "total_coverage_pct": 0.0,
-            "gap_area_m2": 10000.0,
-            "largest_contiguous_gap_m2": 10000.0,
-            "per_layer_coverage_pct": {},
-            "per_zone_coverage_pct": {},
+            "stats": {
+                "total_coverage_pct": 0.0,
+                "gap_area_m2": 10000.0,
+                "largest_contiguous_gap_m2": 10000.0,
+                "per_layer_coverage_pct": {},
+                "per_zone_coverage_pct": {},
+            },
             "executive_summary": "Test report.",
             "assumptions": {},
         },
+        "placements": {"sensors": [], "effectors": []},
     }
 
 
@@ -515,20 +544,36 @@ def test_compare_malformed_feature_geometry_is_skipped() -> None:
     assert len(body["both"]["features"]) >= 1
 
 
-def test_report_invalid_scenario_returns_422(flat_dem_path: Path) -> None:
-    """POST /api/report with an invalid report_config body returns 422."""
+def test_report_accepts_ui_report_config_without_dem_path(flat_dem_path: Path) -> None:
+    """POST /api/report accepts UI-shape report_config (no site_dem_path) and returns a PDF.
+
+    The report endpoint used to fail with 422 when report_config was not a valid
+    ScenarioConfig, but the interface never constructs one client-side — this
+    test locks in the permissive behaviour so the report flow does not regress.
+    """
+    _ = flat_dem_path
     payload = {
-        "report_config": {"site_dem_path": ""},  # invalid: empty path
-        "sim_results": {
-            "total_coverage_pct": 0.0,
-            "gap_area_m2": 0.0,
-            "largest_contiguous_gap_m2": 0.0,
+        "report_config": {
+            "client_name": "Operator",
+            "sanitise_level": "minimal",
+            "include_modules": ["Executive Summary"],
+            "logo_path": None,
         },
+        "sim_results": {
+            "scenario_name": "permissive_flow",
+            "stats": {
+                "total_coverage_pct": 0.0,
+                "gap_area_m2": 0.0,
+                "largest_contiguous_gap_m2": 0.0,
+            },
+        },
+        "placements": {"sensors": [], "effectors": []},
     }
     with TestClient(app) as client:
         resp = client.post("/api/report", json=payload)
-    # Either 422 (Pydantic validation) or 422 from our explicit guard
-    assert resp.status_code == 422
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/pdf"
+    assert resp.content[:4] == b"%PDF"
 
 
 # ---------------------------------------------------------------------------
@@ -680,17 +725,57 @@ def test_terrain_tile_served_after_load(flat_dem_path: Path) -> None:
 
 def test_terrain_tile_404_when_no_session_active() -> None:
     """GET /api/terrain/tiles/{z}/{x}/{y}.png returns 404 if no session is loaded."""
-    from salus.interface_api.app import _terrain_session, _terrain_session_lock
+    from salus.interface_api import app as _app
 
-    # Reset session
-    with _terrain_session_lock:
-        _terrain_session["tile_dir"] = None
-        _terrain_session["dem_path"] = None
+    # Reset session map
+    with _app._terrain_session_lock:
+        _app._terrain_sessions.clear()
+        _app._terrain_latest_session_id = None
 
     with TestClient(app) as client:
         resp = client.get("/api/terrain/tiles/10/900/600.png")
 
     assert resp.status_code == 404
+
+
+def test_terrain_concurrent_loads_keep_disjoint_tile_paths(flat_dem_path: Path) -> None:
+    """Two ``/api/terrain/load`` calls produce two distinct sessions whose
+    tile_dirs and metadata do not collide (D-406 race fix).
+
+    Pre-fix the second load overwrote the first session's ``tile_dir`` /
+    ``dem_path`` in a single global dict, so the first session's pending tile
+    requests were silently redirected to the second session's DEM.
+    """
+    from salus.interface_api import app as _app
+
+    with open(flat_dem_path, "rb") as f:
+        dem_bytes = f.read()
+
+    with TestClient(app) as client:
+        first = client.post(
+            "/api/terrain/load",
+            files={"dem_file": ("flat-a.tif", dem_bytes, "image/tiff")},
+        )
+        assert first.status_code == 200
+        second = client.post(
+            "/api/terrain/load",
+            files={"dem_file": ("flat-b.tif", dem_bytes, "image/tiff")},
+        )
+        assert second.status_code == 200
+
+    sid_a = first.json()["session_id"]
+    sid_b = second.json()["session_id"]
+    assert sid_a != sid_b, "session_id collision between concurrent loads"
+    assert sid_a in first.json()["tile_url_template"]
+    assert sid_b in second.json()["tile_url_template"]
+
+    with _app._terrain_session_lock:
+        sess_a = _app._terrain_sessions.get(sid_a)
+        sess_b = _app._terrain_sessions.get(sid_b)
+        assert sess_a is not None and sess_b is not None
+        assert sess_a["tile_dir"] != sess_b["tile_dir"]
+        assert sess_a["metadata"]["session_id"] == sid_a
+        assert sess_b["metadata"]["session_id"] == sid_b
 
 
 def test_compute_zoom_levels_reasonable_range() -> None:

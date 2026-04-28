@@ -373,16 +373,115 @@ export function init(api) {
   }
 
   // -------------------------------------------------------------------------
-  // State write
+  // State write — canonical shape {priority: PriorityZone[], exclusion: ExclusionZone[]}
+  // (docs/Technical/InterfaceArchitecture.md §3).
+  //
+  // PriorityZone fields:  id, label, geometry (GeoJSON Polygon), min_coverage_pct
+  // ExclusionZone fields: id, label, geometry (GeoJSON Polygon), reason
+  //
+  // The internal `zones` array uses `name`/`coordinates`/`coverage_threshold_pct`
+  // for ergonomics inside the editor; the canonical names are the contract with
+  // coverage-viewer (zone compliance display) and gap-analysis (severity scoring).
   // -------------------------------------------------------------------------
 
+  /** Build a closed GeoJSON Polygon from an open ring of [lng, lat] pairs. */
+  function _ringToPolygon(coordinates) {
+    return {
+      type: 'Polygon',
+      coordinates: [_closeRing(coordinates)],
+    };
+  }
+
   function _writeState() {
-    api.state.set('zones', {
-      zones: zones.map(z => ({
-        ...z,
-        coordinates: z.coordinates.map(c => [...c]),
-      })),
-    });
+    const priority = [];
+    const exclusion = [];
+    for (const z of zones) {
+      const geometry = _ringToPolygon(z.coordinates);
+      if (z.type === 'exclusion') {
+        exclusion.push({
+          id: z.id,
+          label: z.name,
+          geometry,
+          reason: z.reason ?? null,
+        });
+      } else {
+        priority.push({
+          id: z.id,
+          label: z.name,
+          geometry,
+          min_coverage_pct: z.coverage_threshold_pct ?? null,
+        });
+      }
+    }
+    api.state.set('zones', { priority, exclusion });
+  }
+
+  /** Drop a duplicated closing vertex if the ring is closed. */
+  function _openRing(ring) {
+    if (ring.length < 2) return ring.map(c => [...c]);
+    const first = ring[0];
+    const last = ring[ring.length - 1];
+    if (first[0] === last[0] && first[1] === last[1]) {
+      return ring.slice(0, -1).map(c => [...c]);
+    }
+    return ring.map(c => [...c]);
+  }
+
+  /**
+   * Rebuild the tagged in-memory zones array from the canonical state shape.
+   *
+   * Accepts both canonical field names (label/geometry/min_coverage_pct) and
+   * the legacy in-editor names (name/coordinates/coverage_threshold_pct) so a
+   * scenario authored before the canonical migration still loads cleanly.
+   *
+   * Defensive against malformed entries: non-array val.priority/val.exclusion
+   * are coerced to [] (D-422); zones with fewer than 3 ring vertices are
+   * dropped with a warning (D-423) rather than producing a zero-vertex polygon
+   * that MapLibreGL would silently render as nothing.
+   */
+  function _readCanonical(val) {
+    if (!val || typeof val !== 'object') return [];
+
+    function _ringFrom(z) {
+      // Outer ring lookup: canonical first, then legacy.  Both may produce
+      // an empty array, which we let through to the validity check below.
+      const ring = z.geometry?.coordinates?.[0] ?? z.coordinates ?? [];
+      return _openRing(ring);
+    }
+
+    function _validRing(ring, zoneId) {
+      if (Array.isArray(ring) && ring.length >= 3) return true;
+      console.warn(
+        `[zone-editor] zone '${zoneId}' has fewer than 3 ring vertices ` +
+        `(got ${Array.isArray(ring) ? ring.length : typeof ring}) — dropping.`
+      );
+      return false;
+    }
+
+    const priorityRaw = Array.isArray(val.priority) ? val.priority : [];
+    const exclusionRaw = Array.isArray(val.exclusion) ? val.exclusion : [];
+
+    const priority = priorityRaw
+      .map(z => ({
+        id: z.id,
+        name: z.label ?? z.name ?? '',
+        type: 'priority',
+        coverage_threshold_pct: z.min_coverage_pct ?? z.coverage_threshold_pct ?? null,
+        reason: null,
+        coordinates: _ringFrom(z),
+      }))
+      .filter(z => _validRing(z.coordinates, z.id));
+    const exclusion = exclusionRaw
+      .map(z => ({
+        id: z.id,
+        name: z.label ?? z.name ?? '',
+        type: 'exclusion',
+        coverage_threshold_pct: null,
+        reason: z.reason ?? null,
+        coordinates: _ringFrom(z),
+      }))
+      .filter(z => _validRing(z.coordinates, z.id));
+    return [...priority, ...exclusion];
   }
 
   // -------------------------------------------------------------------------
@@ -762,10 +861,7 @@ export function init(api) {
 
   unsubs.push(api.state.watch('zones', (val) => {
     if (!val) return;
-    zones = (val.zones ?? []).map(z => ({
-      ...z,
-      coordinates: (z.coordinates ?? []).map(c => [...c]),
-    }));
+    zones = _readCanonical(val);
     _rebuildZoneSources();
     _rebuildZoneList();
   }));
@@ -776,10 +872,7 @@ export function init(api) {
 
   const initState = api.state.get('zones');
   if (initState) {
-    zones = (initState.zones ?? []).map(z => ({
-      ...z,
-      coordinates: (z.coordinates ?? []).map(c => [...c]),
-    }));
+    zones = _readCanonical(initState);
     _rebuildZoneSources();
     _rebuildZoneList();
   }

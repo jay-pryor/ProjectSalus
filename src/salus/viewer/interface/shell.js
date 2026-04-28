@@ -68,6 +68,61 @@ async function main() {
   });
 
   // -------------------------------------------------------------------
+  // 4b. Bootstrap sensor/effector libraries from the backend.
+  //
+  // No module writes sensor_library or effector_library — they originate
+  // from the read-only bundled data directory on the server.  The shell
+  // fetches them once at startup and exposes them via state.setState().
+  //
+  // If the backend is unreachable we fall back to empty dicts so library-
+  // browser and budget-tracker render cleanly rather than crashing — but
+  // we ALSO emit `shell:library-load-error` on the bus so a downstream
+  // module (e.g. an error banner) can surface the failure to the user
+  // rather than presenting empty dropdowns with no explanation (D-415).
+  //
+  // Test environments without `fetch` (e.g. Node test-runner module-level
+  // unit tests that import the shell) short-circuit to empty libraries
+  // instead of throwing (D-428).
+  // -------------------------------------------------------------------
+  async function _fetchLibrary(url) {
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) {
+        console.warn(`[shell] ${url} returned HTTP ${resp.status}`);
+        bus.emit('shell:library-load-error', { url, status: resp.status });
+        return {};
+      }
+      const body = await resp.json();
+      if (body && typeof body === 'object' && !Array.isArray(body)) return body;
+      // A list response is a contract drift — log so the regression is
+      // visible rather than silently producing empty libraries (D-419).
+      console.warn(
+        `[shell] ${url} returned ${Array.isArray(body) ? 'array' : typeof body}; ` +
+        `expected object grouped by type. Falling back to empty library.`
+      );
+      bus.emit('shell:library-load-error', { url, status: 200, reason: 'unexpected-shape' });
+      return {};
+    } catch (err) {
+      console.warn(`[shell] Failed to fetch ${url}: ${err.message}`);
+      bus.emit('shell:library-load-error', { url, error: err.message });
+      return {};
+    }
+  }
+
+  let sensorLib = {};
+  let effectorLib = {};
+  if (typeof fetch === 'function') {
+    [sensorLib, effectorLib] = await Promise.all([
+      _fetchLibrary('/api/sensors'),
+      _fetchLibrary('/api/effectors'),
+    ]);
+  } else {
+    console.warn('[shell] global fetch is not available — libraries left empty.');
+  }
+  state.setState('sensor_library', sensorLib);
+  state.setState('effector_library', effectorLib);
+
+  // -------------------------------------------------------------------
   // 5. Build module registry
   // -------------------------------------------------------------------
   const panelSlot = document.getElementById('panel-slot');

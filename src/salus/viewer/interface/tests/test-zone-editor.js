@@ -336,12 +336,14 @@ test('(S14.7-4) adding a priority zone writes correct state', () => {
 
   const state = api._stateData.zones;
   assert.ok(state, 'zones state must be set');
-  assert.equal(state.zones.length, 1, 'must have exactly 1 zone');
-  const z = state.zones[0];
-  assert.equal(z.name, 'North Perimeter', 'zone name must match');
-  assert.equal(z.type, 'priority', 'zone type must be priority');
-  assert.equal(z.coverage_threshold_pct, 80, 'coverage threshold must be 80');
-  assert.equal(z.coordinates.length, 3, 'coordinates must have 3 vertices');
+  assert.equal(state.priority.length, 1, 'must have exactly 1 priority zone');
+  assert.equal(state.exclusion.length, 0, 'must have no exclusion zones');
+  const z = state.priority[0];
+  assert.equal(z.label, 'North Perimeter', 'zone label must match');
+  assert.equal(z.min_coverage_pct, 80, 'min_coverage_pct must be 80');
+  assert.equal(z.geometry.type, 'Polygon', 'geometry type must be Polygon');
+  // Outer ring is closed (3 unique vertices + 1 closing duplicate).
+  assert.equal(z.geometry.coordinates[0].length, 4, 'closed ring must have 4 positions');
 });
 
 test('(S14.7-4) adding an exclusion zone writes correct state', () => {
@@ -368,10 +370,12 @@ test('(S14.7-4) adding an exclusion zone writes correct state', () => {
 
   const state = api._stateData.zones;
   assert.ok(state, 'zones state must be set');
-  const z = state.zones[0];
-  assert.equal(z.type, 'exclusion', 'zone type must be exclusion');
-  assert.equal(z.name, 'Comms Mast');
-  assert.equal(z.coverage_threshold_pct, null, 'exclusion zones must not have threshold');
+  assert.equal(state.exclusion.length, 1, 'must have 1 exclusion zone');
+  assert.equal(state.priority.length, 0, 'must have no priority zones');
+  const z = state.exclusion[0];
+  assert.equal(z.label, 'Comms Mast', 'exclusion label must match');
+  assert.equal(z.geometry.type, 'Polygon', 'exclusion geometry type must be Polygon');
+  assert.equal(z.reason, 'Communications mast footprint', 'exclusion zones carry reason');
 });
 
 test('confirming a zone emits zone:added', () => {
@@ -438,7 +442,8 @@ test('removing a zone removes it from state', () => {
   trashBtn._fire('click');
 
   const state = api._stateData.zones;
-  assert.equal(state.zones.length, 0, 'zones must be empty after removal');
+  assert.equal(state.priority.length, 0, 'priority must be empty after removal');
+  assert.equal(state.exclusion.length, 0, 'exclusion must be empty after removal');
 });
 
 // ---------------------------------------------------------------------------
@@ -468,7 +473,7 @@ test('(S14.7-4) non-numeric threshold shows error and does NOT write state', () 
   assert.equal(threshError.hidden, false, 'threshold error must be visible for invalid input');
   // State must NOT have been written (or zones must be empty)
   const state = api._stateData.zones;
-  assert.ok(!state || state.zones.length === 0, 'state must not be written when threshold is invalid');
+  assert.ok(!state || ((state.priority?.length ?? 0) + (state.exclusion?.length ?? 0) === 0), 'state must not be written when threshold is invalid');
 });
 
 test('(S14.7-4) out-of-range threshold (>100) shows error', () => {
@@ -486,7 +491,7 @@ test('(S14.7-4) out-of-range threshold (>100) shows error', () => {
 
   assert.equal(threshError.hidden, false, 'error must show for threshold > 100');
   const state = api._stateData.zones;
-  assert.ok(!state || state.zones.length === 0, 'state must not be written for out-of-range threshold');
+  assert.ok(!state || ((state.priority?.length ?? 0) + (state.exclusion?.length ?? 0) === 0), 'state must not be written for out-of-range threshold');
 });
 
 test('(S14.7-4) negative threshold shows error', () => {
@@ -518,8 +523,8 @@ test('(S14.7-4) valid threshold clears error and writes state', () => {
 
   assert.equal(threshError.hidden, true, 'error must be hidden for valid threshold');
   const state = api._stateData.zones;
-  assert.ok(state && state.zones.length === 1, 'state must be written for valid threshold');
-  assert.equal(state.zones[0].coverage_threshold_pct, 75);
+  assert.ok(state && state.priority.length === 1, 'priority state must be written for valid threshold');
+  assert.equal(state.priority[0].min_coverage_pct, 75);
 });
 
 // ---------------------------------------------------------------------------
@@ -565,16 +570,19 @@ test('state watch on zones triggers source rebuild', () => {
   const api = makeApi();
   init(api);
 
-  // Zone state with one priority zone
+  // Canonical zone state: {priority: PriorityZone[], exclusion: ExclusionZone[]}
+  // PriorityZone fields: id, label, geometry (GeoJSON Polygon), min_coverage_pct
   api.state.set('zones', {
-    zones: [{
+    priority: [{
       id: 'z1',
-      name: 'Remote Zone',
-      type: 'priority',
-      coverage_threshold_pct: 90,
-      reason: null,
-      coordinates: [[10, 20], [30, 20], [20, 40]],
+      label: 'Remote Zone',
+      min_coverage_pct: 90,
+      geometry: {
+        type: 'Polygon',
+        coordinates: [[[10, 20], [30, 20], [20, 40], [10, 20]]],
+      },
     }],
+    exclusion: [],
   });
 
   const pSrc = api._sources['zone-editor:priority-source'];
@@ -585,14 +593,17 @@ test('exclusion zones update exclusion-source on state watch', () => {
   const api = makeApi();
   init(api);
 
+  // Canonical ExclusionZone fields: id, label, geometry (GeoJSON Polygon), reason
   api.state.set('zones', {
-    zones: [{
+    priority: [],
+    exclusion: [{
       id: 'z2',
-      name: 'No-Go Zone',
-      type: 'exclusion',
-      coverage_threshold_pct: null,
+      label: 'No-Go Zone',
       reason: 'Building',
-      coordinates: [[5, 5], [15, 5], [10, 15]],
+      geometry: {
+        type: 'Polygon',
+        coordinates: [[[5, 5], [15, 5], [10, 15], [5, 5]]],
+      },
     }],
   });
 

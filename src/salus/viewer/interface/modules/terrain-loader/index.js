@@ -177,9 +177,15 @@ async function _loadTerrain(api, panel, demFile, dsmFile, apiBase) {
 
     const metadata = await resp.json();
 
-    // Poll tile generation progress
+    // Poll tile generation progress.  Prefer the session-qualified URL
+    // returned by /api/terrain/load (D-426) — the legacy unsessioned
+    // endpoint would report the latest session's progress to this client
+    // even if it had loaded an earlier DEM.
     if (statusMsg) statusMsg.textContent = 'Generating terrain tiles…';
-    await _pollTileProgress(panel, apiBase);
+    const progressUrl = metadata.tile_progress_url
+      ? `${apiBase}${metadata.tile_progress_url}`
+      : `${apiBase}/api/terrain/tile-progress`;
+    await _pollTileProgress(panel, progressUrl);
 
     // Write terrain state — watch() callback updates summary (MUST Rule 8).
     // Do NOT call api.state.get('terrain') after this set (MUST Rule 7).
@@ -214,18 +220,19 @@ async function _loadTerrain(api, panel, demFile, dsmFile, apiBase) {
 // ---------------------------------------------------------------------------
 
 /**
- * Subscribe to GET /api/terrain/tile-progress SSE and resolve when complete.
+ * Subscribe to a terrain-tile-progress SSE endpoint and resolve when complete.
  *
  * @param {HTMLElement} panel
- * @param {string} apiBase - API base URL (resolved inside init — D-329)
+ * @param {string} progressUrl - Fully-qualified SSE URL (sessioned when the
+ *   backend returned tile_progress_url; legacy unsessioned otherwise — D-426).
  * @returns {Promise<void>}
  */
-function _pollTileProgress(panel, apiBase) {
+function _pollTileProgress(panel, progressUrl) {
   return new Promise((resolve, reject) => {
     const progressBar = panel.querySelector('#tl-progress-bar');
     const statusMsg = panel.querySelector('#tl-status-msg');
 
-    const es = new EventSource(`${apiBase}/api/terrain/tile-progress`);
+    const es = new EventSource(progressUrl);
 
     es.onmessage = (event) => {
       let data;

@@ -1,0 +1,97 @@
+task_id: I-6
+timestamp: 2026-04-28T00:00:00Z
+
+quality_gates:
+  G1_lint: pass            # ruff check src/ tests/ → All checks passed
+  G2_format: pass          # ruff format --check → 79 files already formatted (one auto-fixup applied to interface_api/app.py during gate run)
+  G3_import: pass          # ruff check --select I src/ → All checks passed
+  G4_type: pass            # mypy informational only — 36 import-untyped warnings for rasterio/shapely/yaml (no stubs available); no correctness errors
+  G5_security: pass        # bandit -r src/ -ll -q → no findings (only ignored Test-comment warnings)
+  G6_unit_test: pass       # 1290 passed, 3 skipped (full pytest); 32 passed (test_interface_api.py); 637 passed (node --test viewer/interface/tests)
+  G7_coverage: pass        # see coverage_pct below
+  G8_secrets: pass         # detect-secrets scan src/ → 0 files with findings
+  coverage_pct: 82         # 82.39% full-suite coverage; required ≥80%
+
+review:
+  l1_standards:
+    testing: pass          # New tests added: test_simulate_rejects_path_outside_allowlist, test_terrain_concurrent_loads_keep_disjoint_tile_paths, rewritten test_report_accepts_ui_report_config_without_dem_path; updated zone-editor + threat-corridor-editor + kill-chain-analyser + optimiser JS test fixtures to canonical state shapes; conftest fixture now restores allowlist on teardown.
+    error_handling: pass   # _validate_dem_path raises HTTP 403 (security boundary); _parse_sensor_placements returns skipped count and /api/report refuses with 422 when raw_count > 0 and zero placements survive validation; _read_session_progress uses defensive .get() reads.
+    logging: pass          # _log.warning on placement-skip count; per_layer_coverage_pct non-dict warned; rejected DEM path logged; shell.js warns + emits bus event on every fetch failure path.
+    security: pass         # path-traversal allowlist enforced before any worker thread spawns; resolved Path pinned back onto config so worker reopens validated file (closes TOCTOU window); bandit -ll clean; no secret leakage.
+    interface_modules: pass # zone-editor, threat-corridor-editor, kill-chain-analyser, terrain-loader, shell.js — all changes preserve module isolation, manifest reads/writes contracts, watch()-not-get() reactive pattern, and prefixed map layer scoping (per module-architecture-reviewer).
+  l2_agents:
+    silent_failure_hunter:        {status: pass, findings: 15}   # 3 high, 9 medium, 3 low — all high+medium resolved (D-413..D-423); LOW deferred per architecture review
+    spec_compliance:              {status: pass, findings: 3}    # 1 warning (this gate-proof was missing — now written), 2 info (incidental gate-proof deletes; security guard scope justified expansion)
+    type_design_analyzer:         {status: N/A, reason: "no new Python type annotations introduced beyond Path | None return types already covered by mypy"}
+    regression_reviewer:          {status: pass, findings: 8}    # 3 high, 3 medium, 2 low — all high+medium resolved (D-424..D-428); LOW deferred per architecture review
+    module_architecture_reviewer: {status: pass, findings: 3}    # 0 high, 0 medium, 3 low (contract-drift annotations) — deferred to a future ticket; not blocking
+
+defect_ids:
+  # Original Opus-tier triage fixes
+  - D-406  # CRITICAL: terrain session race — replaced with per-session map
+  - D-407  # CRITICAL: path traversal in /api/simulate, /api/optimise — DEM allowlist
+  - D-408  # CRITICAL: sensor_library/effector_library never populated — shell bootstrap
+  - D-409  # CRITICAL: report-configurator POST 422 — backend accepts UI shape
+  - D-410  # CRITICAL: zone-editor wrong state shape — canonical {priority, exclusion} + canonical inner fields
+  - D-411  # CRITICAL: threat_corridors shape mismatch — canonical flat array
+  - D-412  # HIGH:     worst_corridor_coverage_pct missing — added to stats_dict
+  # L2 silent_failure_hunter findings on the above fixes
+  - D-413  # HIGH:     _validate_dem_path return discarded — now pinned back to config
+  - D-414  # HIGH:     _parse_sensor_placements silent skip — refuses if all-skipped
+  - D-415  # HIGH:     _fetchLibrary silent failure — bus event emitted
+  - D-416  # MEDIUM:   _extract_sim_stats empty-dict fallback bug
+  - D-417  # MEDIUM:   per_layer_coverage_pct non-dict silent skip — warns now
+  - D-418  # MEDIUM:   bracket reads on session dict — defensive .get()
+  - D-419  # MEDIUM:   shell.js array response coerced to {} — warn + bus event
+  - D-420  # MEDIUM:   threat-corridor empty-array protectedPoint loss — accepted, documented
+  - D-421  # MEDIUM:   threat-corridor non-array waypoints crash — _cloneWaypoints guard
+  - D-422  # MEDIUM:   zone-editor non-array val.priority/exclusion crash — Array.isArray guard
+  - D-423  # MEDIUM:   zone-editor empty ring silently produces zero-vertex polygon — warn + drop
+  # L2 regression_reviewer findings
+  - D-424  # HIGH:     OptimiserRequest rejecting canonical zones shape — widened to dict|list
+  - D-425  # HIGH:     conftest allowlist no teardown — snapshot + restore
+  - D-426  # MEDIUM:   terrain-loader unsessioned tile-progress — sessioned URL via metadata
+  - D-427  # MEDIUM:   /api/report no longer rejects malformed bodies — accepted, partial via D-414
+  - D-428  # MEDIUM:   shell.js startup blocks without fetch mock — typeof-fetch guard
+
+overall: pass
+
+notes: |
+  I-6 resolves all seven Opus-tier triage bugs identified in docs/BugTriage.md
+  (2026-04-17 sweep): #1, #2, #5, #7, #8, #9, #12.
+
+  Key deliverables (D-406..D-412):
+  - DEM path-traversal allowlist (_ALLOWED_DEM_DIRS + _validate_dem_path)
+  - Per-session terrain state (_terrain_sessions keyed by session_id) with
+    sessioned tile and tile-progress endpoints
+  - Backend /api/report accepts the UI report_config shape (no site_dem_path)
+    and reconstructs ScenarioConfig from placements
+  - Shell bootstraps sensor_library + effector_library from /api/sensors and
+    /api/effectors (with bus-event signalling on failure)
+  - zone-editor emits canonical {priority, exclusion} buckets with canonical
+    inner fields {label, geometry, min_coverage_pct | reason}; backward-compat
+    on read for legacy scenario files
+  - threat-corridor-editor emits flat ThreatCorridor[] with denormalised
+    protected_point; backward-compat on read for legacy {routes, ...} shape
+  - kill-chain-analyser handles the flat array directly with a defensive
+    fallback for the legacy object shape
+  - export_viewer_data computes worst_corridor_coverage_pct from corridor
+    results so simulation-runner's results panel renders correctly
+
+  L2 review remediation (D-413..D-428):
+  - 16 follow-up defects logged from silent_failure_hunter and
+    regression_reviewer findings
+  - All HIGH and MEDIUM findings remediated
+  - Two MEDIUM findings (D-420 corridor protectedPoint isolation, D-427 report
+    body validation depth) accepted and documented for a future ticket
+  - 3 LOW findings from module-architecture-reviewer deferred (contract-drift
+    annotations only — not user-visible)
+
+  Test additions:
+  - test_simulate_rejects_path_outside_allowlist
+  - test_terrain_concurrent_loads_keep_disjoint_tile_paths
+  - test_report_accepts_ui_report_config_without_dem_path (replaces
+    test_report_invalid_scenario_returns_422)
+  - Updated zone-editor, threat-corridor-editor, kill-chain-analyser, and
+    optimiser JS test fixtures to canonical state shapes
+  - conftest._allow_tmp_dem_dirs now snapshots+restores the allowlist

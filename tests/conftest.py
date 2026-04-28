@@ -1,5 +1,6 @@
 """Shared test fixtures for Salus."""
 
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -9,6 +10,37 @@ from rasterio.crs import CRS
 from rasterio.transform import from_bounds
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+
+@pytest.fixture(autouse=True)
+def _allow_tmp_dem_dirs():
+    """Register the pytest tmp root and fixtures directory with the interface
+    API path-traversal allowlist (D-407) so DEMs created under ``tmp_path``
+    pass the security guard, then restore the original allowlist on teardown
+    so cross-test mutation cannot widen the allowlist beyond what each test
+    expects (D-425).
+
+    Any future negative-allowlist test must use a path outside ``/tmp`` —
+    ``tempfile.gettempdir()`` is registered here, so a future test that posts
+    a ``/tmp/...`` path expecting a 403 would silently start passing.
+
+    Imports the interface API lazily — tests that never touch the API should
+    not be forced to import FastAPI.  We narrow the import-failure handler to
+    ``ImportError`` so a typo or partial install in the API surfaces rather
+    than being silently swallowed (silent_failure_hunter D-415 sibling).
+    """
+    try:
+        from salus.interface_api import app as _app
+    except ImportError:
+        yield
+        return
+    snapshot = list(_app._ALLOWED_DEM_DIRS)
+    _app._register_allowed_dem_dir(Path(tempfile.gettempdir()))
+    _app._register_allowed_dem_dir(FIXTURES_DIR)
+    try:
+        yield
+    finally:
+        _app._ALLOWED_DEM_DIRS[:] = snapshot
 
 
 @pytest.fixture

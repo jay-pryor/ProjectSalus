@@ -916,6 +916,28 @@ _Exploration scenarios are stored in `demo/explore/` with the naming convention 
   14. All existing scenario sensor markers, coverage layers, terrain, layer controls, click popups, and bearing wedges are unaffected.
   15. All existing tests pass; new tests cover: library serialisation in `viewer-export`, `getUserPlacementsAsGeoJSON()` output shape.
 
+**I-6: Resolve Opus-tier triage bugs (#1, #2, #5, #7, #8, #9, #12)**
+- _Source:_ Triage sweep `docs/BugTriage.md` (2026-04-17). Seven bugs flagged as architectural/critical and routed to Opus. Defects logged as D-406 through D-412 in `.forge/defect-register.yaml`.
+- _Goal:_ Make the broken interface↔backend contract paths work end-to-end so the live shell renders correct results panels, the report generator stops returning 422, the libraries populate, the path-traversal vulnerability is closed, and concurrent terrain loads stop clobbering each other.
+- _Architecture notes:_
+  - **Canonical state shapes are the contract.** `docs/Technical/InterfaceArchitecture.md` §3 defines `zones: {priority, exclusion}` with inner fields `{label, geometry, min_coverage_pct | reason}`, and `threat_corridors: ThreatCorridor[]` with `protected_point` denormalised. Editors that wrote non-canonical shapes broke every consumer; the fix is to make the editors emit canonical and accept legacy on read for backward compatibility with saved scenarios.
+  - **Permissive backend bodies for UI-shaped POSTs.** `/api/report` is called by report-configurator with the UI report_config (no DEM path). The backend reconstructs the minimum ScenarioConfig server-side from `placements` rather than rejecting the body.
+  - **Per-session terrain state.** `_terrain_session` (single global) replaced with `_terrain_sessions` keyed by per-load `session_id`; tile URL templates are session-qualified so two concurrent loads serve disjoint tiles.
+  - **DEM allowlist.** `_validate_dem_path` enforces an allowlist (default: `_TERRAIN_DATA_DIR`; extensible via `SALUS_ALLOWED_DEM_DIRS`). Pytest fixtures register `tmp_path` automatically.
+  - **Library bootstrap from shell.** No module owns `sensor_library` / `effector_library` writes — the shell fetches `/api/sensors` and `/api/effectors` once at startup and seeds state.
+  - **Stats alias surface.** `worst_corridor_coverage_pct` added to `export_viewer_data`'s stats dict (the `coverage_pct` and `largest_gap_area_m2` aliases were already added in D-405).
+- _Acceptance criteria:_
+  1. `pytest tests/` passes (the bundled regression tests now include `test_simulate_rejects_path_outside_allowlist`, `test_terrain_concurrent_loads_keep_disjoint_tile_paths`, and the rewritten `test_report_accepts_ui_report_config_without_dem_path`).
+  2. `node --test src/salus/viewer/interface/tests/*.js` passes (zone-editor, threat-corridor-editor, kill-chain-analyser tests updated to canonical shapes).
+  3. `/api/simulate` returns HTTP 403 when `site_dem_path` resolves outside `_ALLOWED_DEM_DIRS`.
+  4. Two concurrent `POST /api/terrain/load` calls receive distinct `session_id` values and disjoint `tile_url_template` URLs.
+  5. `POST /api/report` with the UI report_config (no `site_dem_path`) returns a PDF (`application/pdf`).
+  6. Shell bootstraps `sensor_library` and `effector_library` from `/api/sensors` and `/api/effectors`.
+  7. `zone-editor` writes `{priority: PriorityZone[], exclusion: ExclusionZone[]}` with canonical inner fields (`label`, `geometry`, `min_coverage_pct` | `reason`).
+  8. `threat-corridor-editor` writes a flat `ThreatCorridor[]` with `protected_point` on each entry.
+  9. `export_viewer_data` includes `stats.worst_corridor_coverage_pct` whenever any corridor result has a `coverage_pct`.
+  10. `docs/BugTriage.md` Opus section is annotated with the resolution and defect IDs.
+
 ---
 
 ### Slice 15 — Populate Full Sensor/Effector/Threat Database

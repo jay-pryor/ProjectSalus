@@ -234,6 +234,19 @@ def export_viewer_data(
         "largest_contiguous_gap_m2": round(sim_results.stats.largest_contiguous_gap_m2, 1),
     }
 
+    # Worst corridor coverage — min coverage_pct across all corridor results.
+    # The interface simulation-runner and scenario-comparison modules both
+    # surface this as a single summary number; computing it here keeps those
+    # modules from having to re-traverse corridor_results each render.
+    if sim_results.corridor_results:
+        corridor_cov_values = [
+            float(r.coverage_pct)
+            for r in sim_results.corridor_results
+            if getattr(r, "coverage_pct", None) is not None
+        ]
+        if corridor_cov_values:
+            stats_dict["worst_corridor_coverage_pct"] = round(min(corridor_cov_values), 2)
+
     # Threat corridors — compute WGS84 paths from corridor geometry
     import pyproj
 

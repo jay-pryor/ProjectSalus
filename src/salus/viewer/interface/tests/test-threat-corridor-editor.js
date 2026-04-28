@@ -363,11 +363,11 @@ test('confirming a route writes to threat_corridors state', () => {
   panel.querySelector('#tce-confirm-btn')._fire('click');
 
   const state = api._stateData.threat_corridors;
-  assert.ok(state, 'threat_corridors state must be set');
-  assert.equal(state.routes.length, 1, 'must have exactly 1 route');
-  assert.equal(state.routes[0].name, 'Alpha Route');
-  assert.equal(state.routes[0].threat_profile, 'High');
-  assert.equal(state.routes[0].waypoints.length, 2, 'must have 2 waypoints');
+  assert.ok(Array.isArray(state), 'threat_corridors state must be a flat array');
+  assert.equal(state.length, 1, 'must have exactly 1 route');
+  assert.equal(state[0].name, 'Alpha Route');
+  assert.equal(state[0].threat_profile, 'High');
+  assert.equal(state[0].waypoints.length, 2, 'must have 2 waypoints');
 });
 
 test('confirming a route emits corridor:added', () => {
@@ -491,8 +491,8 @@ test('removing a route removes it from state', () => {
   trashBtn._fire('click');
 
   const state = api._stateData.threat_corridors;
-  assert.ok(state, 'state must exist');
-  assert.equal(state.routes.length, 0, 'routes must be empty after removal');
+  assert.ok(Array.isArray(state), 'state must be an array');
+  assert.equal(state.length, 0, 'routes must be empty after removal');
 });
 
 // ---------------------------------------------------------------------------
@@ -536,18 +536,18 @@ test('watch on threat_corridors is registered', () => {
     true, // watch callbacks are stored in closures; verify via state set
     'watch must be registered'
   );
-  // Verify watch fires by setting state externally and checking sources update
-  api.state.set('threat_corridors', {
-    routes: [{
-      id: 'ext-1',
-      name: 'External',
-      threat_profile: 'Low',
-      altitude_m: null,
-      speed_ms: null,
-      waypoints: [[10, 20], [30, 40]],
-    }],
+  // Verify watch fires by setting state externally and checking sources update.
+  // State is the canonical flat ThreatCorridor[] shape with protected_point
+  // denormalised onto each corridor.
+  api.state.set('threat_corridors', [{
+    id: 'ext-1',
+    name: 'External',
+    threat_profile: 'Low',
+    altitude_m: null,
+    speed_ms: null,
+    waypoints: [[10, 20], [30, 40]],
     protected_point: null,
-  });
+  }]);
   const src = api._sources['threat-corridor-editor:routes-source'];
   assert.ok(src._data.features.length > 0, 'routes-source must update when state changes');
 });
@@ -642,8 +642,8 @@ test('(S14.7-2) clicking a route line in idle mode enters edit mode', () => {
   panel.querySelector('#tce-confirm-btn')._fire('click');
 
   const state = api._stateData.threat_corridors;
-  assert.ok(state, 'threat_corridors state must be set before route-line click test');
-  const routeId = state.routes[0].id;
+  assert.ok(Array.isArray(state), 'threat_corridors state must be an array before route-line click test');
+  const routeId = state[0].id;
 
   // Simulate clicking the routes-line layer in idle mode
   api._mockFeatures = [{ properties: { id: routeId } }];

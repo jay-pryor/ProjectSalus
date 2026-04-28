@@ -345,14 +345,59 @@ export function init(api) {
   }
 
   // -------------------------------------------------------------------------
-  // State write
+  // State write — canonical flat array shape ThreatCorridor[]
+  // (docs/Technical/InterfaceArchitecture.md §3).  The scenario-wide
+  // protected_point is denormalised onto each corridor so the canonical
+  // schema can remain a flat array while still carrying the asset location.
   // -------------------------------------------------------------------------
 
+  /** Defensive deep-clone of a waypoints list — drops non-array entries. */
+  function _cloneWaypoints(raw) {
+    if (!Array.isArray(raw)) return [];
+    const out = [];
+    for (const wp of raw) {
+      if (Array.isArray(wp)) out.push([...wp]);
+      // Non-array entries (e.g. null from a half-saved scenario) are skipped
+      // rather than crashing the watch callback (D-421).
+    }
+    return out;
+  }
+
   function _writeState() {
-    api.state.set('threat_corridors', {
-      routes: corridors.map(r => ({ ...r, waypoints: r.waypoints.map(wp => [...wp]) })),
+    const payload = corridors.map(r => ({
+      id: r.id,
+      name: r.name,
+      threat_profile: r.threat_profile,
+      altitude_m: r.altitude_m,
+      speed_ms: r.speed_ms,
+      waypoints: _cloneWaypoints(r.waypoints),
       protected_point: protectedPoint,
-    });
+    }));
+    api.state.set('threat_corridors', payload);
+  }
+
+  // Rebuild the in-memory corridors/protectedPoint from the canonical shape.
+  // Defensively accepts either the flat array or the legacy {routes, protected_point}
+  // object form — the latter only appears from callers that predate this change.
+  // Empty array deliberately preserves the in-memory protectedPoint (the canonical
+  // schema has no place to store it without a corridor) — see D-420 follow-up.
+  function _readCanonical(val) {
+    if (Array.isArray(val)) {
+      const list = val.map(r => ({
+        ...r,
+        waypoints: _cloneWaypoints(r?.waypoints),
+      }));
+      const derivedPoint = list.length > 0 ? (list[0].protected_point ?? null) : protectedPoint;
+      return { list, protectedPoint: derivedPoint };
+    }
+    if (val && typeof val === 'object') {
+      const list = (Array.isArray(val.routes) ? val.routes : []).map(r => ({
+        ...r,
+        waypoints: _cloneWaypoints(r?.waypoints),
+      }));
+      return { list, protectedPoint: val.protected_point ?? null };
+    }
+    return { list: [], protectedPoint };
   }
 
   // -------------------------------------------------------------------------
@@ -770,12 +815,10 @@ export function init(api) {
   // -------------------------------------------------------------------------
 
   unsubs.push(api.state.watch('threat_corridors', (val) => {
-    if (!val) return;
-    corridors = (val.routes ?? []).map(r => ({
-      ...r,
-      waypoints: (r.waypoints ?? []).map(wp => [...wp]),
-    }));
-    protectedPoint = val.protected_point ?? null;
+    if (val == null) return;
+    const parsed = _readCanonical(val);
+    corridors = parsed.list;
+    protectedPoint = parsed.protectedPoint;
     _updateRoutesSources();
     _updateProtectedPointSource();
     _updateProtectedInfoPanel();
@@ -788,11 +831,9 @@ export function init(api) {
 
   const initState = api.state.get('threat_corridors');
   if (initState) {
-    corridors = (initState.routes ?? []).map(r => ({
-      ...r,
-      waypoints: (r.waypoints ?? []).map(wp => [...wp]),
-    }));
-    protectedPoint = initState.protected_point ?? null;
+    const parsed = _readCanonical(initState);
+    corridors = parsed.list;
+    protectedPoint = parsed.protectedPoint;
     _updateRoutesSources();
     _updateProtectedPointSource();
     _updateProtectedInfoPanel();

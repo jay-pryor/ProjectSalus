@@ -220,7 +220,11 @@ export function init(api) {
 
   function _updateMapLayers(idx) {
     const kcResults  = latestSimResults?.kill_chain_results ?? [];
-    const routes     = latestThreatCorridors?.routes ?? [];
+    // threat_corridors is the canonical flat ThreatCorridor[] shape
+    // (docs/Technical/InterfaceArchitecture.md §3).
+    const routes     = Array.isArray(latestThreatCorridors)
+      ? latestThreatCorridors
+      : (latestThreatCorridors?.routes ?? []);
     const kc         = kcResults[idx];
     const route      = routes[idx];
 
@@ -400,6 +404,8 @@ export function init(api) {
   }
 
   function _getRoutes() {
+    // threat_corridors is the canonical flat ThreatCorridor[] shape.
+    if (Array.isArray(latestThreatCorridors)) return latestThreatCorridors;
     return latestThreatCorridors?.routes ?? [];
   }
 
