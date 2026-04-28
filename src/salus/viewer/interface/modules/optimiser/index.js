@@ -401,7 +401,7 @@ export function init(api) {
         constraints: latestConstraints,
         sensor_library_filter: latestConstraints?.allowed_sensor_ids ?? null,
         effector_library_filter: latestConstraints?.allowed_effector_ids ?? null,
-        terrain: latestTerrain,
+        terrain: latestTerrain?.dem_path ?? null,
         objective: currentObjective,
       });
     } catch (e) {

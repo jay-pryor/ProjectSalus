@@ -2,7 +2,7 @@
   "id": "optimiser",
   "label": "Optimiser",
   "reads": ["terrain", "zones", "constraints", "sensor_library", "effector_library", "threat_corridors", "placements", "optimiser_results"],
-  "writes": ["optimiser_results"],
+  "writes": ["optimiser_results", "placements"],
   "prerequisites": ["terrain", "zones"],
   "emits": ["optimiser:started", "optimiser:complete", "optimiser:failed", "placement:added"],
   "subscribes": ["zone:added", "zone:removed", "constraint:updated"],

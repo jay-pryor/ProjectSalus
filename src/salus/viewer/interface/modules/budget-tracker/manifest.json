@@ -5,7 +5,7 @@
   "writes": ["constraints"],
   "prerequisites": [],
   "emits": ["constraint:updated"],
-  "subscribes": ["placement:added", "placement:removed"],
+  "subscribes": [],
   "layer_id_prefix": "budget-tracker",
   "description": "Track procurement cost against a budget and set constraints for the Optimiser."
 }

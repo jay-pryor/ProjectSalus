@@ -276,14 +276,14 @@ test('manifest writes is ["constraints"]', async () => {
   assert.deepEqual(m.writes, ['constraints']);
 });
 
-test('manifest subscribes to placement:added and placement:removed', async () => {
+test('manifest does not subscribe to placement bus events (uses watch instead)', async () => {
   const raw = await readFile(
     path.resolve(__dirname, '../modules/budget-tracker/manifest.json'),
     'utf8'
   );
   const m = JSON.parse(raw);
-  assert.ok(m.subscribes.includes('placement:added'), 'subscribes must include placement:added');
-  assert.ok(m.subscribes.includes('placement:removed'), 'subscribes must include placement:removed');
+  assert.ok(!m.subscribes.includes('placement:added'), 'subscribes must not include placement:added — use watch');
+  assert.ok(!m.subscribes.includes('placement:removed'), 'subscribes must not include placement:removed — use watch');
 });
 
 test('manifest emits constraint:updated', async () => {
@@ -349,21 +349,23 @@ test('init registers watch on effector_library', () => {
   );
 });
 
-test('init subscribes to placement:added bus event', () => {
+test('init does not subscribe to placement:added bus event (uses watch instead)', () => {
   const api = makeApi();
   init(api);
-  assert.ok(
-    (api._busListeners['placement:added'] ?? []).length > 0,
-    'must subscribe to placement:added'
+  assert.equal(
+    (api._busListeners['placement:added'] ?? []).length,
+    0,
+    'must not subscribe to placement:added — placements state watch handles re-render'
   );
 });
 
-test('init subscribes to placement:removed bus event', () => {
+test('init does not subscribe to placement:removed bus event (uses watch instead)', () => {
   const api = makeApi();
   init(api);
-  assert.ok(
-    (api._busListeners['placement:removed'] ?? []).length > 0,
-    'must subscribe to placement:removed'
+  assert.equal(
+    (api._busListeners['placement:removed'] ?? []).length,
+    0,
+    'must not subscribe to placement:removed — placements state watch handles re-render'
   );
 });
 
@@ -732,14 +734,14 @@ test('onUnmount unsubscribes all state watchers', () => {
   assert.equal((api._stateWatchers['effector_library'] ?? []).length, 0, 'effector_library watcher must be removed');
 });
 
-test('onUnmount unsubscribes all bus listeners', () => {
+test('onUnmount registers no bus listeners (placement changes handled via watch)', () => {
   const api = makeApi();
   init(api);
-  assert.ok((api._busListeners['placement:added'] ?? []).length > 0, 'must have placement:added listener');
-  assert.ok((api._busListeners['placement:removed'] ?? []).length > 0, 'must have placement:removed listener');
+  assert.equal((api._busListeners['placement:added'] ?? []).length, 0, 'must have no placement:added bus listener');
+  assert.equal((api._busListeners['placement:removed'] ?? []).length, 0, 'must have no placement:removed bus listener');
   api._runUnmount();
-  assert.equal((api._busListeners['placement:added'] ?? []).length, 0, 'placement:added listener must be removed');
-  assert.equal((api._busListeners['placement:removed'] ?? []).length, 0, 'placement:removed listener must be removed');
+  assert.equal((api._busListeners['placement:added'] ?? []).length, 0, 'still no placement:added listener after unmount');
+  assert.equal((api._busListeners['placement:removed'] ?? []).length, 0, 'still no placement:removed listener after unmount');
 });
 
 test('placement:added no longer fires after unmount', () => {

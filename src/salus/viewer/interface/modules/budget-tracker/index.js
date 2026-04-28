@@ -6,7 +6,7 @@
  * Reads:       placements, sensor_library, effector_library
  * Writes:      constraints
  * Emits:       constraint:updated
- * Subscribes:  placement:added, placement:removed
+ * Subscribes:  (none)
  *
  * This is a pure panel module — no map sources or layers are added.
  *
@@ -442,18 +442,6 @@ export function init(api) {
 
   unsubs.push(api.state.watch('effector_library', (effectors) => {
     latestEffectors = effectors;
-    _render();
-  }));
-
-  // -------------------------------------------------------------------------
-  // Bus subscriptions — idempotent recalculation, fires before state write
-  // propagates for immediate UI responsiveness.
-  // -------------------------------------------------------------------------
-  unsubs.push(api.bus.on('placement:added', () => {
-    _render();
-  }));
-
-  unsubs.push(api.bus.on('placement:removed', () => {
     _render();
   }));
 

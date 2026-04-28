@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -159,6 +160,11 @@ class ScenarioConfig(BaseModel):
     sweep_segment_length_m: float = 5.0
     """Sampling interval for the trajectory sweep (metres, > 0).  Smaller values
     increase fidelity and computation time.  Default 5.0 for planning fidelity."""
+
+    zones: dict[str, Any] | list[dict[str, Any]] = Field(default_factory=dict)
+    """UI zone definitions.  Accepts the canonical ``{priority: [...], exclusion: [...]}``
+    shape from the zone-editor.  Not used by the core simulation engine; consumed by the
+    interface API to compute per-zone coverage stats."""
 
     saturation_scenarios: list[SaturationScenario] = Field(default_factory=list)
     """Multi-target saturation scenarios to analyse.  Empty = no saturation analysis."""

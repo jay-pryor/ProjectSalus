@@ -13,7 +13,7 @@
  *   - a rolling "A: X% | B: Y% | Delta: Z" summary that updates with the
  *     divider position.
  *
- * Reads:       terrain, sim_results
+ * Reads:       sim_results, scenario_b_sim_results
  * Writes:      scenario_b_sim_results
  * Emits:       comparison:loaded
  * Subscribes:  (none)
@@ -163,7 +163,6 @@ export function _featureCentroidLng(feature) {
 
 export function init(api) {
   const unsubs = [];
-  const docListeners = [];
 
   // Local mirrors — avoid cross-key get() inside watch() callbacks
   let latestSimResults = null;
@@ -455,6 +454,10 @@ export function init(api) {
   function _onDividerMouseDown(evt) {
     dividerDragging = true;
     if (evt && typeof evt.preventDefault === 'function') evt.preventDefault();
+    if (globalThis.document && typeof globalThis.document.addEventListener === 'function') {
+      globalThis.document.addEventListener('mousemove', _onDocumentMouseMove);
+      globalThis.document.addEventListener('mouseup',   _onDocumentMouseUp);
+    }
   }
 
   function _onDocumentMouseMove(evt) {
@@ -471,6 +474,10 @@ export function init(api) {
 
   function _onDocumentMouseUp() {
     dividerDragging = false;
+    if (globalThis.document && typeof globalThis.document.removeEventListener === 'function') {
+      globalThis.document.removeEventListener('mousemove', _onDocumentMouseMove);
+      globalThis.document.removeEventListener('mouseup',   _onDocumentMouseUp);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -971,16 +978,6 @@ export function init(api) {
   }));
 
   // -------------------------------------------------------------------------
-  // Document-level divider drag listeners
-  // -------------------------------------------------------------------------
-  if (globalThis.document && typeof globalThis.document.addEventListener === 'function') {
-    globalThis.document.addEventListener('mousemove', _onDocumentMouseMove);
-    globalThis.document.addEventListener('mouseup',   _onDocumentMouseUp);
-    docListeners.push(['mousemove', _onDocumentMouseMove]);
-    docListeners.push(['mouseup',   _onDocumentMouseUp]);
-  }
-
-  // -------------------------------------------------------------------------
   // Cleanup
   // -------------------------------------------------------------------------
   api.panel.onUnmount(() => {
@@ -995,15 +992,6 @@ export function init(api) {
     }
     for (const u of unsubs) { if (typeof u === 'function') u(); }
     unsubs.length = 0;
-
-    for (const [event, handler] of docListeners) {
-      try {
-        globalThis.document?.removeEventListener(event, handler);
-      } catch (e) {
-        console.warn(`[scenario-comparison] removeEventListener(${event}) failed:`, e);
-      }
-    }
-    docListeners.length = 0;
 
     _removeDivider();
 

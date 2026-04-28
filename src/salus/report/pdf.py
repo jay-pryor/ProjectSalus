@@ -169,6 +169,9 @@ class ReportData:
     kill_chain_config: KillChainConfig | None
     """Kill-chain configuration used during analysis (None if not run)."""
 
+    map_screenshot: str | None = None
+    """Optional base64-encoded PNG map capture from the interface."""
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -677,6 +680,17 @@ def _render_kill_chain_chart_to_b64(sim_results: SimulationResults) -> str | Non
     ):
         return None
 
+    # Select the most capable effector for the kill chain chart
+    effector_for_chart = max(sim_results.effector_defs, key=lambda e: e.defeat_probability)
+    if len(sim_results.effector_defs) > 1:
+        _log.warning(
+            "Kill-chain chart: %d effectors available; selecting %r "
+            "(highest defeat_probability=%.2f).",
+            len(sim_results.effector_defs),
+            effector_for_chart.name,
+            effector_for_chart.defeat_probability,
+        )
+
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
         tmp_path = Path(f.name)
     try:
@@ -684,7 +698,7 @@ def _render_kill_chain_chart_to_b64(sim_results: SimulationResults) -> str | Non
             sim_results.corridor_results,
             sim_results.kill_chain_results,
             sim_results.kill_chain_config,
-            sim_results.effector_defs[0],
+            effector_for_chart,
             tmp_path,
         )
         data = tmp_path.read_bytes()

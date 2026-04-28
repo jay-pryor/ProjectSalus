@@ -260,15 +260,16 @@ def find_saturation_threshold(
     protected_point: tuple[float, float],
     threat_profile: ThreatProfile,
     max_targets: int = 20,
+    priority_rule: PriorityRule = PriorityRule.CLOSEST_TO_ASSET,
 ) -> SaturationResult:
     """Sweep over simultaneous target counts to find the saturation threshold.
 
     Distributes N targets evenly around the compass (bearings 0°, 360°/N,
     720°/N, …) at a fixed approach distance equal to
     ``_SWEEP_RANGE_FRACTION × max(effector.max_range_m)``.  For each N from
-    1 to ``max_targets``, runs ``allocate_effectors`` with the
-    ``CLOSEST_TO_ASSET`` priority rule.  The saturation threshold is the first
-    N at which at least one target is unengaged.
+    1 to ``max_targets``, runs ``allocate_effectors`` with the specified
+    ``priority_rule``.  The saturation threshold is the first N at which at
+    least one target is unengaged.
 
     Args:
         effectors: Available effector definitions.  At least one required.
@@ -279,6 +280,8 @@ def find_saturation_threshold(
             used when constructing sweep targets.
         max_targets: Maximum number of simultaneous targets to test.
             Must be >= 1.
+        priority_rule: Engagement priority rule passed to ``allocate_effectors``
+            for each sweep step.  Defaults to ``CLOSEST_TO_ASSET``.
 
     Returns:
         ``SaturationResult`` with threshold, capacity, and per-effector
@@ -334,7 +337,7 @@ def find_saturation_threshold(
             targets,
             effectors,
             placements,
-            PriorityRule.CLOSEST_TO_ASSET,
+            priority_rule,
             site,
             protected_point,
         )

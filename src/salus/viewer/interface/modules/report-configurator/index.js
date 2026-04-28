@@ -286,15 +286,15 @@ export function init(api) {
   // -------------------------------------------------------------------------
 
   function _currentConfig() {
-    const sections = {};
+    const include_modules = {};
     for (const [name, cb] of Object.entries(sectionCheckboxes)) {
-      sections[name] = cb.checked;
+      include_modules[name] = cb.checked;
     }
     return {
-      client_name:        nameInput.value,
-      logo:               capturedLogoDataUrl,   // D-376: data URL or null
-      sanitisation_level: sanitSelect.value,
-      sections,
+      client_name:    nameInput.value,
+      logo_path:      capturedLogoDataUrl,   // D-376: data URL or null
+      sanitise_level: sanitSelect.value,
+      include_modules,
     };
   }
 
@@ -341,16 +341,19 @@ export function init(api) {
     _suppressWrite = true;
     try {
       if (typeof config.client_name === 'string') nameInput.value = config.client_name;
-      if (typeof config.logo === 'string') capturedLogoDataUrl = config.logo;
-      else if (config.logo === null) capturedLogoDataUrl = null;
-      if (typeof config.sanitisation_level === 'string') {
-        sanitSelect.value = config.sanitisation_level;
-        _updateSanitDescription(config.sanitisation_level);
-        _updatePreview(config.sanitisation_level);
+      const logoVal = config.logo_path ?? config.logo;
+      if (typeof logoVal === 'string') capturedLogoDataUrl = logoVal;
+      else if (logoVal === null) capturedLogoDataUrl = null;
+      const sanitLevel = config.sanitise_level ?? config.sanitisation_level;
+      if (typeof sanitLevel === 'string') {
+        sanitSelect.value = sanitLevel;
+        _updateSanitDescription(sanitLevel);
+        _updatePreview(sanitLevel);
       }
-      if (config.sections && typeof config.sections === 'object') {
+      const modulesObj = config.include_modules ?? config.sections;
+      if (modulesObj && typeof modulesObj === 'object') {
         for (const [name, cb] of Object.entries(sectionCheckboxes)) {
-          if (typeof config.sections[name] === 'boolean') cb.checked = config.sections[name];
+          if (typeof modulesObj[name] === 'boolean') cb.checked = modulesObj[name];
         }
       }
     } finally {
@@ -464,7 +467,9 @@ export function init(api) {
       const a = document.createElement('a');
       a.href = objectUrl;
       a.download = filename;
+      panel.appendChild(a);
       a.click();
+      panel.removeChild(a);
       // Defer revoke one tick so the browser download manager can begin reading the URL
       setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
 

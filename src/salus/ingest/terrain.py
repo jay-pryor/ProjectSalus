@@ -105,7 +105,8 @@ def load_dem(
             # fall back to rasterio WKT comparison when either code is unavailable.
             try:
                 dsm_epsg = src.crs.to_epsg()
-            except Exception:
+            except Exception as _exc:
+                _log.debug("DSM CRS EPSG lookup failed, falling back to WKT comparison: %s", _exc)
                 dsm_epsg = None
 
             if dsm_epsg is not None and crs_epsg is not None:
@@ -160,7 +161,8 @@ def load_dem(
             # D-244: validate CHM CRS matches DEM CRS to prevent silent grid misalignment.
             try:
                 chm_epsg = src.crs.to_epsg()
-            except Exception:
+            except Exception as _exc:
+                _log.debug("CHM CRS EPSG lookup failed, falling back to WKT comparison: %s", _exc)
                 chm_epsg = None
 
             if chm_epsg is not None and crs_epsg is not None:
@@ -171,15 +173,35 @@ def load_dem(
             if chm_crs_mismatch:
                 warnings.warn(
                     f"CHM CRS ({src.crs.to_string()}) does not match DEM CRS "
-                    f"({dem_crs.to_string()}); CHM cells may not align with DEM grid — "
+                    f"({dem_crs.to_string()}); reprojecting CHM to match DEM — "
                     "verify the CHM was derived from the same source as the DEM.",
                     UserWarning,
                     stacklevel=2,
                 )
 
-        if canopy_raw.shape != dem.shape:
-            raise ValueError(f"CHM shape {canopy_raw.shape} does not match DEM shape {dem.shape}")
-        canopy = canopy_raw
+            chm_src_crs = src.crs
+            chm_src_transform = src.transform
+
+        if chm_crs_mismatch:
+            canopy = _reproject_array(
+                src_array=canopy_raw,
+                src_crs=chm_src_crs,
+                src_transform=chm_src_transform,
+                dst_crs=dem_crs,
+                dst_transform=dem_transform,
+                dst_shape=dem_shape,
+            )
+            if np.all(np.isnan(canopy)):
+                raise ValueError(
+                    f"CHM reprojection produced an entirely NaN result — the CHM "
+                    f"may not overlap the DEM extent: {canopy_path}"
+                )
+        else:
+            if canopy_raw.shape != dem.shape:
+                raise ValueError(
+                    f"CHM shape {canopy_raw.shape} does not match DEM shape {dem.shape}"
+                )
+            canopy = canopy_raw
 
     return SiteModel(
         dem=dem,

@@ -219,6 +219,12 @@ def find_worst_corridors(
     if num_bearings < 1:
         raise ValueError(f"num_bearings must be >= 1, got {num_bearings}")
 
+    if protected_point is None:
+        raise ValueError(
+            "protected_point must not be None — set a protected_point in the scenario "
+            "when threat_profiles is non-empty"
+        )
+
     px, py = protected_point
     if not (math.isfinite(px) and math.isfinite(py)):
         raise ValueError(f"protected_point coordinates must be finite, got ({px}, {py})")

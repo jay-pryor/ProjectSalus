@@ -375,6 +375,7 @@ def greedy_place_sensors(
     coverage_threshold_pct: float = 100.0,
     weights: PlacementWeights | None = None,
     bearing_step_deg: float = _BEARING_STEP_DEG_DEFAULT,
+    objective: str = "maximise_coverage",
 ) -> list[SensorPlacement]:
     """Greedily select sensor placements that maximise zone-weighted coverage.
 

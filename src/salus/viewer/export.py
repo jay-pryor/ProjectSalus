@@ -444,12 +444,11 @@ def _encode_terrarium(elevation: npt.NDArray[np.float32]) -> npt.NDArray[np.uint
 
     Terrarium decode formula: elevation = (R * 256 + G + B / 256) − 32768
     """
-    val = (elevation.astype(np.float64) + 32768.0).clip(0.0, 65535.999)
-    int_val = val.astype(np.int32)
-    frac_val = val - int_val.astype(np.float64)
-    r = (int_val >> 8).astype(np.uint8)
-    g = (int_val & 0xFF).astype(np.uint8)
-    b = (frac_val * 256).astype(np.uint8)
+    h = np.clip(elevation.astype(np.float64) + 32768.0, 0.0, 65535.999)
+    h_floor = np.floor(h).astype(np.int64)
+    r = (h_floor >> 8).clip(0, 255).astype(np.uint8)
+    g = (h_floor & 0xFF).astype(np.uint8)
+    b = (np.floor(h * 256.0).astype(np.int64) & 0xFF).astype(np.uint8)
     return np.stack([r, g, b], axis=-1)
 
 
@@ -493,11 +492,12 @@ def _raster_to_geojson(
         return _empty_feature_collection()
 
     merged = unary_union(polys)
-    merged = merged.simplify(_SIMPLIFY_TOLERANCE * _degrees_per_metre(src_crs))
 
     # Reproject to WGS84
     transformer = pyproj.Transformer.from_crs(src_crs, CRS.from_epsg(4326), always_xy=True)
     merged_wgs84 = shapely_transform(transformer.transform, merged)
+
+    merged_wgs84 = merged_wgs84.simplify(_SIMPLIFY_TOLERANCE)
 
     return {
         "type": "FeatureCollection",

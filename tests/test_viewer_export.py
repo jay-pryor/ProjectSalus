@@ -137,7 +137,7 @@ class TestEncodeTerrarium:
         """Elevation above 32767 clamps to max representable value."""
         arr = np.array([[32768.0]], dtype=np.float32)
         rgb = _encode_terrarium(arr)
-        # val = 65536 → clipped to 65535.999
+        # h = 65536 clamped to 65535.999; h_floor = 65535; R = 65535 >> 8 = 255, clipped to 255
         assert rgb[0, 0, 0] == 255
 
 

@@ -366,13 +366,14 @@ test('manifest has all required fields', async () => {
   }
 });
 
-test('manifest reads terrain and sim_results', async () => {
+test('manifest reads sim_results and scenario_b_sim_results', async () => {
   const raw = await readFile(
     path.resolve(__dirname, '../modules/scenario-comparison/manifest.json'), 'utf8'
   );
   const m = JSON.parse(raw);
-  assert.ok(m.reads.includes('terrain'));
+  assert.ok(!m.reads.includes('terrain'), 'terrain is not accessed by this module — only a prerequisite');
   assert.ok(m.reads.includes('sim_results'));
+  assert.ok(m.reads.includes('scenario_b_sim_results'));
 });
 
 test('manifest writes scenario_b_sim_results (sole writer)', async () => {
@@ -994,34 +995,53 @@ test('onUnmount removes swipe divider if attached', () => {
   assert.equal(findByTestId(api._canvasParent, 'swipe-divider'), null, 'divider removed on unmount');
 });
 
-test('onUnmount removes document-level event listeners added by this init', () => {
-  // Each test leaves a fresh shared globalThis.document, so compare deltas
-  // rather than absolute counts (other tests also register listeners).
+test('swipe divider drag adds document listeners on mousedown and removes on mouseup', () => {
+  // Listeners are now added only during an active drag (not at init time).
+  const api = makeApi({ simResults: SAMPLE_SIM_RESULTS_A, scenarioB: SAMPLE_SCENARIO_B });
+  init(api);
+
   const before = {
     mousemove: (globalThis.document._listeners.mousemove ?? []).length,
     mouseup:   (globalThis.document._listeners.mouseup   ?? []).length,
   };
-  const api = makeApi();
-  init(api);
+
+  // Activate swipe mode so the divider is created
+  const panel = api._mounted[0];
+  const swipeRadio = findByTestId(panel, 'mode-swipe');
+  swipeRadio.checked = true;
+  swipeRadio._fire('change');
+
+  // init must NOT add document listeners by itself
+  assert.equal(
+    (globalThis.document._listeners.mousemove ?? []).length,
+    before.mousemove,
+    'init does not add document mousemove listener',
+  );
+
+  // mousedown on divider should install the drag listeners
+  const divider = findByTestId(api._canvasParent, 'swipe-divider');
+  divider._fire('mousedown', { clientX: 500, preventDefault: () => {} });
   assert.equal(
     (globalThis.document._listeners.mousemove ?? []).length,
     before.mousemove + 1,
-    'init adds one mousemove listener',
+    'mousedown adds one document mousemove listener',
   );
   assert.equal(
     (globalThis.document._listeners.mouseup ?? []).length,
     before.mouseup + 1,
-    'init adds one mouseup listener',
+    'mousedown adds one document mouseup listener',
   );
-  api._runUnmount();
+
+  // mouseup must self-clean the drag listeners
+  globalThis.document._fire('mouseup', {});
   assert.equal(
     (globalThis.document._listeners.mousemove ?? []).length,
     before.mousemove,
-    'unmount restores mousemove listener count',
+    'mouseup removes the document mousemove listener',
   );
   assert.equal(
     (globalThis.document._listeners.mouseup ?? []).length,
     before.mouseup,
-    'unmount restores mouseup listener count',
+    'mouseup removes the document mouseup listener',
   );
 });

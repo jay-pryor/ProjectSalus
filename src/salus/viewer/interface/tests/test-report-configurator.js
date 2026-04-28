@@ -517,17 +517,17 @@ test('typing client name writes report_config to state', () => {
   assert.equal(config.client_name, 'ACME Defence');
 });
 
-test('changing sanitisation level writes sanitisation_level to report_config state', () => {
+test('changing sanitisation level writes sanitise_level to report_config state', () => {
   const api = makeApi();
   init(api);
   const panel = api._mounted[0];
   const sel = findByTestId(panel, 'sanitisation-select');
   sel.value = 'redacted';
   sel._fire('change');
-  assert.equal(api._stateData.report_config.sanitisation_level, 'redacted');
+  assert.equal(api._stateData.report_config.sanitise_level, 'redacted');
 });
 
-test('toggling a section checkbox writes sections to report_config state', () => {
+test('toggling a section checkbox writes include_modules to report_config state', () => {
   const api = makeApi();
   init(api);
   const panel = api._mounted[0];
@@ -535,22 +535,22 @@ test('toggling a section checkbox writes sections to report_config state', () =>
   cb.checked = false;
   cb._fire('change');
   const config = api._stateData.report_config;
-  assert.equal(config.sections['Kill Chain'], false);
+  assert.equal(config.include_modules['Kill Chain'], false);
 });
 
-test('report_config state includes all 11 section keys', () => {
+test('report_config state includes all 11 section keys in include_modules', () => {
   const api = makeApi();
   init(api);
   const panel = api._mounted[0];
   // Trigger a config write
   findByTestId(panel, 'client-name-input')._fire('input');
-  const { sections } = api._stateData.report_config;
+  const include_modules = api._stateData.report_config.include_modules;
   for (const s of [
     'Executive Summary', 'Site Overview', 'Coverage Analysis', 'Gap Analysis',
     'Threat Analysis', 'Kill Chain', 'Saturation', 'Comparison',
     'Recommendations', 'Assumptions', 'Appendix',
   ]) {
-    assert.ok(Object.prototype.hasOwnProperty.call(sections, s), `sections must contain '${s}'`);
+    assert.ok(Object.prototype.hasOwnProperty.call(include_modules, s), `include_modules must contain '${s}'`);
   }
 });
 
@@ -884,7 +884,7 @@ test('logo file change stores data URL in report_config.logo via FileReader', ()
 
   const config = api._stateData.report_config;
   assert.ok(config, 'report_config must be written to state after FileReader.onload');
-  assert.equal(config.logo, 'data:image/png;base64,abc123', 'logo data URL must be written to state');
+  assert.equal(config.logo_path, 'data:image/png;base64,abc123', 'logo_path data URL must be written to state');
 
   delete globalThis.FileReader;
 });
@@ -902,7 +902,7 @@ test('logo file change stores null when FileReader unavailable', () => {
 
   const config = api._stateData.report_config;
   assert.ok(config, 'report_config must still be written to state');
-  assert.equal(config.logo, null, 'logo must be null when FileReader is unavailable');
+  assert.equal(config.logo_path, null, 'logo_path must be null when FileReader is unavailable');
 
   if (orig) globalThis.FileReader = orig;
 });

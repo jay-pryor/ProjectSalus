@@ -1,7 +1,7 @@
 {
   "id": "scenario-comparison",
   "label": "Scenario Comparison",
-  "reads": ["terrain", "sim_results"],
+  "reads": ["sim_results", "scenario_b_sim_results"],
   "writes": ["scenario_b_sim_results"],
   "prerequisites": ["terrain", "sim_results"],
   "emits": ["comparison:loaded"],

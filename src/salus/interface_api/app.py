@@ -144,6 +144,8 @@ _MAX_DEM_UPLOAD_BYTES: int = 500 * 1024 * 1024
 # tile endpoints — new clients pass session_id explicitly.
 # Both are protected by ``_terrain_session_lock``.
 _terrain_session_lock: threading.Lock = threading.Lock()
+_sensor_cache_lock: threading.Lock = threading.Lock()
+_effector_cache_lock: threading.Lock = threading.Lock()
 _terrain_sessions: dict[str, dict[str, Any]] = {}
 _terrain_latest_session_id: str | None = None
 
@@ -247,7 +249,7 @@ class OptimiserRequest(BaseModel):
     effector_library_filter: list[str] = Field(default_factory=list)
     """Names of effectors from the bundled library (informational; unused in placement)."""
 
-    zones: dict[str, Any] | list[dict[str, Any]] = Field(default_factory=list)
+    zones: dict[str, Any] | list[dict[str, Any]] = Field(default_factory=dict)
     """Zone definitions (used for weighted placement scoring).
 
     Accepted as either the canonical ``{priority: PriorityZone[], exclusion: ExclusionZone[]}``
@@ -257,6 +259,10 @@ class OptimiserRequest(BaseModel):
 
     constraints: OptimiserConstraints = Field(default_factory=OptimiserConstraints)
     """Placement and coverage constraints."""
+
+    objective: str = "maximise_coverage"
+    """Scoring objective. One of 'maximise_coverage', 'maximise_critical_zone_coverage',
+    'minimise_cost'."""
 
 
 class OptimiserResultsPayload(BaseModel):
@@ -354,14 +360,15 @@ def _get_sensor_defs() -> list[SensorDefinition]:
     the actual directory.
     """
     global _sensor_cache
-    if _sensor_cache is None:
-        try:
-            result = load_sensors(_DEFAULT_SENSOR_DIR)
-            _sensor_cache = result  # Only cache on success
-        except Exception as exc:
-            _log.warning("Could not load sensor library: %s", exc)
-            return []
-    return _sensor_cache
+    with _sensor_cache_lock:
+        if _sensor_cache is None:
+            try:
+                result = load_sensors(_DEFAULT_SENSOR_DIR)
+                _sensor_cache = result  # Only cache on success
+            except Exception as exc:
+                _log.warning("Could not load sensor library: %s", exc)
+                return []
+        return _sensor_cache
 
 
 def _get_effector_defs() -> list[EffectorDefinition]:
@@ -372,14 +379,15 @@ def _get_effector_defs() -> list[EffectorDefinition]:
     the actual directory.
     """
     global _effector_cache
-    if _effector_cache is None:
-        try:
-            result = load_effectors(_DEFAULT_EFFECTOR_DIR)
-            _effector_cache = result  # Only cache on success
-        except Exception as exc:
-            _log.warning("Could not load effector library: %s", exc)
-            return []
-    return _effector_cache
+    with _effector_cache_lock:
+        if _effector_cache is None:
+            try:
+                result = load_effectors(_DEFAULT_EFFECTOR_DIR)
+                _effector_cache = result  # Only cache on success
+            except Exception as exc:
+                _log.warning("Could not load effector library: %s", exc)
+                return []
+        return _effector_cache
 
 
 # ---------------------------------------------------------------------------
@@ -435,6 +443,77 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _parse_ui_zones(
+    zones_payload: dict[str, Any] | list[dict[str, Any]],
+    site_crs_epsg: int | None,
+) -> list[Any]:
+    """Parse the UI canonical zones payload into Zone objects for coverage analysis.
+
+    Accepts the canonical {priority: [...], exclusion: [...]} dict shape from the
+    zone-editor, or an empty/legacy value. Returns [] if the payload cannot be parsed.
+    """
+    from salus.models.zone import Zone, ZoneType
+
+    if not isinstance(zones_payload, dict):
+        return []
+
+    zones: list[Zone] = []
+    transformer = None
+
+    try:
+        import pyproj
+        from shapely.geometry import shape as shapely_shape
+        from shapely.ops import transform as shapely_transform
+
+        if site_crs_epsg is not None and site_crs_epsg != 4326:
+            transformer = pyproj.Transformer.from_crs(4326, site_crs_epsg, always_xy=True)
+    except ImportError:
+        _log.warning("pyproj/shapely not available — zone coverage stats will be skipped.")
+        return []
+
+    used_names: set[str] = set()
+
+    def _make_unique_name(base: str) -> str:
+        name = base
+        counter = 1
+        while name in used_names:
+            name = f"{base}_{counter}"
+            counter += 1
+        used_names.add(name)
+        return name
+
+    def _parse_entry(entry: dict[str, Any], zone_type: Any) -> "Zone | None":
+        if not isinstance(entry, dict):
+            return None
+        geom_dict = entry.get("geometry")
+        if not geom_dict or not isinstance(geom_dict, dict):
+            return None
+        try:
+            geom = shapely_shape(geom_dict)
+            if transformer is not None:
+                geom = shapely_transform(transformer.transform, geom)
+            raw_name = entry.get("label") or entry.get("name") or zone_type.value
+            name = _make_unique_name(str(raw_name))
+            return Zone(name=name, zone_type=zone_type, geometry=geom)
+        except Exception as exc:
+            _log.warning("Skipping unparseable zone entry: %s", exc)
+            return None
+
+    for entry in zones_payload.get("priority") or []:
+        z = _parse_entry(entry, ZoneType.critical_asset)
+        if z is not None:
+            zones.append(z)
+
+    for entry in zones_payload.get("exclusion") or []:
+        z = _parse_entry(entry, ZoneType.exclusion)
+        if z is not None:
+            zones.append(z)
+
+    if zones:
+        _log.info("Parsed %d zone(s) from UI payload for coverage analysis.", len(zones))
+    return zones
+
+
 def _run_simulate_pipeline(
     config: ScenarioConfig,
     q: _queue.Queue[dict[str, Any]],
@@ -465,6 +544,7 @@ def _run_simulate_pipeline(
 
         q.put({"type": "progress", "message": "Loading terrain model…", "pct": 15})
         site = load_dem(config.site_dem_path, dsm_path=config.site_dsm_path)
+        ui_zones = _parse_ui_zones(config.zones, site.crs_epsg)
 
         q.put({"type": "progress", "message": "Loading site boundary…", "pct": 20})
         if config.boundary_path is not None:
@@ -483,6 +563,24 @@ def _run_simulate_pipeline(
                 )
                 continue
             placements_by_type.setdefault(sensor.type, []).append((sensor, placement))
+
+        # After the placements_by_type loop
+        skipped_sensor_names = [
+            p.sensor_name for p in config.sensor_placements if sensor_map.get(p.sensor_name) is None
+        ]
+        if skipped_sensor_names:
+            q.put(
+                {
+                    "type": "progress",
+                    "message": (
+                        f"Warning: {len(skipped_sensor_names)} sensor(s) not found in "
+                        f"library and skipped: {', '.join(skipped_sensor_names)}"
+                    ),
+                    "pct": 30,
+                    "sensor_skip_count": len(skipped_sensor_names),
+                    "skipped_sensor_names": skipped_sensor_names,
+                }
+            )
 
         n_placements = sum(len(v) for v in placements_by_type.values())
         q.put(
@@ -508,7 +606,7 @@ def _run_simulate_pipeline(
         gaps = compute_gaps(composite, bitmask)
 
         q.put({"type": "progress", "message": "Computing coverage statistics…", "pct": 70})
-        stats = compute_coverage_stats(site, layer_coverages, composite, gaps, site.zones)
+        stats = compute_coverage_stats(site, layer_coverages, composite, gaps, ui_zones)
 
         # Build the full SimulationResults so the viewer-export path can
         # vectorise coverage layers and build the sensor_placements
@@ -557,6 +655,7 @@ def _run_simulate_pipeline(
             "kill_chain_results": viewer_data.kill_chain_results,
             "saturation_result": viewer_data.saturation_result,
             "sanitised": viewer_data.sanitised,
+            "sensor_skip_count": len(skipped_sensor_names),
         }
         q.put({"type": "complete", "result": result})
 
@@ -577,8 +676,11 @@ def _run_optimise_pipeline(
             greedy_place_sensors,
         )
 
+        _log.info("Optimiser objective: %s", request.objective)
+
         q.put({"type": "progress", "message": "Loading terrain model…", "pct": 10})
         site = load_dem(Path(request.terrain))
+        ui_zones = _parse_ui_zones(getattr(request, "zones", {}), site.crs_epsg)
 
         q.put({"type": "progress", "message": "Loading sensor library…", "pct": 20})
         sensor_defs = _get_sensor_defs()
@@ -623,6 +725,7 @@ def _run_optimise_pipeline(
             candidates=candidates,
             coverage_threshold_pct=request.constraints.coverage_threshold_pct,
             weights=placement_weights,
+            objective=request.objective,
         )
 
         q.put({"type": "progress", "message": "Computing final coverage…", "pct": 80})
@@ -645,7 +748,7 @@ def _run_optimise_pipeline(
             composite = compute_composite_coverage(layer_coverages)
             bitmask = np.ones((site.rows, site.cols), dtype=bool)
             gaps = compute_gaps(composite, bitmask)
-            stats = compute_coverage_stats(site, layer_coverages, composite, gaps, site.zones)
+            stats = compute_coverage_stats(site, layer_coverages, composite, gaps, ui_zones)
             coverage_pct = stats.total_coverage_pct
 
         q.put({"type": "progress", "message": "Optimisation complete.", "pct": 100})
@@ -793,18 +896,9 @@ def _generate_terrain_tile(dem_path: Path, z: int, x: int, y: int) -> bytes | No
     # Replace nodata (NaN) with sea level before encoding
     dst_elevation = np.where(np.isnan(dst_elevation), 0.0, dst_elevation)
 
-    # Encode elevation as Terrarium RGB:
-    #   R = floor(h / 256),  G = floor(h) % 256,  B = floor(h * 256) % 256
-    #   where h = elevation + 32768  (ensures h ≥ 0 for elevations ≥ −32768 m)
-    #   Decoding: height = R*256 + G + B/256 − 32768
-    # Use floor-based encoding throughout (D-324: np.round uses banker's rounding
-    # which introduces systematic error; floor matches the Terrarium reference).
-    h = dst_elevation + 32768.0
-    h_floor = np.floor(h).astype(np.int64)
-    r = (h_floor // 256).clip(0, 255).astype(np.uint8)
-    g = (h_floor % 256).astype(np.uint8)
-    b = (np.floor(h * 256.0).astype(np.int64) % 256).astype(np.uint8)
-    rgb = np.stack([r, g, b], axis=-1)
+    from salus.viewer.export import _encode_terrarium
+
+    rgb = _encode_terrarium(dst_elevation.astype(np.float32))
 
     img = Image.fromarray(rgb, mode="RGB")
     buf = io.BytesIO()
@@ -1298,6 +1392,7 @@ async def report(request: ReportRequest) -> Response:
         layer_maps_b64=layer_maps_b64,
         kill_chain_chart_b64=kill_chain_b64 if isinstance(kill_chain_b64, str) else None,
         saturation_chart_b64=saturation_b64 if isinstance(saturation_b64, str) else None,
+        map_screenshot=request.map_screenshot if isinstance(request.map_screenshot, str) else None,
         corridor_results=[],
         kill_chain_results=[],
         saturation_result=None,
