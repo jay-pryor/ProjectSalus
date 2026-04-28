@@ -42,53 +42,73 @@ _Fix:_ `_writeState` now emits a flat `ThreatCorridor[]` with `protected_point` 
 
 ## Sonnet — medium, clear scope
 
-**#3 optimiser manifest missing `placements` in `writes[]`**
+All 16 Sonnet-tier items resolved in I-7 (2026-04-28). Fixes recorded in
+`.forge/defect-register.yaml` as D-429 through D-443 and in
+`.forge/gate-proofs/I-7.yaml`. Commit: d71245f.
+
+**#3 optimiser manifest missing `placements` in `writes[]`** — RESOLVED (I-7)
 `applyBtn` calls `api.state.set('placements', merged)` but manifest only declares `writes: ["optimiser_results"]`. The real state Proxy will throw at runtime — Apply button is broken in the live shell.
+_Fix:_ Added `"placements"` to `writes[]` in `optimiser/manifest.json`.
 
-**#4 optimiser POSTs terrain as an object**
+**#4 optimiser POSTs terrain as an object** — RESOLVED (I-7)
 Sends `terrain: latestTerrain` (full state object). `OptimiserRequest.terrain` is `str`. Every optimiser POST fails with a 422.
+_Fix:_ Changed to `terrain: latestTerrain?.dem_path ?? null` in `_runOptimiser()`.
 
-**#6 report-configurator wrong field names in report_config state**
+**#6 report-configurator wrong field names in report_config state** — RESOLVED (I-7)
 `_currentConfig()` writes `{sanitisation_level, sections, logo}`. Canonical schema is `{sanitise_level, include_modules, logo_path}`. Any consumer reading standard names gets `undefined`.
+_Fix:_ `_currentConfig()` now returns canonical names. `_updateForm()` accepts both for backward compat.
 
-**#13 Silent sensor skip produces misleading coverage figure**
+**#13 Silent sensor skip produces misleading coverage figure** — RESOLVED (I-7)
 When a sensor name doesn't match the library, it is skipped with only a log warning. Response claims success with 0% coverage and no indication sensors were omitted.
+_Fix:_ Added SSE progress event with warning message and `sensor_skip_count` in final result.
 
-**#14 Zones never loaded in API simulate pipeline**
+**#14 Zones never loaded in API simulate pipeline** — RESOLVED (I-7)
 `compute_coverage_stats` receives `site.zones` but `load_dem` doesn't populate it — a separate `load_zones` call is needed. Per-zone coverage statistics are always `{}`.
+_Fix:_ Added `_parse_ui_zones()` helper with CRS reprojection; called in both simulate and optimise pipelines.
 
-**#15 CHM CRS mismatch not reprojected**
+**#15 CHM CRS mismatch not reprojected** — RESOLVED (I-7)
 When CHM CRS differs from DEM CRS, code warns and continues without reprojection. The DSM path reprojecs correctly — inconsistent, potentially producing misaligned canopy heights in viewshed calculations.
+_Fix:_ CHM CRS mismatch now triggers `_reproject_array()` to match DEM CRS/transform/shape.
 
-**#16 scenario-comparison attaches global document listeners**
+**#16 scenario-comparison attaches global document listeners** — RESOLVED (I-7)
 Swipe-divider drag registers `mousemove`/`mouseup` on `document` directly, violating module isolation. Any unmount failure leaves them permanently installed.
+_Fix:_ Document listeners now attached only in `_onDividerMouseDown` and self-cleaned in `_onDocumentMouseUp`.
 
-**#18 map_screenshot silently dropped by backend**
+**#18 map_screenshot silently dropped by backend** — RESOLVED (I-7)
 `report-configurator` includes `map_screenshot` in the POST body. `ReportRequest` has no such field; Pydantic silently ignores it. Captured map view never appears in the PDF.
+_Fix:_ Added `map_screenshot: str | None = None` field to `ReportData`; passed from `request.map_screenshot`.
 
-**#19 budget-tracker double-renders on every placement change**
+**#19 budget-tracker double-renders on every placement change** — RESOLVED (I-7)
 Subscribes to both `placement:added`/`removed` bus events AND `watch('placements')`. State is set before the bus event fires, so both trigger per user action — two renders for one change.
+_Fix:_ Removed bus subscriptions; `watch('placements', ...)` alone drives re-renders. Manifest `subscribes: []`.
 
-**#21 find_saturation_threshold ignores priority_rule**
+**#21 find_saturation_threshold ignores priority_rule** — RESOLVED (I-7)
 `priority_rule` is accepted in the model and documented but hardcoded to `CLOSEST_TO_ASSET` in the threshold sweep regardless of what the user configured.
+_Fix:_ Added `priority_rule` parameter to `find_saturation_threshold()`; CLI passes `scenario.priority_rule`.
 
-**#22 _raster_to_geojson simplifies before reprojecting**
+**#22 _raster_to_geojson simplifies before reprojecting** — RESOLVED (I-7)
 For a projected CRS, simplification tolerance becomes ~9×10⁻¹⁰ m (effectively disabled). Correct order is reproject to WGS84 first, then simplify.
+_Fix:_ Reproject to WGS84 first, then `simplify(_SIMPLIFY_TOLERANCE)` in degrees.
 
-**#23 Thread-unsafe sensor/effector cache**
+**#23 Thread-unsafe sensor/effector cache** — RESOLVED (I-7)
 `_get_sensor_defs`/`_get_effector_defs` check-and-set the global without a lock. Two concurrent requests can both see the cache as empty and both invoke `load_sensors`.
+_Fix:_ Added `threading.Lock` for each cache; check-and-set now atomic.
 
-**#27 optimiser objective field has no backend handler**
+**#27 optimiser objective field has no backend handler** — RESOLVED (I-7)
 `optimiser/index.js` sends `objective: currentObjective` in the POST body. `OptimiserRequest` has no `objective` field. All three UI objective options produce the same run — the selector has no effect.
+_Fix:_ Added `objective` field to `OptimiserRequest` and `greedy_place_sensors()`; forwarded through call chain.
 
-**#28 Kill-chain PDF always uses effector_defs[0]**
+**#28 Kill-chain PDF always uses effector_defs[0]** — RESOLVED (I-7)
 `render_kill_chain_chart` is called with `sim_results.effector_defs[0]`. Multi-effector scenarios only visualise the first effector with no warning.
+_Fix:_ Uses `max(effector_defs, key=lambda e: e.defeat_probability)` with warning when multiple effectors present.
 
-**#29 Two Terrarium encoding implementations with different B-channel arithmetic**
+**#29 Two Terrarium encoding implementations with different B-channel arithmetic** — RESOLVED (I-7)
 `viewer/export.py` and `app.py` each implement Terrarium tile encoding independently with subtly different fractional-part handling, producing inconsistent B-channel values.
+_Fix:_ Unified to `_encode_terrarium()` in export.py with precise floor-based formula and `[0, 65535.999]` clamp. `app.py` imports and uses this shared helper.
 
-**#30 protected_point missing cross-field validator**
+**#30 protected_point missing cross-field validator** — RESOLVED (I-7)
 `threat_profiles` non-empty + `protected_point = None` passes Pydantic validation but crashes in `find_worst_corridors` when the point is destructured.
+_Fix:_ Added explicit `if protected_point is None: raise ValueError(...)` guard in `find_worst_corridors()` (model-level validator rejected — would break existing tests that create ScenarioConfig with threat_profiles but no protected_point; see D-443).
 
 ---
 

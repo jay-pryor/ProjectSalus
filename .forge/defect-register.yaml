@@ -4736,7 +4736,7 @@ defects:
     description: "_serialise_corridor returns {} (empty dict) on any serialisation exception; caller list-comprehension has no filter, so empty dicts enter ViewerData.corridor_results and corrupt threat-corridor display in JS modules."
     resolution: ""
     status: open
-    commit: ""
+    commit: d71245f
 
   - id: D-430
     severity: high
@@ -4747,7 +4747,7 @@ defects:
     description: "pyproj.Transformer.from_crs called unconditionally in export_viewer_data; if pyproj unavailable or CRS lookup fails, unhandled exception aborts entire viewer export."
     resolution: ""
     status: open
-    commit: ""
+    commit: d71245f
 
   - id: D-431
     severity: high
@@ -4758,7 +4758,7 @@ defects:
     description: "coverage_pct guards time_to_asset_s > 0 but not time_in_detection_s isfinite; NaN timing propagates silently to corridor stats."
     resolution: ""
     status: open
-    commit: ""
+    commit: d71245f
 
   - id: D-432
     severity: medium
@@ -4769,7 +4769,7 @@ defects:
     description: "except Exception: chm_epsg = None swallows CHM CRS EPSG lookup exception with no logging; fallback to WKT comparison can miss CRS mismatches, silently misaligning canopy grid."
     resolution: "Added _log.debug() in the except block to surface the fallback."
     status: resolved
-    commit: ""
+    commit: d71245f
 
   - id: D-433
     severity: medium
@@ -4780,7 +4780,7 @@ defects:
     description: "When sensor_map is empty due to library load failure, every placement is listed as skipped and simulation proceeds with 0% coverage and a 'complete' SSE event — no error surfaced."
     resolution: ""
     status: open
-    commit: ""
+    commit: d71245f
 
   - id: D-434
     severity: medium
@@ -4791,7 +4791,7 @@ defects:
     description: "_serialise_kill_chain and _serialise_saturation return {} on exception; unfiltered list-comprehension in caller propagates malformed dicts to JS kill-chain modules."
     resolution: ""
     status: open
-    commit: ""
+    commit: d71245f
 
   - id: D-435
     severity: high
@@ -4802,7 +4802,7 @@ defects:
     description: "Single-writer rule violated: placements declared in writes[] of both optimiser and placement-editor manifests. Optimiser's applyBtn calls api.state.set('placements') directly — architectural redesign via event delegation needed."
     resolution: ""
     status: open
-    commit: ""
+    commit: d71245f
 
   - id: D-436
     severity: medium
@@ -4813,7 +4813,7 @@ defects:
     description: "scenario_b_sim_results accessed via get() and watch() in index.js but not listed in manifest reads[]. 'terrain' declared in reads[] but never accessed. Manifest contract diverges from implementation."
     resolution: "Added scenario_b_sim_results to reads[]; removed terrain from reads[]."
     status: resolved
-    commit: ""
+    commit: d71245f
 
   - id: D-437
     severity: low
@@ -4824,7 +4824,7 @@ defects:
     description: "PDF download anchor created with document.createElement but not appended to panel before .click() — unparented DOM interaction outside module's panel scope."
     resolution: "Appended anchor to panel before .click() and removed immediately after, matching budget-tracker pattern."
     status: resolved
-    commit: ""
+    commit: d71245f
 
   - id: D-438
     severity: medium
@@ -4835,7 +4835,7 @@ defects:
     description: "_encode_terrarium clips h to [0, None] but not upper bound 65535.999; for elevation > 32767 m, h_floor > 65535 and G channel may encode wrong byte, silently producing incorrect Terrarium RGB for extreme elevations."
     resolution: "Added upper clip: np.clip(elevation + 32768, 0.0, 65535.999)"
     status: resolved
-    commit: ""
+    commit: d71245f
 
   - id: D-439
     severity: medium
@@ -4846,7 +4846,7 @@ defects:
     description: "CHM CRS mismatch reprojection path (Bug #15) has no test coverage. DSM path has test_dsm_crs_mismatch_warns_and_reprojects but CHM equivalent is missing."
     resolution: ""
     status: open
-    commit: ""
+    commit: d71245f
 
   - id: D-440
     severity: low
@@ -4857,7 +4857,7 @@ defects:
     description: "OptimiserRequest.zones defaults to list() while ScenarioConfig.zones defaults to dict(); both produce [] from _parse_ui_zones but inconsistency could confuse callers."
     resolution: "Aligned OptimiserRequest.zones default_factory to dict to match ScenarioConfig.zones."
     status: resolved
-    commit: ""
+    commit: d71245f
 
   - id: D-441
     severity: low
@@ -4868,7 +4868,7 @@ defects:
     description: "Stale test comment '# val = 65536 → clipped to 65535.999' describes old upper-clip mechanism no longer in effect; updated to reflect new approach."
     resolution: "Updated comment to describe the bit-shift clamping."
     status: resolved
-    commit: ""
+    commit: d71245f
 
   - id: D-442
     severity: medium
@@ -4879,7 +4879,7 @@ defects:
     description: "Bug #27: objective field accepted and logged but not forwarded to greedy_place_sensors(); engine always runs maximise_coverage regardless of request.objective."
     resolution: "Added objective parameter to greedy_place_sensors() with default 'maximise_coverage'. Passed request.objective at call site."
     status: resolved
-    commit: ""
+    commit: d71245f
 
   - id: D-443
     severity: low
@@ -4890,4 +4890,4 @@ defects:
     description: "Bug #30: spec required Pydantic model_validator but implementation uses function-level guard in find_worst_corridors. Deviation from spec: model_validator approach blocked by existing tests (test_valid_full, test_threat_profiles_loaded) which require ScenarioConfig to accept threat_profiles without protected_point."
     resolution: "Accepted documented deviation: function-level guard in find_worst_corridors() is the correct implementation given existing behavioral tests. CLI guard at line 643 provides defense-in-depth for the simulate path."
     status: accepted_documented
-    commit: ""
+    commit: d71245f
