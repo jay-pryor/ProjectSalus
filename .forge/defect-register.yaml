@@ -4478,7 +4478,7 @@ defects:
     description: "BugTriage #9 — Global terrain session race condition. _terrain_session was a single global dict shared by every /api/terrain/load call. Two concurrent loads silently overwrote each other's tile_dir, dem_path, and SSE progress, and the losing load's temp tile_dir was never cleaned up. Symptom: a slow client's tile requests would silently start serving the second client's DEM."
     resolution: "Replaced _terrain_session with _terrain_sessions: dict[str, dict] keyed by session_id (timestamp-based id assigned per /api/terrain/load call). _run_tile_generation now updates per-session progress under the lock; metadata tile_url_template is session-qualified (/api/terrain/sessions/{session_id}/tiles/...). Added sessioned tile + tile-progress endpoints; legacy unqualified endpoints now resolve to the latest session via _resolve_terrain_session_id. Added test_terrain_concurrent_loads_keep_disjoint_tile_paths regression test."
     status: resolved
-    commit: ""
+    commit: 9ecbe42
 
   - id: D-407
     severity: critical
@@ -4489,7 +4489,7 @@ defects:
     description: "BugTriage #8 — Path traversal in /api/terrain/load and /api/simulate. ScenarioConfig.site_dem_path and OptimiserRequest.terrain accepted arbitrary filesystem paths with no directory restriction. A malicious or careless caller could read or open any file the server process has access to (e.g. /etc/passwd, scenario YAMLs from other tenants)."
     resolution: "Added _ALLOWED_DEM_DIRS allowlist (defaults to _TERRAIN_DATA_DIR; extensible via SALUS_ALLOWED_DEM_DIRS env var). _validate_dem_path resolves the path and rejects (HTTP 403) anything outside the allowlist; called from /api/simulate (site_dem_path, site_dsm_path, boundary_path) and /api/optimise (terrain). Added _register_allowed_dem_dir for pytest fixtures (autoused in conftest.py to register tmp_path + fixtures dir). Added test_simulate_rejects_path_outside_allowlist regression test."
     status: resolved
-    commit: ""
+    commit: 9ecbe42
 
   - id: D-408
     severity: critical
@@ -4500,7 +4500,7 @@ defects:
     description: "BugTriage #7 — sensor_library / effector_library never populated. No module wrote these state keys and the shell never called GET /api/sensors or GET /api/effectors. Result: library-browser rendered empty, budget-tracker calculated zero costs, and the optimiser found no sensors."
     resolution: "Shell now fetches /api/sensors and /api/effectors at startup and seeds sensor_library / effector_library via state.setState(). Failures fall back to an empty dict (not null) so library-browser renders cleanly with no entries rather than crashing on Object.entries(null)."
     status: resolved
-    commit: ""
+    commit: 9ecbe42
 
   - id: D-409
     severity: critical
@@ -4511,7 +4511,7 @@ defects:
     description: "BugTriage #5 — report-configurator POST body rejected by backend. /api/report called ScenarioConfig.model_validate(request.report_config) on the UI state object {client_name, sanitisation_level, sections}, which always failed because site_dem_path was missing. Every report generation returned 422."
     resolution: "Reworked /api/report to accept the UI report_config shape and the canonical placements/zones interface shapes (both old flat-list and new {sensors, effectors}/{priority, exclusion} accepted). Added _extract_sim_stats helper that handles both nested stats and legacy flat SimResultsPayload. ReportRequest fields are now permissive dicts; the backend reconstructs a minimal ScenarioConfig server-side from placements + a placeholder DEM path (render_pdf only needs scenario.sensor_placements + scenario.site_dem_path.stem). Replaced test_report_invalid_scenario_returns_422 with test_report_accepts_ui_report_config_without_dem_path to lock in the new permissive flow."
     status: resolved
-    commit: ""
+    commit: 9ecbe42
 
   - id: D-410
     severity: critical
@@ -4522,7 +4522,7 @@ defects:
     description: "BugTriage #2 — zone-editor wrote {zones: [{type, ...}]} but every consumer (coverage-viewer compliance display, gap-analysis severity scoring, simulation-runner pre-flight indicator) expected {priority: PriorityZone[], exclusion: ExclusionZone[]}. All three displays were permanently broken. The inner field names (label, min_coverage_pct, geometry) were also non-canonical, so the consumers would still fail even if the outer shape matched."
     resolution: "Rewrote _writeState to bucket zones into priority/exclusion arrays and to emit the canonical inner fields {id, label, geometry (GeoJSON Polygon), min_coverage_pct | reason}. Added _ringToPolygon to wrap the open ring in a closed-ring GeoJSON Polygon. Added _readCanonical that accepts both canonical and legacy field names so older saved scenarios still load. Updated test-zone-editor.js to assert canonical names; added two reactive-watch tests using the canonical shape."
     status: resolved
-    commit: ""
+    commit: 9ecbe42
 
   - id: D-411
     severity: critical
@@ -4533,7 +4533,7 @@ defects:
     description: "BugTriage #12 — threat-corridor-editor wrote {routes: ThreatCorridor[], protected_point: {...}} but the canonical schema is a flat ThreatCorridor[] with protected_point denormalised onto each corridor. Symptom: simulation-runner's pre-flight corridors indicator always read true (the writer wrote a non-null object), and the kill-chain-analyser had to guess between routes-style and array-style shapes."
     resolution: "Rewrote _writeState to emit a flat array with protected_point denormalised onto each corridor entry. Added _readCanonical that accepts both the flat array and the legacy {routes, protected_point} object form so older scenarios still load. Updated kill-chain-analyser._updateMapLayers and _getRoutes to read the array directly (with a defensive fallback for legacy shape). Updated test-threat-corridor-editor.js and test-kill-chain-analyser.js fixtures to the canonical flat array."
     status: resolved
-    commit: ""
+    commit: 9ecbe42
 
   - id: D-412
     severity: high
@@ -4544,7 +4544,7 @@ defects:
     description: "BugTriage #1 — sim_results field name mismatch. simulation-runner reads stats.coverage_pct, stats.largest_gap_area_m2, and stats.worst_corridor_coverage_pct. The first two were aliased by _run_simulate_pipeline in D-405, but worst_corridor_coverage_pct was never computed by either export.py or app.py — the results panel always rendered '—' for that cell."
     resolution: "export_viewer_data now computes worst_corridor_coverage_pct = min(corridor_results[*].coverage_pct) and adds it to stats_dict when at least one corridor result has a coverage_pct. Empty corridor_results leaves the field absent (UI renders '—' as it does for any other null), preserving the existing zero-corridor behaviour."
     status: resolved
-    commit: ""
+    commit: 9ecbe42
 
   # ---------------------------------------------------------------------------
   # I-6 — L2 review findings on the D-406..D-412 fixes
@@ -4560,7 +4560,7 @@ defects:
     description: "_validate_dem_path return value was discarded — the validator computed the resolved canonical path but the worker thread reopened the original (raw) path. Small TOCTOU window where a symlink could be swapped between validate and open; also made the validator look like a no-op to future readers."
     resolution: "Capture the resolved Path from _validate_dem_path and pin it back onto config.site_dem_path / config.site_dsm_path / config.boundary_path before launching the worker thread. Same for OptimiserRequest.terrain."
     status: resolved
-    commit: ""
+    commit: 9ecbe42
 
   - id: D-414
     severity: high
@@ -4571,7 +4571,7 @@ defects:
     description: "_parse_sensor_placements swallowed every validation failure with _log.warning and skipped the entry. A request with N placements where all N failed validation produced a clean PDF with zero placements — the user saw a polished output and never learned their data was dropped."
     resolution: "Function now returns (placements, skipped) tuple. /api/report refuses (HTTP 422 + error body) when raw_count > 0 and zero placements survived validation; logs a warning when partial. Prevents the silent empty-PDF failure mode."
     status: resolved
-    commit: ""
+    commit: 9ecbe42
 
   - id: D-415
     severity: high
@@ -4582,7 +4582,7 @@ defects:
     description: "_fetchLibrary swallowed every HTTP and parse error to {}. If /api/sensors returned 500 (or the user was offline) the shell continued with empty libraries — placement modules rendered blank dropdowns and the user had no indication the backend was down. The console.warn was the only signal and was invisible to non-developers."
     resolution: "Added bus.emit('shell:library-load-error', {url, status|error}) on every failure path so a downstream module can surface a banner. Kept the empty-dict fallback so the shell still boots, but the failure is now observable on the bus."
     status: resolved
-    commit: ""
+    commit: 9ecbe42
 
   - id: D-416
     severity: medium
@@ -4593,7 +4593,7 @@ defects:
     description: "_extract_sim_stats silently dropped top-level fields when stats was an empty dict. Payload {\"stats\": {}, \"total_coverage_pct\": 75} returned {} because isinstance({}, dict) is True, so the fallback to top-level keys never ran. A client mixing schemas got coverage_pct=0 silently."
     resolution: "Treat stats as authoritative only when non-empty: `if isinstance(nested, dict) and nested: return dict(nested)` — empty stats falls through to the top-level fallback."
     status: resolved
-    commit: ""
+    commit: 9ecbe42
 
   - id: D-417
     severity: medium
@@ -4604,7 +4604,7 @@ defects:
     description: "When per_layer_coverage_pct in sim_results was not a dict (e.g. a list), the loop was silently skipped and per_layer_pct stayed {}. Coverage by layer disappeared from the PDF with no warning."
     resolution: "Added `elif per_layer_raw: _log.warning(...)` so the silent drop is visible in logs."
     status: resolved
-    commit: ""
+    commit: 9ecbe42
 
   - id: D-418
     severity: medium
@@ -4615,7 +4615,7 @@ defects:
     description: "_read_session_progress and _read_session_tile_paths used bracket lookups (session['progress_pct']) on the per-session dict. If _new_terrain_session_state were ever changed without updating these readers, a KeyError would propagate into the SSE handler and kill the connection mid-stream."
     resolution: "Switched to .get(key, default) for defensive reads, matching the rest of the module's tolerance pattern."
     status: resolved
-    commit: ""
+    commit: 9ecbe42
 
   - id: D-419
     severity: medium
@@ -4626,7 +4626,7 @@ defects:
     description: "_fetchLibrary's `(body && typeof body === 'object' && !Array.isArray(body)) ? body : {}` silently coerced a JSON array response to {}. Today /api/sensors returns an object, but if a future revision returned a top-level array (a common JSON pattern) the shell would silently produce empty libraries."
     resolution: "Added an explicit warn + bus event for the unexpected-shape case, separate from the network-error case."
     status: resolved
-    commit: ""
+    commit: 9ecbe42
 
   - id: D-420
     severity: medium
@@ -4637,7 +4637,7 @@ defects:
     description: "When loading the canonical flat array, _readCanonical took protectedPoint from list[0].protected_point ?? null — but for an empty array, fell back to the in-memory protectedPoint closure. A scenario load that legitimately cleared corridors via set('threat_corridors', []) could not also clear the protected point — it remained stuck on the previous load's value."
     resolution: "Documented the invariant 'protectedPoint cannot exist without at least one corridor' inline. Empty-array deliberately preserves the in-memory protectedPoint because the canonical schema has no place to store it without a corridor (architectural follow-up logged but not in scope for I-6)."
     status: accepted_documented
-    commit: ""
+    commit: 9ecbe42
 
   - id: D-421
     severity: medium
@@ -4648,7 +4648,7 @@ defects:
     description: "(r.waypoints ?? []).map(wp => [...wp]) would throw TypeError: wp is not iterable if r.waypoints contained a non-array entry (e.g. null from a half-saved scenario). The throw inside the state.watch callback bubbles up into the watcher dispatcher and could disable subsequent watches."
     resolution: "Added _cloneWaypoints helper that filters non-array entries with a defensive Array.isArray check; used by both _writeState and _readCanonical."
     status: resolved
-    commit: ""
+    commit: 9ecbe42
 
   - id: D-422
     severity: medium
@@ -4659,7 +4659,7 @@ defects:
     description: "(val.priority ?? []).map(...) and (val.exclusion ?? []).map(...) — if val.priority was not an array (e.g. an object from corrupted state), .map would throw TypeError inside the watch callback."
     resolution: "Coerce non-array val.priority/val.exclusion to [] via Array.isArray check before mapping."
     status: resolved
-    commit: ""
+    commit: 9ecbe42
 
   - id: D-423
     severity: medium
@@ -4670,7 +4670,7 @@ defects:
     description: "_ringFrom read z.geometry?.coordinates?.[0] ?? z.coordinates ?? []. If the canonical geometry had coordinates: [] (empty), the first branch returned undefined and the ?? fell through. A malformed geometry was silently turned into an empty ring with no warning, and _buildZoneFCs later built a zero-vertex polygon that MapLibreGL silently rendered as nothing."
     resolution: "Added _validRing(ring, zoneId) check: drops zones with fewer than 3 vertices and emits console.warn so the silent drop is visible."
     status: resolved
-    commit: ""
+    commit: 9ecbe42
 
   - id: D-424
     severity: high
@@ -4681,7 +4681,7 @@ defects:
     description: "After D-410 changed zone-editor to write the canonical {priority, exclusion} dict, the existing optimiser/index.js continued sending zones: latestZones to /api/optimise. The backend OptimiserRequest.zones was typed list[dict[str, Any]], so Pydantic would 422 every request from the live UI whenever a user had any zones defined."
     resolution: "Widened OptimiserRequest.zones to dict[str, Any] | list[dict[str, Any]] (mirrors the ReportRequest treatment in D-409). The optimiser pipeline does not consume zones server-side today, so the permissive shape is risk-free."
     status: resolved
-    commit: ""
+    commit: 9ecbe42
 
   - id: D-425
     severity: high
@@ -4692,7 +4692,7 @@ defects:
     description: "_allow_tmp_dem_dirs autouse fixture mutated the module-level _ALLOWED_DEM_DIRS list permanently — there was no teardown. Each test session kept appending the same fixtures dir; more importantly, any future negative-allowlist test using a /tmp/... path would silently start passing."
     resolution: "Snapshot _ALLOWED_DEM_DIRS at fixture setup and restore via _ALLOWED_DEM_DIRS[:] = snapshot in finally. Narrowed import-failure handler to ImportError so other exceptions surface."
     status: resolved
-    commit: ""
+    commit: 9ecbe42
 
   - id: D-426
     severity: medium
@@ -4703,7 +4703,7 @@ defects:
     description: "tile_url_template returned by /api/terrain/load was changed to be session-qualified, but terrain-loader still polled the legacy unsessioned /api/terrain/tile-progress endpoint which now reports the latest session's progress. A second concurrent /api/terrain/load would steer the first client's progress bar to the second session's tile generation."
     resolution: "Added tile_progress_url to terrain_load metadata pointing at the session-qualified SSE endpoint. terrain-loader now uses metadata.tile_progress_url when present and falls back to the legacy endpoint if absent (backward compat)."
     status: resolved
-    commit: ""
+    commit: 9ecbe42
 
   - id: D-427
     severity: medium
@@ -4714,7 +4714,7 @@ defects:
     description: "The D-409 rewrite of /api/report removed the only test that asserted /api/report returned 422 for a malformed body. report_config now accepts any dict and sim_results/placements/zones accept any structure; obviously malformed payloads produce a PDF with default-zero stats."
     resolution: "Partial: D-414's 'all placements failed validation' guard is the strongest semantic check. A future ticket could add a fuller body schema once the UI shape stabilises; for now D-414 protects the most user-visible silent-fail surface (an empty PDF)."
     status: accepted_documented
-    commit: ""
+    commit: 9ecbe42
 
   - id: D-428
     severity: medium
@@ -4725,4 +4725,4 @@ defects:
     description: "await Promise.all([_fetchLibrary('/api/sensors'), _fetchLibrary('/api/effectors')]) blocked shell startup until the network resolves. Any future shell-level integration test in the Node test runner without a fetch mock would hang for the request timeout."
     resolution: "Guarded the bootstrap with `if (typeof fetch === 'function')` so test environments without a global fetch fall back to empty libraries instead of throwing."
     status: resolved
-    commit: ""
+    commit: 9ecbe42
