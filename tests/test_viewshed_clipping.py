@@ -238,18 +238,14 @@ class TestInputGuards:
             clip_viewshed_to_sensor(bad_array, flat_site, sensor, placement)
 
     def test_zero_resolution_raises(self, all_visible):
-        """site.resolution == 0.0 must raise ValueError."""
-        bad_site = SiteModel(
-            dem=np.zeros((ROWS, COLS), dtype=float),
-            resolution=0.0,
-            origin_x=ORIGIN_X,
-            origin_y=ORIGIN_Y,
-        )
-        sensor = _sensor()
-        placement = _placement()
-
+        """site.resolution == 0.0 must raise ValueError — now caught by SiteModel validation."""
         with pytest.raises(ValueError, match="resolution"):
-            clip_viewshed_to_sensor(all_visible, bad_site, sensor, placement)
+            SiteModel(
+                dem=np.zeros((ROWS, COLS), dtype=float),
+                resolution=0.0,
+                origin_x=ORIGIN_X,
+                origin_y=ORIGIN_Y,
+            )
 
     def test_integer_viewshed_array_normalised_to_bool(self, flat_site):
         """Passing an integer array (e.g. from raw GDAL read) must not silently corrupt results."""

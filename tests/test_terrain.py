@@ -67,6 +67,18 @@ class TestSiteModel:
                 origin_y=0.0,
             )
 
+    def test_rejects_zero_resolution(self):
+        with pytest.raises(ValueError, match="resolution"):
+            SiteModel(dem=np.zeros((10, 10)), resolution=0.0, origin_x=0.0, origin_y=0.0)
+
+    def test_rejects_negative_resolution(self):
+        with pytest.raises(ValueError, match="resolution"):
+            SiteModel(dem=np.zeros((10, 10)), resolution=-5.0, origin_x=0.0, origin_y=0.0)
+
+    def test_rejects_infinite_resolution(self):
+        with pytest.raises(ValueError, match="finite"):
+            SiteModel(dem=np.zeros((10, 10)), resolution=float("inf"), origin_x=0.0, origin_y=0.0)
+
     def test_extent(self):
         dem = np.zeros((100, 200))
         site = SiteModel(

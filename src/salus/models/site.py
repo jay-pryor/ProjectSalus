@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Self
 
 import numpy as np
@@ -32,8 +33,15 @@ class SiteModel(BaseModel):
     DSM/DEM offsets are clamped to zero during derivation).  NaN cells represent nodata
     and are treated as canopy-free during viewshed attenuation."""
 
-    resolution: float
+    resolution: float = Field(gt=0)
     """Metres per grid cell."""
+
+    @field_validator("resolution")
+    @classmethod
+    def _validate_resolution(cls, v: float) -> float:
+        if not math.isfinite(v):
+            raise ValueError(f"resolution must be a finite positive number, got {v!r}")
+        return v
 
     origin_x: float
     """Easting of the top-left cell centre in CRS units (metres)."""

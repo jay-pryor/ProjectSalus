@@ -114,38 +114,42 @@ _Fix:_ Added explicit `if protected_point is None: raise ValueError(...)` guard 
 
 ## Haiku — mechanical / trivial
 
-**#10 mercantile and Pillow missing from pyproject.toml**
+All 11 Haiku-tier items resolved in I-8 (2026-04-29). Fixes recorded in
+`.forge/defect-register.yaml` (D-444 through D-454).
+`.forge/gate-proofs/I-8.yaml`. Commit: TBD.
+
+**#10 mercantile and Pillow missing from pyproject.toml** — RESOLVED (D-444, I-8)
 Both are imported at runtime in `app.py` for terrain tile generation but appear in no dependency group. Fresh install crashes with `ModuleNotFoundError`.
 
-**#11 Dockerfile installs `.[dev]` not `.[dev,interface]`**
+**#11 Dockerfile installs `.[dev]` not `.[dev,interface]`** — RESOLVED (D-445, I-8)
 FastAPI and uvicorn are in the `interface` extra. The Docker image cannot start the API server as built.
 
-**#17 scenario-comparison over-exports**
+**#17 scenario-comparison over-exports** — RESOLVED (D-446, I-8)
 `index.js` exports `_parseScenarioJsText`, `_parseScenarioFile`, `_validateScenarioBPayload`, etc. alongside `init`. Architecture requires `index.js` exports only `{ init }`.
 
-**#20 optimiser zone-gating too strict**
+**#20 optimiser zone-gating too strict** — RESOLVED (D-447, I-8)
 `prerequisites: ["terrain", "zones"]` prevents access to the optimiser until zones are defined. The backend doesn't require zones — they only affect scoring weights.
 
-**#24 _test-module in production index.json**
+**#24 _test-module in production index.json** — RESOLVED (D-448, I-8)
 The test stub is the first entry in `modules/index.json` and appears as a nav bar entry in every deployment.
 
-**#25 scenario-comparison reads scenario_b_sim_results without declaring it in reads[]**
+**#25 scenario-comparison reads scenario_b_sim_results without declaring it in reads[]** — RESOLVED (D-436, I-7)
 The manifest `reads: ["terrain", "sim_results"]` but the module calls `api.state.watch('scenario_b_sim_results', ...)`. Missing declaration makes the manifest contract misleading.
 
-**#26 coverage-viewer dead placements declaration in manifest**
+**#26 coverage-viewer dead placements declaration in manifest** — RESOLVED (D-449, I-8)
 `reads: [..., "placements"]` but the module never calls `get('placements')` or `watch('placements')`. Dead manifest declaration.
 
-**#31 SiteModel.resolution missing > 0 validator**
+**#31 SiteModel.resolution missing > 0 validator** — RESOLVED (D-450, I-8)
 Zero or negative resolution passes Pydantic and reaches engine code where it is used as a divisor.
 
-**#32 SanitiseConfig.coordinate_precision missing ge=0 bound**
+**#32 SanitiseConfig.coordinate_precision missing ge=0 bound** — RESOLVED (D-451, I-8)
 Negative precision causes `round(v, -N)` — all coordinates become multiples of 10^N, producing geometrically invalid GeoJSON.
 
-**#33 PlacementWeights missing extra="forbid"**
+**#33 PlacementWeights missing extra="forbid"** — RESOLVED (D-452, I-8)
 Unknown weight keys (e.g. typo `crital_asset`) are silently discarded. No validation error, no feedback to the caller.
 
-**#34 Empty no-op bus subscriptions**
+**#34 Empty no-op bus subscriptions** — RESOLVED (D-453, I-8)
 `gap-analysis` subscribes to `simulation:complete` with an empty body; `kill-chain-analyser` watches `terrain` with a no-op. Both generate unnecessary cleanup entries. Remove subscriptions and update manifests.
 
-**#35 optimiser sensor_library_filter sends null instead of []**
+**#35 optimiser sensor_library_filter sends null instead of []** — RESOLVED (D-454, I-8)
 When `constraints.allowed_sensor_ids` is absent, the POST sends `null`. Backend expects `list[str]` and may 422 or return "no sensors found".

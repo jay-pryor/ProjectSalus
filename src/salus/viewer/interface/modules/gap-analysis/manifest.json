@@ -5,7 +5,7 @@
   "writes": [],
   "prerequisites": ["terrain", "sim_results"],
   "emits": ["placement:pending"],
-  "subscribes": ["simulation:complete"],
+  "subscribes": [],
   "layer_id_prefix": "gap-analysis",
   "description": "Ranked gap list sorted by severity (area × zone-priority weight). Fly-to navigation per gap, suggested sensor placement via placement:pending emission."
 }

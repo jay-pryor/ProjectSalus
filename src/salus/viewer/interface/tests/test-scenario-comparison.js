@@ -89,14 +89,13 @@ globalThis.document = {
 // Import module (after document mock is set up)
 // ---------------------------------------------------------------------------
 
-const mod = await import('../modules/scenario-comparison/index.js');
+const { init } = await import('../modules/scenario-comparison/index.js');
 const {
-  init,
   _parseScenarioJsText,
   _parseScenarioFile,
   _validateScenarioBPayload,
   _featureCentroidLng,
-} = mod;
+} = await import('../modules/scenario-comparison/_helpers.js');
 
 // ---------------------------------------------------------------------------
 // Mock API factory

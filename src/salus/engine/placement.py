@@ -40,7 +40,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import numpy.typing as npt
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from shapely.geometry import MultiPolygon, Point, Polygon
 
 from salus.engine.dispatcher import compute_sensor_coverage
@@ -94,6 +94,8 @@ class PlacementWeights(BaseModel):
     - ``exclusion``: 0.0 (cells in exclusion zones are not scored)
     - ``unzoned``: 1.0 (cells not in any named zone score at baseline)
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     critical_asset: float = Field(default=3.0, ge=0.0)
     inner: float = Field(default=2.0, ge=0.0)

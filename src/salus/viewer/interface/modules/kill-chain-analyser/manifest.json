@@ -1,7 +1,7 @@
 {
   "id": "kill-chain-analyser",
   "label": "Kill Chain",
-  "reads": ["terrain", "sim_results", "threat_corridors"],
+  "reads": ["sim_results", "threat_corridors"],
   "writes": [],
   "prerequisites": ["terrain", "sim_results"],
   "emits": [],

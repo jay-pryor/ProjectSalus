@@ -114,12 +114,10 @@ def clip_viewshed_to_sensor(
         Boolean 2D array with cells outside sensor coverage set to False.
 
     Raises:
-        ValueError: If viewshed_array is not 2D, or site.resolution is <= 0.
+        ValueError: If viewshed_array is not 2D.
     """
     if viewshed_array.ndim != 2:
         raise ValueError(f"viewshed_array must be 2D, got {viewshed_array.ndim}D")
-    if site.resolution <= 0.0:
-        raise ValueError(f"site.resolution must be > 0, got {site.resolution}")
 
     # Normalise dtype — guards against callers passing integer or float arrays.
     viewshed_bool: npt.NDArray[np.bool_] = viewshed_array.astype(bool)
@@ -312,8 +310,6 @@ def line_of_sight_3d(
         raise ValueError(
             f"All coordinates must be finite, got ({x1}, {y1}, {z1_abs}) → ({x2}, {y2}, {z2_abs})"
         )
-    if site.resolution <= 0.0:
-        raise ValueError(f"site.resolution must be > 0, got {site.resolution}")
 
     h_dist = math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
     if h_dist == 0.0:

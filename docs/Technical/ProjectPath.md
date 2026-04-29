@@ -938,6 +938,33 @@ _Exploration scenarios are stored in `demo/explore/` with the naming convention 
   9. `export_viewer_data` includes `stats.worst_corridor_coverage_pct` whenever any corridor result has a `coverage_pct`.
   10. `docs/BugTriage.md` Opus section is annotated with the resolution and defect IDs.
 
+**I-7: Resolve Sonnet-tier triage bugs (#3, #4, #6, #13, #14, #15, #16, #18, #19, #21, #22, #23, #27, #28, #29, #30)**
+- _Source:_ Triage sweep `docs/BugTriage.md`. Sixteen medium/clear-scope bugs routed to Sonnet. Defects logged as D-429 through D-443 in `.forge/defect-register.yaml`.
+- _Goal:_ Fix manifest contract gaps, data-flow errors, model validation holes, and JS event-listener leaks identified in the Sonnet triage tier.
+- _Acceptance criteria:_
+  1. `pytest tests/` passes including new regression tests for each fixed bug.
+  2. `node --test src/salus/viewer/interface/tests/*.js` passes.
+  3. `docs/BugTriage.md` Sonnet section is annotated with resolution and defect IDs.
+
+**I-8: Resolve Haiku-tier triage bugs (#10, #11, #17, #20, #24, #25, #26, #31, #32, #33, #34, #35)**
+- _Source:_ Triage sweep `docs/BugTriage.md`. Twelve mechanical/trivial bugs. Defects logged as D-444 through D-455 in `.forge/defect-register.yaml`.
+- _Goal:_ Fix missing dependencies, over-exports, over-strict prerequisites, dead manifest declarations, model validation bounds, and empty no-op subscriptions.
+- _Acceptance criteria:_
+  1. `mercantile` and `Pillow` present in the `interface` extra in `pyproject.toml`.
+  2. `Dockerfile` installs `.[dev,interface]`.
+  3. `scenario-comparison/index.js` exports only `{ init }`.
+  4. `optimiser` manifest `prerequisites` contains only `["terrain"]` (zones removed).
+  5. `_test-module` removed from `modules/index.json`.
+  6. `scenario-comparison` manifest `reads` includes `"scenario_b_sim_results"`.
+  7. `coverage-viewer` manifest `reads` does not include `"placements"`.
+  8. `SiteModel.resolution` has `gt=0` constraint.
+  9. `SanitiseConfig.coordinate_precision` has `ge=0` bound (converted to Pydantic field or validated dataclass).
+  10. `PlacementWeights` has `model_config = ConfigDict(extra="forbid")`.
+  11. `gap-analysis/index.js` removes the empty `simulation:complete` subscription; manifest `subscribes` updated to `[]`.
+  12. `kill-chain-analyser/index.js` removes the no-op terrain watch; manifest `reads` updated to remove `"terrain"`.
+  13. `optimiser/index.js` sends `[]` instead of `null` when `allowed_sensor_ids` is absent.
+  14. `docs/BugTriage.md` Haiku section annotated with resolution and defect IDs.
+
 ---
 
 ### Slice 15 — Populate Full Sensor/Effector/Threat Database

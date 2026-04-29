@@ -506,21 +506,14 @@ class TestEdgeCases:
             compute_single_effector_coverage(flat_site, rf_jammer, placement)
 
     def test_zero_resolution_raises(self, rf_jammer: EffectorDefinition) -> None:
-        """site.resolution=0 must raise ValueError in _clip_to_effector (D-194)."""
-        bad_site = SiteModel(
-            dem=np.full((10, 10), 50.0),
-            resolution=0.0,
-            origin_x=0.0,
-            origin_y=10.0,
-        )
-        placement = EffectorPlacement(
-            effector_name="test",
-            position_x=5.0,
-            position_y=5.0,
-            bearing_deg=0.0,
-        )
+        """site.resolution=0 must raise ValueError — now caught by SiteModel validation."""
         with pytest.raises(ValueError, match="resolution"):
-            compute_single_effector_coverage(bad_site, rf_jammer, placement)
+            SiteModel(
+                dem=np.full((10, 10), 50.0),
+                resolution=0.0,
+                origin_x=0.0,
+                origin_y=10.0,
+            )
 
     def test_empty_effector_list_warns(
         self, flat_site: SiteModel, caplog: pytest.LogCaptureFixture

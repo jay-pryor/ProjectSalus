@@ -312,12 +312,12 @@ test('manifest emits placement:pending', async () => {
   assert.ok(m.emits.includes('placement:pending'), 'must emit placement:pending');
 });
 
-test('manifest subscribes to simulation:complete', async () => {
+test('manifest subscribes is empty (simulation:complete subscription removed — no-op)', async () => {
   const raw = await readFile(
     path.resolve(__dirname, '../modules/gap-analysis/manifest.json'), 'utf8'
   );
   const m = JSON.parse(raw);
-  assert.ok(m.subscribes.includes('simulation:complete'), 'must subscribe simulation:complete');
+  assert.ok(!m.subscribes.includes('simulation:complete'), 'simulation:complete was a no-op and has been removed');
 });
 
 // ---------------------------------------------------------------------------
@@ -540,12 +540,12 @@ test('gap list re-renders on zones state watch', () => {
 // Bus subscription tests
 // ---------------------------------------------------------------------------
 
-test('subscribes to simulation:complete', () => {
+test('does not subscribe to simulation:complete (no-op subscription removed)', () => {
   const api = makeApi();
   init(api);
-  assert.ok(
-    api._busListeners['simulation:complete']?.length > 0,
-    'simulation:complete listener registered',
+  assert.equal(
+    api._busListeners['simulation:complete']?.length ?? 0, 0,
+    'simulation:complete listener must not be registered',
   );
 });
 
@@ -564,8 +564,4 @@ test('onUnmount unsubscribes state watchers and bus listeners', () => {
 
   assert.equal(api._stateWatchers['sim_results']?.length ?? 0, 0, 'sim_results watcher cleaned');
   assert.equal(api._stateWatchers['zones']?.length ?? 0,       0, 'zones watcher cleaned');
-  assert.equal(
-    api._busListeners['simulation:complete']?.length ?? 0, 0,
-    'simulation:complete listener cleaned',
-  );
 });

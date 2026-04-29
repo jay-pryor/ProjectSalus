@@ -399,8 +399,8 @@ export function init(api) {
       bodyJson = JSON.stringify({
         zones: latestZones,
         constraints: latestConstraints,
-        sensor_library_filter: latestConstraints?.allowed_sensor_ids ?? null,
-        effector_library_filter: latestConstraints?.allowed_effector_ids ?? null,
+        sensor_library_filter: latestConstraints?.allowed_sensor_ids ?? [],
+        effector_library_filter: latestConstraints?.allowed_effector_ids ?? [],
         terrain: latestTerrain?.dem_path ?? null,
         objective: currentObjective,
       });

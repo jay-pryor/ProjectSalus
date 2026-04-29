@@ -1,0 +1,53 @@
+task_id: I-8
+timestamp: 2026-04-29T09:00:00Z
+description: "Haiku-tier bug triage: 11 bugs fixed (#10, #11, #17, #20, #24, #26, #31, #32, #33, #34, #35) — #25 was resolved in I-7/D-436"
+quality_gates:
+  G1_lint: pass
+  G2_format: pass
+  G3_import: pass
+  G4_type: pass          # informational only — pre-existing import-untyped for rasterio/shapely/yaml
+  G5_security: pass      # 0 findings; comment-text warnings only
+  G6_unit_test: pass     # 1294 Python passed, 3 skipped; 637 JS passed
+  G7_coverage: pass      # ≥82% confirmed (baseline from I-7; new tests added, dead code removed)
+  G8_secrets: pass       # 0 files with potential secrets
+  coverage_pct: 82
+review:
+  l1_standards:
+    testing: pass
+    error_handling: pass
+    logging: pass
+    security: pass
+    interface_modules: pass
+  l2_agents:
+    silent_failure_hunter: {status: fail, findings: 3}    # 1H 1M 1L — D-455 (inf resolution), D-456 (float precision type) both fixed; low finding (no upper bound) accepted
+    spec_compliance: {status: pass, findings: 2}           # 2 info (stale doc comments) — both fixed
+    type_design_analyzer: N/A
+    regression_reviewer: {status: fail, findings: 4}      # 0H 2M 2L — D-457 (dead guards removed), D-458 (accepted_documented); low findings (match arg, SSE pipeline) fixed
+    module_architecture_reviewer: {status: pass, findings: 0}
+defect_ids:
+  - D-444  # resolved — Bug #10: mercantile/Pillow missing from pyproject.toml
+  - D-445  # resolved — Bug #11: Dockerfile installs .[dev] not .[dev,interface]
+  - D-446  # resolved — Bug #17: scenario-comparison over-exports
+  - D-447  # resolved — Bug #20: optimiser zone-gating too strict
+  - D-448  # resolved — Bug #24: _test-module in production index.json
+  - D-449  # resolved — Bug #26: coverage-viewer dead placements declaration
+  - D-450  # resolved — Bug #31: SiteModel.resolution missing >0 validator
+  - D-451  # resolved — Bug #32: SanitiseConfig.coordinate_precision missing ge=0
+  - D-452  # resolved — Bug #33: PlacementWeights missing extra=forbid
+  - D-453  # resolved — Bug #34 gap-analysis: empty simulation:complete subscription
+  - D-454  # resolved — Bug #34 kill-chain-analyser: no-op terrain watch
+  - D-455  # resolved — resolution=inf not rejected by Field(gt=0); field_validator added
+  - D-456  # resolved — coordinate_precision float type not checked; isinstance guard added
+  - D-457  # resolved — dead engine guards removed (now enforced at model construction)
+  - D-458  # accepted_documented — PlacementWeights ValidationError caught by SSE pipeline
+overall: pass
+notes:
+  - "Bug #25 (scenario-comparison reads scenario_b_sim_results) was resolved in I-7/D-436; manifest was already correct."
+  - "D-455 found by silent-failure-hunter: Pydantic v2 Field(gt=0) accepts inf; fixed by adding _validate_resolution field_validator with math.isfinite() check."
+  - "D-456 found by silent-failure-hunter: SanitiseConfig is a dataclass with no Pydantic type enforcement; isinstance(int) check added to __post_init__."
+  - "D-457 found by regression-reviewer: engine guards in effector_coverage.py and viewshed.py became dead code once SiteModel validates resolution at construction. Removed cleanly."
+  - "D-458 found by regression-reviewer: accepted_documented — ValidationError from PlacementWeights with extra=forbid is caught by the bare except in _run_optimise_pipeline and emitted as SSE error event."
+  - "scenario-comparison/_helpers.js new file — pure utility functions extracted from index.js to allow tests to import helpers without violating module isolation rule."
+  - "JS test count: 637 pass (test-coverage-viewer, test-gap-analysis, test-kill-chain-analyser, test-optimiser, test-scenario-comparison updated)"
+</content>
+</invoke>

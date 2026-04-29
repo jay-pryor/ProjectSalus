@@ -10,7 +10,7 @@
  * Reads:       terrain, sim_results, zones, sensor_library
  * Writes:      (none)
  * Emits:       placement:pending
- * Subscribes:  simulation:complete
+ * Subscribes:  (none)
  * Map sources: (none — navigates via api.map.flyTo only)
  * Map layers:  (none)
  */
@@ -337,13 +337,6 @@ export function init(api) {
     latestZones = z;
     _renderList();
   }));
-
-  // -------------------------------------------------------------------------
-  // Bus subscriptions
-  // -------------------------------------------------------------------------
-  // simulation:complete is declared in manifest subscribes[]; the sim_results
-  // state watch drives the actual render.
-  unsubs.push(api.bus.on('simulation:complete', () => {}));
 
   // -------------------------------------------------------------------------
   // Cleanup

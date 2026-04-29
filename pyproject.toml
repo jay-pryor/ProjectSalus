@@ -50,6 +50,8 @@ dev = [
 interface = [
     "fastapi>=0.110",
     "uvicorn>=0.29",
+    "mercantile>=1.2",
+    "Pillow>=10.0",
 ]
 
 [project.scripts]

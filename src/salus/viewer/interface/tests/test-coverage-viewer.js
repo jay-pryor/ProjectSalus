@@ -322,14 +322,15 @@ test('manifest has all required fields', async () => {
   }
 });
 
-test('manifest reads terrain, placements, sim_results', async () => {
+test('manifest reads terrain, sim_results, zones', async () => {
   const raw = await readFile(
     path.resolve(__dirname, '../modules/coverage-viewer/manifest.json'), 'utf8'
   );
   const m = JSON.parse(raw);
-  for (const k of ['terrain', 'placements', 'sim_results']) {
+  for (const k of ['terrain', 'sim_results', 'zones']) {
     assert.ok(m.reads.includes(k), `reads must include ${k}`);
   }
+  assert.ok(!m.reads.includes('placements'), 'reads must not include placements (dead declaration removed)');
 });
 
 test('manifest has correct prerequisites', async () => {

@@ -704,6 +704,14 @@ class TestSanitiseForExport:
             terrain_max_zoom=16,
         )
 
+    def test_rejects_negative_coordinate_precision(self):
+        with pytest.raises(ValueError, match="coordinate_precision"):
+            SanitiseConfig(coordinate_precision=-1)
+
+    def test_rejects_float_coordinate_precision(self):
+        with pytest.raises(TypeError, match="coordinate_precision"):
+            SanitiseConfig(coordinate_precision=4.5)  # type: ignore[arg-type]
+
     def test_returns_new_instance(self):
         vd = self._make_viewer_data_with_sensors()
         config = SanitiseConfig(level=SanitiseLevel.MINIMAL)

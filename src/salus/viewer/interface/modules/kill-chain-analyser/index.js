@@ -8,7 +8,7 @@
  * corridor, with map visualisation of the selected corridor, first-detection
  * point, and engagement marker.
  *
- * Reads:       terrain, sim_results, threat_corridors
+ * Reads:       sim_results, threat_corridors
  * Writes:      (none)
  * Emits:       (none)
  * Subscribes:  simulation:complete
@@ -549,8 +549,6 @@ export function init(api) {
     _populateSelect();
     _renderKillChain(selectedIdx);
   }));
-
-  unsubs.push(api.state.watch('terrain', (_t) => { /* terrain prerequisite only */ }));
 
   // -------------------------------------------------------------------------
   // Bus subscription — simulation:complete re-renders for current corridor

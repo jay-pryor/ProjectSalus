@@ -113,6 +113,11 @@ def test_placement_weights_rejects_nan() -> None:
         PlacementWeights(perimeter=float("nan"))
 
 
+def test_placement_weights_rejects_unknown_keys() -> None:
+    with pytest.raises(Exception):
+        PlacementWeights(crital_asset=3.0)
+
+
 # ---------------------------------------------------------------------------
 # _build_weight_map
 # ---------------------------------------------------------------------------

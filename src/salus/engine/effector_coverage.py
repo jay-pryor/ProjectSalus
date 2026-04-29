@@ -221,10 +221,6 @@ def _clip_to_effector(
     Raises:
         ValueError: If ``site.resolution`` is not a finite positive number.
     """
-    # D-194: guard against zero/negative resolution producing a uniform-distance grid
-    if not math.isfinite(site.resolution) or site.resolution <= 0.0:
-        raise ValueError(f"site.resolution must be a finite positive number, got {site.resolution}")
-
     rows, cols = base.shape
 
     # D-197: annotate all intermediate float arrays

@@ -68,94 +68,14 @@ const _ALL_LAYERS = [
 ];
 
 // ---------------------------------------------------------------------------
-// File parsing helpers (exported for unit tests)
+// File parsing helpers (imported from _helpers.js; index.js exports only { init })
 // ---------------------------------------------------------------------------
-
-/**
- * Extract the SALUS_DATA payload from a viewer_data.js text blob.
- * Returns the parsed object on success, or throws with a clear message.
- *
- * The expected format is:  window.SALUS_DATA={...};\n
- * We match non-greedy up to the last `};` and JSON.parse the inner literal.
- */
-export function _parseScenarioJsText(text) {
-  // Allow whitespace and optional leading semicolons / comments
-  const match = /window\.SALUS_DATA\s*=\s*(\{[\s\S]*\})\s*;?\s*$/m.exec(text);
-  if (!match) {
-    throw new Error('File does not match the expected "window.SALUS_DATA={...}" format.');
-  }
-  return JSON.parse(match[1]);
-}
-
-/**
- * Parse scenario-B file contents based on filename extension.
- * Delegates to _parseScenarioJsText for .js, JSON.parse for .json.
- */
-export function _parseScenarioFile(text, filename) {
-  const lower = String(filename ?? '').toLowerCase();
-  if (lower.endsWith('.js')) return _parseScenarioJsText(text);
-  if (lower.endsWith('.json')) return JSON.parse(text);
-  // No extension — try JSON first, fall back to JS extraction
-  try {
-    return JSON.parse(text);
-  } catch (_) {
-    return _parseScenarioJsText(text);
-  }
-}
-
-/**
- * Validate a parsed scenario-B payload has the minimum fields required for
- * comparison.  Returns { ok: true } or { ok: false, reason: string }.
- */
-export function _validateScenarioBPayload(obj) {
-  if (obj == null || typeof obj !== 'object' || Array.isArray(obj)) {
-    return { ok: false, reason: 'Payload is not a JSON object.' };
-  }
-  if (!obj.layers || typeof obj.layers !== 'object') {
-    return { ok: false, reason: 'Missing "layers" object (expected a composite coverage layer).' };
-  }
-  // "composite" is the key we rely on for the diff; other layer keys are optional
-  if (!obj.layers.composite || typeof obj.layers.composite !== 'object') {
-    return { ok: false, reason: 'Missing "layers.composite" FeatureCollection.' };
-  }
-  return { ok: true };
-}
-
-// ---------------------------------------------------------------------------
-// Feature centroid utilities (feature-level swipe filtering)
-// ---------------------------------------------------------------------------
-
-/**
- * Compute a rough longitude centroid for a GeoJSON feature.
- * Used only by the swipe filter to decide which side of the divider a feature
- * belongs to.  For features straddling the divider, centroid classification is
- * an acknowledged approximation (polygon-edge precision isn't possible without
- * a spatial clip, which is server-side via /api/compare).
- */
-export function _featureCentroidLng(feature) {
-  const g = feature?.geometry;
-  if (!g) return null;
-  const coords = g.coordinates;
-  if (coords == null) return null;
-
-  // Flatten arbitrary coordinate nesting into a list of [lng, lat] positions
-  const positions = [];
-  function walk(node) {
-    if (!Array.isArray(node)) return;
-    // A [lng, lat] position has two numeric elements
-    if (typeof node[0] === 'number' && typeof node[1] === 'number') {
-      positions.push(node);
-      return;
-    }
-    for (const child of node) walk(child);
-  }
-  walk(coords);
-
-  if (positions.length === 0) return null;
-  let sum = 0;
-  for (const p of positions) sum += p[0];
-  return sum / positions.length;
-}
+import {
+  _parseScenarioJsText,
+  _parseScenarioFile,
+  _validateScenarioBPayload,
+  _featureCentroidLng,
+} from './_helpers.js';
 
 // ---------------------------------------------------------------------------
 // Module entry point

@@ -1,7 +1,7 @@
 {
   "id": "coverage-viewer",
   "label": "Coverage Viewer",
-  "reads": ["terrain", "placements", "sim_results", "zones"],
+  "reads": ["terrain", "sim_results", "zones"],
   "writes": [],
   "prerequisites": ["terrain", "sim_results"],
   "emits": ["placement:pending"],

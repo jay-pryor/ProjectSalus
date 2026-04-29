@@ -341,13 +341,13 @@ test('manifest writes optimiser_results and placements', async () => {
   assert.ok(m.writes.includes('placements'), 'writes must include placements — applyBtn calls state.set("placements", merged)');
 });
 
-test('manifest prerequisites are terrain and zones', async () => {
+test('manifest prerequisites are terrain only (zones removed — optional for backend)', async () => {
   const raw = await readFile(
     path.resolve(__dirname, '../modules/optimiser/manifest.json'), 'utf8'
   );
   const m = JSON.parse(raw);
   assert.ok(m.prerequisites.includes('terrain'), 'prerequisites must include terrain');
-  assert.ok(m.prerequisites.includes('zones'), 'prerequisites must include zones');
+  assert.ok(!m.prerequisites.includes('zones'), 'zones must not be a prerequisite (zones only affect scoring weights, not required by backend)');
 });
 
 test('manifest subscribes to zone:added, zone:removed, constraint:updated', async () => {

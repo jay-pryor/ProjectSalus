@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import copy
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
@@ -55,8 +55,15 @@ class SanitiseConfig:
     level: SanitiseLevel = SanitiseLevel.REDACTED
     """Sanitisation depth."""
 
-    coordinate_precision: int = 4
-    """Decimal places for WGS84 coordinates (4 dp ≈ 11 m accuracy)."""
+    coordinate_precision: int = field(default=4)
+    """Decimal places for WGS84 coordinates (4 dp ≈ 11 m accuracy). Must be >= 0."""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.coordinate_precision, int):
+            got = type(self.coordinate_precision).__name__
+            raise TypeError(f"coordinate_precision must be an int, got {got}")
+        if self.coordinate_precision < 0:
+            raise ValueError(f"coordinate_precision must be >= 0, got {self.coordinate_precision}")
 
 
 def sanitise_for_export(viewer_data: ViewerData, config: SanitiseConfig) -> ViewerData:

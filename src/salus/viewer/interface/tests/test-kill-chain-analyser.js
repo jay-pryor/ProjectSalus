@@ -263,13 +263,14 @@ test('manifest id is kill-chain-analyser', async () => {
   assert.equal(m.id, 'kill-chain-analyser');
 });
 
-test('manifest reads terrain, sim_results, threat_corridors', async () => {
+test('manifest reads sim_results, threat_corridors (terrain removed — no-op watch)', async () => {
   const m = JSON.parse(await readFile(
     path.resolve(__dirname, '../modules/kill-chain-analyser/manifest.json'), 'utf8'
   ));
-  for (const k of ['terrain', 'sim_results', 'threat_corridors']) {
+  for (const k of ['sim_results', 'threat_corridors']) {
     assert.ok(m.reads.includes(k), `reads must include ${k}`);
   }
+  assert.ok(!m.reads.includes('terrain'), 'terrain must not be in reads (no-op watch removed)');
 });
 
 test('manifest writes is empty', async () => {
@@ -318,15 +319,16 @@ test('init mounts exactly one panel element', () => {
   assert.equal(api._mounted.length, 1);
 });
 
-test('init registers watch on sim_results and threat_corridors and terrain', () => {
+test('init registers watch on sim_results and threat_corridors (terrain no-op removed)', () => {
   const api = makeApi();
   init(api);
-  for (const key of ['sim_results', 'threat_corridors', 'terrain']) {
+  for (const key of ['sim_results', 'threat_corridors']) {
     assert.ok(
       (api._stateWatchers[key] ?? []).length > 0,
       `must register watch on ${key}`
     );
   }
+  assert.equal((api._stateWatchers['terrain'] ?? []).length, 0, 'terrain no-op watch must not be registered');
 });
 
 test('init subscribes to simulation:complete bus event', () => {
@@ -600,11 +602,11 @@ test('simulation:complete bus event triggers re-render', () => {
 test('onUnmount unsubscribes all state watchers', () => {
   const api = makeApi();
   init(api);
-  for (const key of ['sim_results', 'threat_corridors', 'terrain']) {
+  for (const key of ['sim_results', 'threat_corridors']) {
     assert.ok((api._stateWatchers[key] ?? []).length > 0, `${key} watcher must be registered`);
   }
   api._runUnmount();
-  for (const key of ['sim_results', 'threat_corridors', 'terrain']) {
+  for (const key of ['sim_results', 'threat_corridors']) {
     assert.equal((api._stateWatchers[key] ?? []).length, 0, `${key} watcher must be removed`);
   }
 });
