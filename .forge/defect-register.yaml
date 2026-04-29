@@ -4901,7 +4901,7 @@ defects:
     description: "Bug #10: mercantile and Pillow imported at runtime in app.py but missing from interface extra in pyproject.toml. Fresh install crashes with ModuleNotFoundError."
     resolution: "Added mercantile>=1.2 and Pillow>=10.0 to interface extra."
     status: resolved
-    commit: ""
+    commit: bae5a97
 
   - id: D-445
     severity: medium
@@ -4912,7 +4912,7 @@ defects:
     description: "Bug #11: Dockerfile installs .[dev] not .[dev,interface]. FastAPI and uvicorn in interface extra. Docker image cannot start API server."
     resolution: "Changed pip install to .[dev,interface]."
     status: resolved
-    commit: ""
+    commit: bae5a97
 
   - id: D-446
     severity: medium
@@ -4923,7 +4923,7 @@ defects:
     description: "Bug #17: scenario-comparison/index.js exports _parseScenarioJsText, _parseScenarioFile, _validateScenarioBPayload, _featureCentroidLng alongside init. Architecture requires index.js exports only { init }."
     resolution: "Moved helpers to _helpers.js; index.js imports from _helpers.js and exports only { init }. Test updated to import from _helpers.js."
     status: resolved
-    commit: ""
+    commit: bae5a97
 
   - id: D-447
     severity: low
@@ -4934,7 +4934,7 @@ defects:
     description: "Bug #20: optimiser manifest prerequisites includes zones. Backend does not require zones (only affects scoring weights). Blocks optimiser access until zones are defined."
     resolution: "Removed zones from prerequisites; changed to [terrain]."
     status: resolved
-    commit: ""
+    commit: bae5a97
 
   - id: D-448
     severity: low
@@ -4945,7 +4945,7 @@ defects:
     description: "Bug #24: _test-module is first entry in modules/index.json and appears as nav bar entry in every deployment."
     resolution: "Removed _test-module from index.json."
     status: resolved
-    commit: ""
+    commit: bae5a97
 
   - id: D-449
     severity: low
@@ -4956,7 +4956,7 @@ defects:
     description: "Bug #26: coverage-viewer manifest reads includes placements but module never calls get/watch on placements. Dead manifest declaration."
     resolution: "Removed placements from coverage-viewer manifest reads."
     status: resolved
-    commit: ""
+    commit: bae5a97
 
   - id: D-450
     severity: high
@@ -4967,7 +4967,7 @@ defects:
     description: "Bug #31: SiteModel.resolution missing >0 validator. Zero or negative resolution passes Pydantic and reaches engine code where it is used as a divisor."
     resolution: "Added Field(gt=0) to resolution field. Added field_validator _validate_resolution that also checks math.isfinite() (D-455 companion fix)."
     status: resolved
-    commit: ""
+    commit: bae5a97
 
   - id: D-451
     severity: medium
@@ -4978,7 +4978,7 @@ defects:
     description: "Bug #32: SanitiseConfig.coordinate_precision missing ge=0 bound. Negative precision causes round(v, -N) — all coordinates become multiples of 10^N, producing geometrically invalid GeoJSON."
     resolution: "Added __post_init__ validator that raises ValueError if coordinate_precision < 0."
     status: resolved
-    commit: ""
+    commit: bae5a97
 
   - id: D-452
     severity: medium
@@ -4989,7 +4989,7 @@ defects:
     description: "Bug #33: PlacementWeights missing extra=forbid. Unknown weight keys (e.g. typo crital_asset) are silently discarded."
     resolution: "Added model_config = ConfigDict(extra=forbid)."
     status: resolved
-    commit: ""
+    commit: bae5a97
 
   - id: D-453
     severity: low
@@ -5000,7 +5000,7 @@ defects:
     description: "Bug #34 (gap-analysis): Empty simulation:complete subscription with no body. Generates unnecessary cleanup entry."
     resolution: "Removed the empty bus subscription. Updated manifest subscribes to []."
     status: resolved
-    commit: ""
+    commit: bae5a97
 
   - id: D-454
     severity: low
@@ -5011,7 +5011,7 @@ defects:
     description: "Bug #34 (kill-chain-analyser): No-op terrain watch with comment-only body. Generates unnecessary cleanup entry."
     resolution: "Removed the no-op watch. Updated manifest reads to remove terrain."
     status: resolved
-    commit: ""
+    commit: bae5a97
 
   - id: D-455
     severity: high
@@ -5022,7 +5022,7 @@ defects:
     description: "Field(gt=0) does not reject float('inf') in Pydantic v2. SiteModel can be constructed with resolution=inf. All downstream grid coordinate computations (viewshed, coverage, placement) silently produce arrays of inf or NaN — wrong simulation output with no error raised."
     resolution: "Added field_validator for resolution that calls math.isfinite() and raises ValueError if not finite. Added test_rejects_infinite_resolution."
     status: resolved
-    commit: ""
+    commit: bae5a97
 
   - id: D-456
     severity: medium
@@ -5033,7 +5033,7 @@ defects:
     description: "SanitiseConfig.coordinate_precision annotated as int but no runtime type check. A float value passes __post_init__ guard and causes TypeError deep inside _round_geojson_coords with an unhelpful message."
     resolution: "Added isinstance(self.coordinate_precision, int) check in __post_init__ that raises TypeError with clear message. Added test_rejects_float_coordinate_precision."
     status: resolved
-    commit: ""
+    commit: bae5a97
 
   - id: D-457
     severity: medium
@@ -5044,7 +5044,7 @@ defects:
     description: "Engine-level guard 'if not math.isfinite(site.resolution) or site.resolution <= 0.0' is now unreachable dead code after SiteModel.Field(gt=0) and _validate_resolution are added. Similar guards in viewshed.py lines 121 and 315 are also dead."
     resolution: "Removed all three now-dead guards. Resolution validation is enforced by SiteModel.Field(gt=0) + _validate_resolution at construction time."
     status: resolved
-    commit: ""
+    commit: bae5a97
 
   - id: D-458
     severity: low
@@ -5055,4 +5055,4 @@ defects:
     description: "PlacementWeights(**request.constraints.weights) now raises ValidationError for unknown keys (extra=forbid). Verify this is caught by the SSE error pipeline rather than producing an unhandled server exception."
     resolution: "Confirmed: _run_optimise_pipeline wraps in bare except Exception (line 774) that catches ValidationError and sends {type: error, message: str(exc)} to the SSE queue. Client receives a structured error event. No code change needed."
     status: accepted_documented
-    commit: ""
+    commit: bae5a97

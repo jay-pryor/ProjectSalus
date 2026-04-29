@@ -116,7 +116,7 @@ _Fix:_ Added explicit `if protected_point is None: raise ValueError(...)` guard 
 
 All 11 Haiku-tier items resolved in I-8 (2026-04-29). Fixes recorded in
 `.forge/defect-register.yaml` (D-444 through D-454).
-`.forge/gate-proofs/I-8.yaml`. Commit: TBD.
+`.forge/gate-proofs/I-8.yaml`. Commit: bae5a97.
 
 **#10 mercantile and Pillow missing from pyproject.toml** — RESOLVED (D-444, I-8)
 Both are imported at runtime in `app.py` for terrain tile generation but appear in no dependency group. Fresh install crashes with `ModuleNotFoundError`.

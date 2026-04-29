@@ -7,10 +7,10 @@ quality_gates:
   G3_import: pass
   G4_type: pass          # informational only — pre-existing import-untyped for rasterio/shapely/yaml
   G5_security: pass      # 0 findings; comment-text warnings only
-  G6_unit_test: pass     # 1294 Python passed, 3 skipped; 637 JS passed
-  G7_coverage: pass      # ≥82% confirmed (baseline from I-7; new tests added, dead code removed)
+  G6_unit_test: pass     # 1294 Python passed, 3 skipped; 637 JS passed. Commit: bae5a97
+  G7_coverage: pass      # 80.11% confirmed (1294 passed, 3 skipped)
   G8_secrets: pass       # 0 files with potential secrets
-  coverage_pct: 82
+  coverage_pct: 80
 review:
   l1_standards:
     testing: pass
@@ -49,5 +49,3 @@ notes:
   - "D-458 found by regression-reviewer: accepted_documented — ValidationError from PlacementWeights with extra=forbid is caught by the bare except in _run_optimise_pipeline and emitted as SSE error event."
   - "scenario-comparison/_helpers.js new file — pure utility functions extracted from index.js to allow tests to import helpers without violating module isolation rule."
   - "JS test count: 637 pass (test-coverage-viewer, test-gap-analysis, test-kill-chain-analyser, test-optimiser, test-scenario-comparison updated)"
-</content>
-</invoke>
