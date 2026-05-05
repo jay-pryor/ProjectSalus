@@ -5066,7 +5066,7 @@ defects:
     description: "FileReader in mountShellNavButtons has no onerror handler. If a file read fails (permission error, disk error, handle invalidated), the error is silently swallowed — no console message, no bus event, no user feedback."
     resolution: "Added reader.onerror handler that logs the error to console.error."
     status: resolved
-    commit: "PENDING"
+    commit: e0a9578
 
   - id: D-460
     severity: medium
@@ -5077,7 +5077,7 @@ defects:
     description: "_expected_modules() opens modules/index.json with no exception handling. Missing or malformed file raises FileNotFoundError/JSONDecodeError across 4 dependent test functions instead of a graceful skip."
     resolution: "Wrapped open() in try/except (FileNotFoundError, json.JSONDecodeError); calls pytest.skip() on error."
     status: resolved
-    commit: "PENDING"
+    commit: e0a9578
 
   - id: D-461
     severity: medium
@@ -5088,7 +5088,7 @@ defects:
     description: "shell:library-load-error bus event is no longer emitted on startup library fetch failures. Previously _fetchLibrary captured the live bus and emitted unconditionally on HTTP error/network failure. Now bus=null is passed during pre-fetch, so the if(bus) guard suppresses all emissions. The JSDoc comment at step 8 promises compensation emission but it was not implemented."
     resolution: "Added compensation emission in main() step 8: after bus is created, emits shell:library-load-error for any library that ended up empty (meaning both API and SALUS_DATA fallback failed)."
     status: resolved
-    commit: "PENDING"
+    commit: e0a9578
 
   - id: D-462
     severity: medium
@@ -5099,7 +5099,7 @@ defects:
     description: "window._salusShell.emitScenario and onScenario expose the raw unrestricted shell bus to the global window scope with no event filtering. Any caller (browser console, injected scripts, extensions) can emit arbitrary event names bypassing VALID_EVENTS. The wrapper adds no VALID_EVENTS guard."
     resolution: "Added _ALLOWED_SCENARIO_EVENTS Set; both emitScenario and onScenario now throw if the event name is not in the set."
     status: resolved
-    commit: "PENDING"
+    commit: e0a9578
 
   - id: D-463
     severity: high
@@ -5110,4 +5110,4 @@ defects:
     description: "salus interface --scenario does not pre-generate terrain tiles. Spec S14.14-4 requires: start FastAPI server, pre-generate terrain tiles if not present, open browser. When scenario is provided the DEM path is never extracted and no tile generation is triggered. The CLI only prints a message directing users to the Load Scenario button."
     resolution: "Added pregen_terrain_from_path() to app.py; cli.py interface command now loads the scenario YAML, extracts site_dem_path, and calls pregen_terrain_from_path() before uvicorn starts. Two unit tests added."
     status: resolved
-    commit: "PENDING"
+    commit: e0a9578
