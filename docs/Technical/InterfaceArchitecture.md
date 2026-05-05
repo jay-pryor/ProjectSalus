@@ -858,20 +858,60 @@ On error: `data: {"type": "error", "message": "..."}` followed by stream close.
 Because module inclusion is purely file-based, any subset of modules can be
 shipped. Examples:
 
-**Minimal (no backend):**
-Terrain Loader + Coverage Viewer. Terrain and `viewer_data.js` are
-pre-generated. No simulation, no placement editing.
+### 8.1 Minimal deployment (no backend, viewer-only)
 
-**Field planning kit:**
-Terrain Loader + Library Browser + Placement Editor + Simulation Runner +
-Coverage Viewer + Budget Tracker. No optimiser, no reporting.
+Terrain Loader + Coverage Viewer only. Terrain tiles and scenario data are
+pre-generated. No simulation, no placement editing, no FastAPI backend required.
 
-**Full analyst suite:**
-All modules. Requires the FastAPI backend running locally.
+**Script:** `src/salus/viewer/interface/deploy-minimal.sh`
 
-**Customer deliverable:**
-Terrain Loader + Coverage Viewer only, with pre-generated sanitised
-`viewer_data.js`. No backend, no editable placements.
+```bash
+# Generate viewer data via salus CLI
+salus viewer scenario.yaml --output viewer_output/
+
+# Package the minimal viewer
+src/salus/viewer/interface/deploy-minimal.sh /tmp/salus-minimal viewer_output/viewer_data.js
+
+# Serve (no backend required)
+python3 -m http.server 8080 --directory /tmp/salus-minimal
+```
+
+The shell's library pre-load falls back to `window.SALUS_DATA.sensor_library` and
+`window.SALUS_DATA.effector_library` from `viewer_data.js` when `/api/sensors` and
+`/api/effectors` return 404 (no backend running). If `SALUS_DATA` is also absent,
+the shell falls back to empty objects — the viewer renders without sensor badges.
+
+### 8.2 Full analyst suite (FastAPI backend + all modules)
+
+All 14 modules. Requires the FastAPI backend running locally. The backend serves
+both the API routes (`/api/*`) and the interface static files (`/interface/*`, `/static/*`).
+
+**Command:**
+
+```bash
+salus interface --scenario site.yaml --port 5000
+```
+
+This command:
+1. Starts the FastAPI backend on the specified port.
+2. Opens `http://127.0.0.1:5000/interface/` in the default browser after a 1-second delay
+   (giving uvicorn time to bind before the browser's first request).
+3. Handles Ctrl+C gracefully — uvicorn catches SIGINT and terminates cleanly.
+
+The interface HTML, JS modules, and vendor assets are served by FastAPI's
+`StaticFiles` mount (registered last, so `/api/*` routes always take precedence).
+
+### 8.3 Scenario persistence (Save / Load)
+
+The shell nav bar includes **Save Scenario** and **Load Scenario** buttons that
+operate on the full session state (all keys except `ui`):
+
+- **Save:** Serialises state to JSON and triggers a browser download named
+  `scenario-{date}.salus.json`.
+- **Load:** Opens a file picker accepting `.salus.json`. If the session has
+  active placements the user is shown a confirmation modal before the state is
+  overwritten. After loading, all module `watch()` subscriptions fire
+  automatically as each state key is written.
 
 ---
 

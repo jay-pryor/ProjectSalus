@@ -8,13 +8,37 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <!-- Loading overlay — shown while shell fetches sensor/effector libraries -->
+  <div id="loading-overlay" aria-live="polite" aria-busy="true">
+    <div class="loading-content">
+      <div class="loading-spinner" aria-hidden="true"></div>
+      <p>Loading Salus…</p>
+    </div>
+  </div>
+
+  <!-- Confirmation modal for scenario load when session has active placements -->
+  <dialog id="load-confirm-modal" aria-labelledby="load-confirm-title">
+    <h2 id="load-confirm-title">Replace current session?</h2>
+    <p>Loading a scenario will overwrite your current placements and results.</p>
+    <div class="modal-actions">
+      <button id="load-confirm-ok">Load anyway</button>
+      <button id="load-confirm-cancel">Cancel</button>
+    </div>
+  </dialog>
+
+  <!-- Hidden file input for scenario load -->
+  <input type="file" id="shell-load-file" accept=".salus.json" style="display:none" aria-hidden="true">
+
   <div id="app">
-    <nav id="nav-bar" aria-label="Module navigation"></nav>
+    <nav id="nav-bar" aria-label="Module navigation">
+      <!-- Module buttons injected by mode-manager; shell buttons appended below -->
+    </nav>
     <div id="main">
       <div id="map"></div>
       <div id="panel-slot" aria-live="polite"></div>
     </div>
   </div>
+
   <!-- MapLibreGL global loaded before shell so maplibregl is available to shell.js -->
   <script src="../static/vendor/maplibre-gl.js"></script>
   <script type="module" src="shell.js"></script>

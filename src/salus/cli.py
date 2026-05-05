@@ -2436,24 +2436,42 @@ def interface(
         )
         sys.exit(1)
 
-    interface_dir = Path(__file__).parent / "viewer" / "static"
-    index_html = interface_dir / "interface" / "index.html"
+    base_url = f"http://{host}:{port}"
+    interface_url = f"{base_url}/interface/"
+
+    if scenario:
+        try:
+            from salus.ingest.scenario import load_scenario
+            from salus.interface_api.app import pregen_terrain_from_path
+
+            sc = load_scenario(scenario)
+            dem_path = Path(sc.site_dem_path)
+            session_id = pregen_terrain_from_path(dem_path)
+            if session_id:
+                click.echo(
+                    f"Pre-generating terrain tiles for {dem_path.name} (session {session_id})"
+                )
+            else:
+                click.echo(
+                    f"Warning: could not pre-generate terrain tiles for {scenario}. "
+                    "Load terrain manually via the interface."
+                )
+        except Exception as exc:
+            click.echo(f"Warning: scenario pre-load failed: {exc}")
 
     if not no_browser:
+        import threading
+        import time
         import webbrowser
 
-        url = f"http://{host}:{port}"
-        if index_html.exists():
-            # Open the bundled interface HTML via the file:// protocol
-            file_url = index_html.resolve().as_uri()
-            click.echo(f"Opening interface: {file_url}")
-            webbrowser.open(file_url)
-        else:
-            click.echo(f"Opening API root: {url}")
-            webbrowser.open(url)
+        # Open the browser after a short delay so uvicorn can bind the port
+        # before the browser's first request arrives.
+        def _open_browser() -> None:
+            time.sleep(1.0)
+            click.echo(f"Opening interface: {interface_url}")
+            webbrowser.open(interface_url)
 
-    click.echo(f"Starting Salus Interface API on http://{host}:{port}")
-    if scenario:
-        click.echo(f"Scenario: {scenario}")
+        threading.Thread(target=_open_browser, daemon=True).start()
 
+    click.echo(f"Starting Salus Interface API on {base_url}")
     uvicorn.run(app, host=host, port=port, log_level="info")

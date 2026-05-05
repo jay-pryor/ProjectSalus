@@ -128,3 +128,120 @@ html, body {
 #panel-slot:not(:empty) {
   display: block;
 }
+
+/* ------------------------------------------------------------------ */
+/* Loading overlay                                                      */
+/* ------------------------------------------------------------------ */
+
+#loading-overlay {
+  position: fixed;
+  inset: 0;
+  background: #0d0d1a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+#loading-overlay.hidden {
+  display: none;
+}
+
+.loading-content {
+  text-align: center;
+  color: #8888aa;
+}
+
+.loading-spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid #252540;
+  border-top-color: #4488cc;
+  border-radius: 50%;
+  margin: 0 auto 12px;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ------------------------------------------------------------------ */
+/* Shell-level nav buttons (Save / Load Scenario)                      */
+/* ------------------------------------------------------------------ */
+
+#nav-bar .shell-action {
+  margin-top: auto;
+  background: transparent;
+  color: #6688aa;
+  border-color: #1e1e30;
+  font-size: 12px;
+}
+
+#nav-bar .shell-action:hover:not(:disabled) {
+  background: #1a2a3a;
+  color: #aaccee;
+  border-color: #2a3a4a;
+}
+
+#nav-bar .shell-divider {
+  height: 1px;
+  background: #1e1e30;
+  margin: 4px 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Scenario load confirmation modal                                     */
+/* ------------------------------------------------------------------ */
+
+#load-confirm-modal {
+  background: #13131f;
+  color: #d0d0e0;
+  border: 1px solid #252540;
+  border-radius: 6px;
+  padding: 24px;
+  max-width: 360px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+}
+
+#load-confirm-modal::backdrop {
+  background: rgba(0, 0, 0, 0.6);
+}
+
+#load-confirm-modal h2 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  color: #ffffff;
+}
+
+#load-confirm-modal p {
+  margin: 0 0 20px;
+  color: #9090aa;
+  font-size: 13px;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.modal-actions button {
+  background: #1a1a2e;
+  color: #d0d0e0;
+  border: 1px solid #252540;
+  border-radius: 4px;
+  padding: 8px 16px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.modal-actions button:first-child {
+  background: #1a3a5a;
+  border-color: #2a5a8a;
+  color: #ffffff;
+}
+
+.modal-actions button:hover {
+  opacity: 0.85;
+}

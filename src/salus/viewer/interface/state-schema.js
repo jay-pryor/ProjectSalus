@@ -47,4 +47,5 @@ export const VALID_EVENTS = new Set([
   'report:generated',
   'scenario:loaded',
   'scenario:saved',
+  'shell:library-load-error',
 ]);

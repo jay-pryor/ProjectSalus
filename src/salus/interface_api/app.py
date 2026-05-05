@@ -27,6 +27,7 @@ import numpy as np
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from salus import __version__
@@ -186,7 +187,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"http://localhost(:\d+)?",
+    allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
@@ -1647,3 +1648,115 @@ async def terrain_tile(z: int, x: int, y: int) -> Response:
 async def terrain_tile_sessioned(session_id: str, z: int, x: int, y: int) -> Response:
     """Serve a Terrarium tile scoped to *session_id*.  See ``terrain_tile``."""
     return await _serve_terrain_tile(session_id, z, x, y)
+
+
+# ---------------------------------------------------------------------------
+# CLI helper — pre-generate terrain tiles before uvicorn starts (D-463)
+# ---------------------------------------------------------------------------
+
+
+def pregen_terrain_from_path(dem_path: Path) -> str | None:
+    """Create a terrain session for *dem_path* and start background tile generation.
+
+    Called by ``salus interface --scenario`` before uvicorn starts.  Because
+    uvicorn runs in the same process, the session registered here is immediately
+    visible to the serving app.
+
+    The DEM is used in-place (not copied).  Its parent directory is added to
+    ``_ALLOWED_DEM_DIRS`` so tile requests will pass the path guard.
+
+    Returns:
+        The new session_id string, or None if the DEM cannot be read.
+    """
+    try:
+        resolved = dem_path.resolve(strict=True)
+    except (FileNotFoundError, OSError) as exc:
+        _log.warning("pregen_terrain: DEM not found: %s — %s", dem_path, exc)
+        return None
+
+    _register_allowed_dem_dir(resolved.parent)
+    _TERRAIN_DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+    session_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+    session_dir = _TERRAIN_DATA_DIR / session_id
+    session_dir.mkdir(parents=True)
+    tile_dir = session_dir / "tiles"
+    tile_dir.mkdir()
+
+    try:
+        bounds_wgs84, centre_wgs84, resolution_m, crs_epsg = _compute_dem_bounds_wgs84(resolved)
+    except Exception as exc:
+        _log.warning("pregen_terrain: failed to read DEM metadata from %s: %s", resolved, exc)
+        return None
+
+    import mercantile  # lazy — avoid adding to import-time cost
+
+    min_zoom, max_zoom = _compute_zoom_levels(resolution_m)
+    west, south, east, north = bounds_wgs84
+    total_tiles = sum(
+        len(list(mercantile.tiles(west, south, east, north, zooms=z)))
+        for z in range(min_zoom, max_zoom + 1)
+    )
+
+    metadata: dict[str, Any] = {
+        "session_id": session_id,
+        "dem_path": str(resolved),
+        "dsm_path": None,
+        "crs_epsg": crs_epsg,
+        "bounds_wgs84": bounds_wgs84,
+        "centre_wgs84": centre_wgs84,
+        "resolution_m": resolution_m,
+        "tile_url_template": (f"/api/terrain/sessions/{session_id}/tiles/{{z}}/{{x}}/{{y}}.png"),
+        "tile_progress_url": f"/api/terrain/sessions/{session_id}/tile-progress",
+        "terrain_tile_count": total_tiles,
+        "terrain_min_zoom": min_zoom,
+        "terrain_max_zoom": max_zoom,
+    }
+
+    global _terrain_latest_session_id
+    with _terrain_session_lock:
+        session_state = _new_terrain_session_state()
+        session_state.update(
+            {
+                "dem_path": resolved,
+                "dsm_path": None,
+                "metadata": metadata,
+                "tile_dir": tile_dir,
+            }
+        )
+        _terrain_sessions[session_id] = session_state
+        _terrain_latest_session_id = session_id
+
+    t = threading.Thread(
+        target=_run_tile_generation,
+        args=(session_id, resolved, tile_dir, min_zoom, max_zoom, list(bounds_wgs84), total_tiles),
+        daemon=True,
+    )
+    t.start()
+    return session_id
+
+
+# ---------------------------------------------------------------------------
+# Static file serving — interface HTML/JS/CSS (S14.14-4)
+#
+# Mounted last so /api/* routes take precedence.  The interface module
+# JS files use relative imports (e.g. ../static/vendor/...) so both
+# /interface and /static must be mounted at the same path depth.
+# ---------------------------------------------------------------------------
+_VIEWER_ROOT = Path(__file__).parent.parent / "viewer"
+_INTERFACE_DIR = _VIEWER_ROOT / "interface"
+_STATIC_DIR = _VIEWER_ROOT / "static"
+
+if _INTERFACE_DIR.exists():
+    app.mount(
+        "/interface",
+        StaticFiles(directory=_INTERFACE_DIR, html=True),
+        name="interface",
+    )
+
+if _STATIC_DIR.exists():
+    app.mount(
+        "/static",
+        StaticFiles(directory=_STATIC_DIR),
+        name="static-assets",
+    )
