@@ -247,30 +247,65 @@ def export_viewer_data(
         if corridor_cov_values:
             stats_dict["worst_corridor_coverage_pct"] = round(min(corridor_cov_values), 2)
 
-    # Threat corridors — compute WGS84 paths from corridor geometry
-    import pyproj
+    # Threat corridors — compute WGS84 paths from corridor geometry.
+    # D-430 / D-471: contain pyproj failure for the corridor path. The earlier
+    # vectorisation calls (_vectorise_coverage, _build_sensor_geojson) have
+    # already exercised pyproj by this point; this guard catches a transient
+    # / Transformer-specific construction failure so the rest of the export
+    # still proceeds with empty corridor paths instead of aborting.
+    _transformer_to_wgs84: Any | None
+    try:
+        import pyproj
 
-    _transformer_to_wgs84 = pyproj.Transformer.from_crs(
-        src_crs, CRS.from_epsg(4326), always_xy=True
-    )
-    protected_point = sim_results.scenario.protected_point
-    corridor_list = [
-        _serialise_corridor(
-            r,
-            _compute_corridor_path_wgs84(r, protected_point, _transformer_to_wgs84),
+        _transformer_to_wgs84 = pyproj.Transformer.from_crs(
+            src_crs, CRS.from_epsg(4326), always_xy=True
         )
-        for r in sim_results.corridor_results
-    ]
+    except Exception as exc:
+        _log.warning(
+            "pyproj Transformer construction failed (%s); corridor WGS84 paths will be empty.",
+            exc,
+        )
+        _transformer_to_wgs84 = None
 
-    # Kill-chain results
-    kc_list = [_serialise_kill_chain(r) for r in sim_results.kill_chain_results]
+    protected_point = sim_results.scenario.protected_point
 
-    # Saturation result
-    sat_dict = (
-        _serialise_saturation(sim_results.saturation_result)
-        if sim_results.saturation_result is not None
-        else None
-    )
+    # D-429 / D-434 / D-464: serialise corridors and kill-chain results in
+    # lockstep so positional alignment (kill_chain[i] ↔ corridor[i], guaranteed
+    # by the engine, see kill_chain.py:128) is preserved when either serialiser
+    # fails. The legacy static viewer (src/salus/viewer/static/app.js) and the
+    # interactive kill-chain-analyser both index into kill_chain_results with
+    # values that must correspond to the same row in corridor_results — we
+    # therefore drop a kill_chain entry whenever its corridor entry was dropped
+    # and vice versa.
+    n_kc = len(sim_results.kill_chain_results)
+    corridor_list: list[dict[str, Any]] = []
+    kc_list: list[dict[str, Any]] = []
+    for i, corridor in enumerate(sim_results.corridor_results):
+        ser_c = _serialise_corridor(
+            corridor,
+            (
+                _compute_corridor_path_wgs84(corridor, protected_point, _transformer_to_wgs84)
+                if _transformer_to_wgs84 is not None
+                else []
+            ),
+        )
+        if not ser_c:
+            continue
+        if i < n_kc:
+            ser_kc = _serialise_kill_chain(sim_results.kill_chain_results[i])
+            if not ser_kc:
+                # Drop both halves of the pair to keep indices aligned.
+                continue
+            kc_list.append(ser_kc)
+        corridor_list.append(ser_c)
+
+    # Saturation result — D-434: a falsy serialiser result is dropped.
+    sat_dict: dict[str, Any] | None
+    if sim_results.saturation_result is not None:
+        ser_sat = _serialise_saturation(sim_results.saturation_result)
+        sat_dict = ser_sat if ser_sat else None
+    else:
+        sat_dict = None
 
     # Terrain tiles
     terrain_tiles: dict[str, str]
@@ -629,8 +664,13 @@ def _serialise_corridor(
             "path_wgs84": path_wgs84 if path_wgs84 is not None else [],
         }
     except Exception as exc:
-        _log.warning(
-            "_serialise_corridor failed for '%s': %s", getattr(result, "threat_name", "?"), exc
+        # D-466: error level — when this branch fires the entry is dropped from
+        # ViewerData.corridor_results (with its paired kill_chain entry) so
+        # silent data loss in production must surface above warning threshold.
+        _log.error(
+            "_serialise_corridor failed for '%s': %s — entry dropped",
+            getattr(result, "threat_name", "?"),
+            exc,
         )
         return {}
 
@@ -651,7 +691,8 @@ def _serialise_kill_chain(result: KillChainResult) -> dict[str, Any]:
             "second_engagement_possible": result.second_engagement_possible,
         }
     except Exception as exc:
-        _log.warning("_serialise_kill_chain failed: %s", exc)
+        # D-466: error level — entry will be dropped, paired corridor too.
+        _log.error("_serialise_kill_chain failed: %s — entry dropped", exc)
         return {}
 
 
@@ -667,7 +708,8 @@ def _serialise_saturation(result: SaturationResult) -> dict[str, Any]:
             },
         }
     except Exception as exc:
-        _log.warning("_serialise_saturation failed: %s", exc)
+        # D-466: error level — saturation result is dropped to None on failure.
+        _log.error("_serialise_saturation failed: %s — saturation_result set to None", exc)
         return {}
 
 

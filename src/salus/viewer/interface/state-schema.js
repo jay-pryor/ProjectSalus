@@ -41,6 +41,7 @@ export const VALID_EVENTS = new Set([
   'optimiser:started',
   'optimiser:complete',
   'optimiser:failed',
+  'optimiser:apply',
   'corridor:added',
   'corridor:removed',
   'comparison:loaded',

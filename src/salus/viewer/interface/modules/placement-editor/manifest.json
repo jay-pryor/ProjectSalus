@@ -5,7 +5,7 @@
   "writes": ["placements"],
   "prerequisites": ["terrain"],
   "emits": ["placement:added", "placement:removed", "placement:moved"],
-  "subscribes": ["placement:pending", "optimiser:complete"],
+  "subscribes": ["placement:pending", "optimiser:complete", "optimiser:apply"],
   "layer_id_prefix": "placement-editor",
   "description": "Place, move, and remove sensors and effectors on the map. The sole writer of the placements state key."
 }

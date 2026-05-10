@@ -5,19 +5,17 @@
  *
  * Reads:       terrain, zones, constraints, sensor_library, effector_library,
  *              threat_corridors, placements
- * Writes:      optimiser_results, placements (Apply action merges proposals)
+ * Writes:      optimiser_results
  * Emits:       optimiser:started, optimiser:complete, optimiser:failed,
- *              placement:added (one per applied placement)
+ *              optimiser:apply
  * Subscribes:  zone:added, zone:removed, constraint:updated
  * Map sources: optimiser:ghost-sensors
  * Map layers:  optimiser:ghost-sensors-circle
  *
- * Note on placements write: S14.11-3 specifies that the Apply button merges
- * proposed_placements into the placements state key. manifest.json therefore
- * declares placements in both reads[] and writes[]. When S14.5 (Placement
- * Editor) is built it will become the sole writer; at that point S14.5 will
- * subscribe to optimiser:complete instead of this module writing placements
- * directly. For now (S14.5 absent) this module handles the merge.
+ * Single-writer rule (D-435): the Apply button no longer writes the
+ * `placements` state key directly. Instead it emits `optimiser:apply` with the
+ * proposed list; placement-editor (the sole owner of the placements key) does
+ * the merge and emits the per-placement `placement:added` events.
  */
 
 const _EMPTY_FC = Object.freeze({ type: 'FeatureCollection', features: [] });
@@ -515,12 +513,11 @@ export function init(api) {
   applyBtn.addEventListener('click', () => {
     if (!latestOptimiserResults) return;
     const proposed = latestOptimiserResults.proposed_placements ?? [];
-    const current = latestPlacements ?? [];
-    const merged = [...current, ...proposed];
-    api.state.set('placements', merged); // watch fires -> latestPlacements = p
-    for (const p of proposed) {
-      api.bus.emit('placement:added', p);
-    }
+    // D-435: route placement writes through the placement-editor (single-writer
+    // rule). The `optimiser:apply` event delegates the merge + state.set +
+    // placement:added emissions to placement-editor, which is the sole owner
+    // of the `placements` state key.
+    api.bus.emit('optimiser:apply', { proposed });
     _clearGhostMarkers();
     latestOptimiserResults = null;
     api.state.set('optimiser_results', null);

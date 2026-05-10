@@ -565,10 +565,37 @@ def _run_simulate_pipeline(
                 continue
             placements_by_type.setdefault(sensor.type, []).append((sensor, placement))
 
-        # After the placements_by_type loop
-        skipped_sensor_names = [
-            p.sensor_name for p in config.sensor_placements if sensor_map.get(p.sensor_name) is None
-        ]
+        # After the placements_by_type loop. D-469: dedup the skipped names so
+        # repeated placements of an unknown sensor don't blow up the message.
+        skipped_sensor_names = sorted(
+            {
+                p.sensor_name
+                for p in config.sensor_placements
+                if sensor_map.get(p.sensor_name) is None
+            }
+        )
+        # D-433: when the request had placements but every one was skipped — the
+        # most common cause is an empty / failed-to-load sensor library — surface
+        # an explicit error so the SSE consumer can distinguish this from "0%
+        # coverage by design". A bare 'complete' with 0% is misleading.
+        if config.sensor_placements and not placements_by_type:
+            cause = (
+                "sensor library is empty — every placement was skipped"
+                if not sensor_map
+                else "no placement matched a sensor in the library"
+            )
+            q.put(
+                {
+                    "type": "error",
+                    "message": (
+                        f"Cannot run simulation: {cause}. "
+                        f"Skipped sensor names: {', '.join(skipped_sensor_names)}"
+                    ),
+                    "sensor_skip_count": len(skipped_sensor_names),
+                    "skipped_sensor_names": skipped_sensor_names,
+                }
+            )
+            return
         if skipped_sensor_names:
             q.put(
                 {

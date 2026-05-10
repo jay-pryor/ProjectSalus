@@ -11,7 +11,7 @@
  * Reads:       terrain, sensor_library, effector_library, placements
  * Writes:      placements
  * Emits:       placement:added, placement:removed, placement:moved
- * Subscribes:  placement:pending, optimiser:complete
+ * Subscribes:  placement:pending, optimiser:complete, optimiser:apply
  * Map sources: placement-editor:sensors-source,
  *              placement-editor:bearing-lines-source,
  *              placement-editor:wedges-source,
@@ -854,6 +854,29 @@ export function init(api) {
   unsubs.push(api.bus.on('optimiser:complete', (evt) => {
     const proposed = evt?.proposed_placements ?? [];
     _showOptimiserModal(proposed);
+  }));
+
+  // D-435: optimiser delegates `placements` writes to placement-editor (single
+  // writer rule). The optimiser emits `optimiser:apply` on its own Apply
+  // button; we perform the merge + emit per-placement events here.
+  unsubs.push(api.bus.on('optimiser:apply', (evt) => {
+    const proposed = Array.isArray(evt?.proposed) ? evt.proposed : [];
+    const valid = proposed.filter(p => p != null && typeof p === 'object');
+    if (valid.length === 0) {
+      // D-468: log the malformed/empty payload so the no-op is observable in
+      // dev tools rather than silently swallowing the user's Apply action.
+      console.warn(
+        '[placement-editor] optimiser:apply produced no valid placements; nothing applied',
+        evt,
+      );
+      return;
+    }
+    const current = latestPlacements ?? [];
+    const merged = [...current, ...valid];
+    api.state.set('placements', merged);
+    for (const p of valid) {
+      api.bus.emit('placement:added', p);
+    }
   }));
 
   // -------------------------------------------------------------------------

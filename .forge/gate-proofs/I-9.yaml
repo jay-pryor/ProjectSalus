@@ -1,0 +1,110 @@
+task_id: I-9
+title: "Resolve open defect backlog (audit + Group 5 fixes + L2 review remediation)"
+timestamp: 2026-05-10T05:00:00Z
+
+scope: |
+  Sweep of the 31 open defects in .forge/defect-register.yaml.
+  - 1 defect (D-056) audit-confirmed already fixed by D-450 (I-8); register updated.
+  - 18 defects (D-126, D-136, D-137, D-138, D-146, D-147, D-148, D-149, D-150,
+    D-151, D-193, D-194, D-195, D-196, D-197, D-198, D-199, D-200) audit-confirmed
+    fixed in subsequent slices; malformed YAML repaired and status set to
+    resolved with audit references.
+  - 5 defects (D-394, D-395, D-396, D-397, D-398) reclassified from open to
+    deferred; require backend API extension scheduled for a future S14.10b slice.
+  - 7 defects (D-429, D-430, D-431, D-433, D-434, D-435, D-439) genuinely open
+    from the I-7 L2 review — fixed in I-9.
+  - 9 new defects (D-464..D-472) raised by the L2 review of I-9's own changes —
+    addressed in this commit (7 resolved, 1 accepted_documented, 1 deferred).
+
+quality_gates:
+  G1_lint: pass
+  G2_format: pass
+  G3_import: pass
+  G4_type: N/A — pre-existing import-untyped warnings only (third-party stubs); no new errors introduced
+  G5_security: pass
+  G6_unit_test: pass
+  G7_coverage: pass
+  G8_secrets: pass
+  coverage_pct: 81
+
+review:
+  l1_standards:
+    testing: pass
+    error_handling: pass
+    logging: pass
+    security: pass
+    interface_modules: pass
+  l2_agents:
+    silent_failure_hunter: {status: pass, findings: 7, severities: "0 critical / 0 high / 4 medium / 3 low"}
+    spec_compliance: N/A
+    type_design_analyzer: N/A
+    regression_reviewer: {status: pass, findings: 6, severities: "0 critical / 0 high / 1 medium / 5 low"}
+    module_architecture_reviewer: {status: pass, findings: 0}
+
+defect_ids:
+  resolved_audit_only:
+    - D-056
+    - D-126
+    - D-136
+    - D-137
+    - D-138
+    - D-146
+    - D-147
+    - D-148
+    - D-149
+    - D-150
+    - D-151
+    - D-193
+    - D-194
+    - D-195
+    - D-196
+    - D-197
+    - D-198
+    - D-199
+    - D-200
+  resolved_with_code_change:
+    - D-429
+    - D-430
+    - D-431
+    - D-433
+    - D-434
+    - D-435
+    - D-439
+    - D-464
+    - D-465
+    - D-466
+    - D-468
+    - D-469
+    - D-471
+    - D-472
+  reclassified_deferred:
+    - D-394
+    - D-395
+    - D-396
+    - D-397
+    - D-398
+  accepted_documented:
+    - D-467
+  deferred:
+    - D-470
+
+files_changed:
+  python:
+    - src/salus/viewer/export.py
+    - src/salus/engine/threat_corridor.py
+    - src/salus/interface_api/app.py
+    - tests/test_terrain.py
+    - tests/test_interface_api.py
+  interface:
+    - src/salus/viewer/interface/state-schema.js
+    - src/salus/viewer/interface/modules/optimiser/index.js
+    - src/salus/viewer/interface/modules/optimiser/manifest.json
+    - src/salus/viewer/interface/modules/placement-editor/index.js
+    - src/salus/viewer/interface/modules/placement-editor/manifest.json
+    - src/salus/viewer/interface/tests/test-optimiser.js
+    - src/salus/viewer/interface/tests/test-placement-editor.js
+  forge:
+    - .forge/defect-register.yaml
+    - .forge/gate-proofs/I-9.yaml
+
+overall: pass

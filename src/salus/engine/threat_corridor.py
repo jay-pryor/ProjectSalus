@@ -6,6 +6,7 @@ the 3D sensor-based worst-corridor sweep (find_worst_corridors).
 
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass
 
@@ -17,6 +18,8 @@ from salus.models.scenario import SensorPlacement
 from salus.models.sensor import SensorDefinition
 from salus.models.site import SiteModel
 from salus.models.threat import DroneTrajectory, ThreatCorridor, ThreatProfile, TrajectoryWaypoint
+
+_log = logging.getLogger(__name__)
 
 # Minimum number of samples along a corridor (includes the protected point itself).
 _MIN_SAMPLES: int = 1
@@ -263,17 +266,39 @@ def find_worst_corridors(
             altitude_m=altitude,
             start_distance_m=start_distance_m,
         )
-        coverage_pct = (
-            (tr.time_in_detection_s / tr.time_to_asset_s * 100.0)
-            if tr.time_to_asset_s > 0.0
-            else 0.0
-        )
+        # D-431 / D-472: guard against non-finite trajectory timings. NaN
+        # propagating into coverage_pct would corrupt the sort key; non-finite
+        # values reaching covered_cells/time_in_coverage_s would leave the
+        # CorridorResult internally inconsistent. Force all four derived fields
+        # to safe defaults together so downstream consumers see a coherent
+        # zero-coverage row, and emit a warning so a NaN bug elsewhere is
+        # observable.
+        if (
+            tr.time_to_asset_s > 0.0
+            and math.isfinite(tr.time_in_detection_s)
+            and math.isfinite(tr.time_to_asset_s)
+        ):
+            coverage_pct = tr.time_in_detection_s / tr.time_to_asset_s * 100.0
+            covered_cells = max(0, round(tr.time_in_detection_s * speed / site.resolution))
+            total_cells = max(0, round(tr.time_to_asset_s * speed / site.resolution))
+            time_in_coverage_s = tr.time_in_detection_s
+        else:
+            if not (math.isfinite(tr.time_in_detection_s) and math.isfinite(tr.time_to_asset_s)):
+                _log.warning(
+                    "find_worst_corridors: non-finite trajectory timing for bearing %.1f° "
+                    "(time_in_detection_s=%s, time_to_asset_s=%s); CorridorResult fields "
+                    "forced to zero defaults to preserve internal consistency.",
+                    bearing,
+                    tr.time_in_detection_s,
+                    tr.time_to_asset_s,
+                )
+            coverage_pct = 0.0
+            covered_cells = 0
+            total_cells = 0
+            time_in_coverage_s = 0.0
         first_detection_m: float | None = (
             tr.first_detection.distance_to_asset_m if tr.first_detection else None
         )
-        # Approximate cell counts from timing and resolution (clamped non-negative).
-        covered_cells: int = max(0, round(tr.time_in_detection_s * speed / site.resolution))
-        total_cells: int = max(0, round(tr.time_to_asset_s * speed / site.resolution))
 
         results.append(
             CorridorResult(
@@ -282,7 +307,7 @@ def find_worst_corridors(
                 coverage_pct=coverage_pct,
                 first_detection_distance_m=first_detection_m,
                 last_gap_before_target_m=tr.last_gap_before_asset_m,
-                time_in_coverage_s=tr.time_in_detection_s,
+                time_in_coverage_s=time_in_coverage_s,
                 covered_cells=covered_cells,
                 total_cells=total_cells,
             )

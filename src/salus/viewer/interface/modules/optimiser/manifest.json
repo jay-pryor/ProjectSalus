@@ -2,10 +2,10 @@
   "id": "optimiser",
   "label": "Optimiser",
   "reads": ["terrain", "zones", "constraints", "sensor_library", "effector_library", "threat_corridors", "placements", "optimiser_results"],
-  "writes": ["optimiser_results", "placements"],
+  "writes": ["optimiser_results"],
   "prerequisites": ["terrain"],
-  "emits": ["optimiser:started", "optimiser:complete", "optimiser:failed", "placement:added"],
+  "emits": ["optimiser:started", "optimiser:complete", "optimiser:failed", "optimiser:apply"],
   "subscribes": ["zone:added", "zone:removed", "constraint:updated"],
   "layer_id_prefix": "optimiser",
-  "description": "Compute optimal sensor/effector placements via the backend optimiser, review proposals, and apply to the current configuration."
+  "description": "Compute optimal sensor/effector placements via the backend optimiser, review proposals, and emit optimiser:apply (placement-editor performs the actual placements write)."
 }

@@ -332,13 +332,17 @@ test('manifest reads all required state keys', async () => {
   }
 });
 
-test('manifest writes optimiser_results and placements', async () => {
+test('manifest writes optimiser_results only (single-writer rule, D-435)', async () => {
   const raw = await readFile(
     path.resolve(__dirname, '../modules/optimiser/manifest.json'), 'utf8'
   );
   const m = JSON.parse(raw);
   assert.ok(m.writes.includes('optimiser_results'), 'writes must include optimiser_results');
-  assert.ok(m.writes.includes('placements'), 'writes must include placements — applyBtn calls state.set("placements", merged)');
+  assert.ok(
+    !m.writes.includes('placements'),
+    'placements must NOT be in optimiser writes — placement-editor is the sole writer; ' +
+      'optimiser delegates via the optimiser:apply event (D-435)'
+  );
 });
 
 test('manifest prerequisites are terrain only (zones removed — optional for backend)', async () => {
@@ -360,14 +364,24 @@ test('manifest subscribes to zone:added, zone:removed, constraint:updated', asyn
   }
 });
 
-test('manifest emits optimiser:started, optimiser:complete, optimiser:failed', async () => {
+test('manifest emits optimiser:started, optimiser:complete, optimiser:failed, optimiser:apply', async () => {
   const raw = await readFile(
     path.resolve(__dirname, '../modules/optimiser/manifest.json'), 'utf8'
   );
   const m = JSON.parse(raw);
-  for (const ev of ['optimiser:started', 'optimiser:complete', 'optimiser:failed']) {
+  for (const ev of [
+    'optimiser:started',
+    'optimiser:complete',
+    'optimiser:failed',
+    'optimiser:apply', // D-435: delegate placements writes to placement-editor
+  ]) {
     assert.ok(m.emits.includes(ev), `emits must include ${ev}`);
   }
+  assert.ok(
+    !m.emits.includes('placement:added'),
+    'placement:added must NOT be in optimiser emits — placement-editor emits these ' +
+      'after handling optimiser:apply (D-435)'
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -663,7 +677,7 @@ test('error SSE event emits optimiser:failed', async () => {
 // Apply tests (S14.11-3)
 // ---------------------------------------------------------------------------
 
-test('apply merges proposed placements into current placements', async () => {
+test('apply emits optimiser:apply with proposed placements (D-435)', async () => {
   const api = makeApi({
     placements: SAMPLE_PLACEMENTS,
     optimiserResults: SAMPLE_RESULTS,
@@ -673,17 +687,38 @@ test('apply merges proposed placements into current placements', async () => {
   // Results section should be visible since optimiser_results is set
   assert.equal(findByTestId(panel, 'results-section').style.display, 'block');
   findByTestId(panel, 'apply-btn')._fire('click');
-  const merged = api._stateData.placements;
-  assert.equal(merged.length, SAMPLE_PLACEMENTS.length + SAMPLE_PROPOSED.length);
+  const ev = api._emitted.find(e => e.event === 'optimiser:apply');
+  assert.ok(ev, 'apply must emit optimiser:apply (placement-editor performs the merge)');
+  assert.deepEqual(ev.data?.proposed, SAMPLE_PROPOSED);
 });
 
-test('apply emits placement:added for each proposed placement', async () => {
+test('apply does NOT write placements directly (single-writer rule, D-435)', async () => {
+  const api = makeApi({
+    placements: SAMPLE_PLACEMENTS,
+    optimiserResults: SAMPLE_RESULTS,
+  });
+  init(api);
+  const panel = api._mounted[0];
+  findByTestId(panel, 'apply-btn')._fire('click');
+  // Optimiser must not touch the placements key — placement-editor owns it.
+  assert.deepEqual(
+    api._stateData.placements,
+    SAMPLE_PLACEMENTS,
+    'optimiser must not write placements directly; placement-editor handles optimiser:apply'
+  );
+});
+
+test('apply does NOT emit placement:added directly (D-435)', async () => {
   const api = makeApi({ placements: [], optimiserResults: SAMPLE_RESULTS });
   init(api);
   const panel = api._mounted[0];
   findByTestId(panel, 'apply-btn')._fire('click');
   const addedEvents = api._emitted.filter(e => e.event === 'placement:added');
-  assert.equal(addedEvents.length, SAMPLE_PROPOSED.length);
+  assert.equal(
+    addedEvents.length,
+    0,
+    'placement:added must be emitted by placement-editor (sole writer), not optimiser'
+  );
 });
 
 test('apply clears ghost markers', async () => {

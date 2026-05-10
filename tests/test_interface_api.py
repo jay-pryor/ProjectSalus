@@ -278,6 +278,32 @@ def test_simulate_missing_dem_file_yields_error_event(tmp_path: Path) -> None:
     assert "error" in types, f"Expected error event; got types: {types}"
 
 
+def test_simulate_all_placements_unknown_yields_error_event(flat_dem_path: Path) -> None:
+    """D-433 regression: when every sensor_placement references a sensor not in
+    the library, the SSE stream surfaces an error event rather than a misleading
+    complete with 0% coverage."""
+    payload = {
+        "site_dem_path": str(flat_dem_path),
+        "sensor_placements": [
+            {
+                "sensor_name": "DefinitelyNotARealSensor",
+                "position_x": 500050.0,
+                "position_y": 6100050.0,
+                "bearing_deg": 0.0,
+            }
+        ],
+    }
+    with TestClient(app) as client:
+        resp = client.post("/api/simulate", json=payload)
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    types = [e.get("type") for e in events]
+    assert "error" in types, f"Expected error event when all placements unknown; got types: {types}"
+    assert "complete" not in types, (
+        f"Must not emit 'complete' when no placements survived; got types: {types}"
+    )
+
+
 def test_simulate_rejects_path_outside_allowlist() -> None:
     """POST /api/simulate with a DEM path outside the allowed directories
     returns 403 before any pipeline work begins (path-traversal guard)."""

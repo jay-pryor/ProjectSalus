@@ -351,12 +351,12 @@ test('manifest emits placement:added, placement:removed, placement:moved', async
   }
 });
 
-test('manifest subscribes to placement:pending and optimiser:complete', async () => {
+test('manifest subscribes to placement:pending, optimiser:complete, optimiser:apply', async () => {
   const raw = await readFile(
     path.resolve(__dirname, '../modules/placement-editor/manifest.json'), 'utf8'
   );
   const m = JSON.parse(raw);
-  for (const ev of ['placement:pending', 'optimiser:complete']) {
+  for (const ev of ['placement:pending', 'optimiser:complete', 'optimiser:apply']) {
     assert.ok(m.subscribes.includes(ev), `subscribes must include ${ev}`);
   }
 });
@@ -418,10 +418,10 @@ test('init registers watch on placements', () => {
   );
 });
 
-test('init subscribes to placement:pending and optimiser:complete', () => {
+test('init subscribes to placement:pending, optimiser:complete, optimiser:apply', () => {
   const api = makeApi();
   init(api);
-  for (const ev of ['placement:pending', 'optimiser:complete']) {
+  for (const ev of ['placement:pending', 'optimiser:complete', 'optimiser:apply']) {
     assert.ok(
       (api._busListeners[ev] ?? []).length > 0,
       `must subscribe to ${ev}`
@@ -801,6 +801,39 @@ test('modal Apply hides modal and clears ghost markers', () => {
   assert.equal(modal.style.display, 'none');
   const ghost = api._sources['placement-editor:optimiser-ghost-source'];
   assert.equal(ghost._data.features.length, 0);
+});
+
+test('optimiser:apply merges proposed placements into state (D-435)', () => {
+  const api = makeApi({ placements: [RADAR] });
+  init(api);
+  api._fireBus('optimiser:apply', { proposed: PROPOSED });
+  assert.equal(
+    api._stateData.placements.length,
+    1 + PROPOSED.length,
+    'placement-editor must merge proposed placements when optimiser:apply fires'
+  );
+});
+
+test('optimiser:apply emits placement:added for each proposed (D-435)', () => {
+  const api = makeApi({ placements: [] });
+  init(api);
+  api._fireBus('optimiser:apply', { proposed: PROPOSED });
+  const addedEvents = api._emitted.filter(e => e.event === 'placement:added');
+  assert.equal(addedEvents.length, PROPOSED.length);
+});
+
+test('optimiser:apply with empty proposed leaves state unchanged (D-435)', () => {
+  const api = makeApi({ placements: [RADAR] });
+  init(api);
+  api._fireBus('optimiser:apply', { proposed: [] });
+  assert.deepEqual(api._stateData.placements, [RADAR]);
+});
+
+test('optimiser:apply with non-array payload is a no-op (D-435)', () => {
+  const api = makeApi({ placements: [RADAR] });
+  init(api);
+  api._fireBus('optimiser:apply', { proposed: null });
+  assert.deepEqual(api._stateData.placements, [RADAR]);
 });
 
 test('modal Discard hides modal and clears ghost markers without modifying placements', () => {

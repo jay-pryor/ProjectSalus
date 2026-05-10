@@ -205,6 +205,45 @@ class TestLoadDem:
         assert site.dsm is not None
         assert site.dsm.shape == site.dem.shape
 
+    def test_chm_crs_mismatch_warns_and_reprojects(self, flat_dem_path, tmp_path):
+        """A CHM with a different CRS must be reprojected with a warning (D-439)."""
+        import rasterio
+        from pyproj import Transformer
+        from rasterio.crs import CRS
+        from rasterio.transform import from_bounds
+
+        # Convert DEM bounds (EPSG:28354) to WGS84 for the CHM.
+        t = Transformer.from_crs(28354, 4326, always_xy=True)
+        left, bottom = t.transform(500000.0, 6100000.0)
+        right, top = t.transform(500100.0, 6100100.0)
+
+        chm_path = tmp_path / "chm_wgs84.tif"
+        chm_data = np.full((50, 50), 3.0, dtype=np.float64)  # 3 m canopy everywhere
+        transform = from_bounds(left, bottom, right, top, 50, 50)
+        with rasterio.open(
+            chm_path,
+            "w",
+            driver="GTiff",
+            height=50,
+            width=50,
+            count=1,
+            dtype="float64",
+            crs=CRS.from_epsg(4326),
+            transform=transform,
+        ) as dst:
+            dst.write(chm_data, 1)
+
+        with pytest.warns(UserWarning, match="reprojecting CHM"):
+            site = load_dem(flat_dem_path, canopy_path=chm_path)
+
+        assert site.canopy_height_m is not None
+        assert site.canopy_height_m.shape == site.dem.shape
+        # Reprojection should preserve the constant canopy height for cells that
+        # fall fully inside the source extent.
+        finite = site.canopy_height_m[np.isfinite(site.canopy_height_m)]
+        assert finite.size > 0
+        assert np.all(np.abs(finite - 3.0) < 0.5)
+
     def test_dem_nodata_replaced_with_nan(self, tmp_path):
         """DEM cells matching the nodata value must be converted to NaN."""
         import rasterio
