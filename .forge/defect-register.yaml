@@ -601,7 +601,7 @@ defects:
     description: "SiteModel resolution field not validated as > 0; zero resolution causes ZeroDivisionError deep in _xy_to_rc with no diagnostic message"
     resolution: "I-9 audit-confirmed fixed by D-450 (I-8). SiteModel.resolution declared as `Field(gt=0)` with `_validate_resolution` field_validator (math.isfinite). Zero / non-finite resolution is rejected at model construction."
     status: resolved
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-057
     severity: high
@@ -1393,7 +1393,7 @@ defects:
     description: "render_corridor_overlay_map legend only shows 'Covered' patch; first detection circle markers and protected-point star have no legend entries. Map is uninterpretable without prior knowledge."
     resolution: "I-9 audit-confirmed fixed in maps.py:1021-1046. render_corridor_overlay_map now builds an `all_legend` list with patches for sensor type, first-detection circle, protected-point star, and zones; ax.legend renders all entries."
     status: resolved
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-127
     severity: medium
@@ -1503,7 +1503,7 @@ defects:
     description: "line_of_sight_3d has no guard for site.resolution <= 0; divides by resolution to compute num_steps. A zero or negative resolution causes ZeroDivisionError or nonsensical step count."
     resolution: "I-9 audit-confirmed fixed by D-450 (I-8). SiteModel enforces resolution > 0 at construction (Field(gt=0) + isfinite validator); line_of_sight_3d cannot receive a SiteModel with resolution <= 0."
     status: resolved
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-137
     severity: high
@@ -1514,7 +1514,7 @@ defects:
     description: "sensor_can_detect_point reads site.dem[s_row, s_col] for the sensor cell but does not check for NaN. If DEM is nodata at the sensor position, sz_abs becomes NaN and all subsequent arithmetic (slant range, elevation angle) silently propagates NaN, returning wrong results."
     resolution: "I-9 audit-confirmed fixed in trajectory.py:524-529. sensor_can_detect_point now raises ValueError with a diagnostic message when DEM at the sensor position is NaN; NaN no longer propagates into slant range or elevation calculations."
     status: resolved
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-138
     severity: medium
@@ -1525,7 +1525,7 @@ defects:
     description: "Co-located target (h_dist == 0, same height as sensor) is silently assigned elevation_angle_deg = 90 degrees by convention (atan2 branch). This undocumented convention can cause unexpected False returns for sensors with elevation arcs that do not include 90 degrees. Behaviour should be documented in the docstring."
     resolution: "I-9 audit-confirmed fixed in trajectory.py:570-579. Convention is now documented inline: +90° (straight up) when target at/above sensor, -90° (straight down) when below. Sensors whose elevation arc excludes ±90° will report False as expected."
     status: resolved
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-139
     severity: low
@@ -1613,7 +1613,7 @@ defects:
     description: "_detect_one swallows all ValueError from sensor_can_detect_point including 'sensor placement outside DEM' which is a configuration error. A misconfigured sensor silently returns False on every sample, producing coverage_pct=0 and asset_reached_undetected=True with no diagnostic."
     resolution: "I-9 audit-confirmed fixed in trajectory.py:171-180. _detect_one now calls sensor_can_detect_point directly with no try/except; ValueErrors (configuration errors) propagate as documented in the docstring."
     status: resolved
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-147
     severity: high
@@ -1624,7 +1624,7 @@ defects:
     description: "time_in_det can accumulate a negative delta if binary-search exit crossing d_cross_any is slightly less than det_start_d due to floating-point rounding when drone starts detected. Produces negative time_in_det propagating to wrong coverage_pct and time_undetected_s."
     resolution: "I-9 audit-confirmed fixed in trajectory.py:300, 312. Both time_in_det accumulations now use max(0.0, (exit_d - det_start_d) / speed) to clamp against floating-point rounding."
     status: resolved
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-148
     severity: high
@@ -1635,7 +1635,7 @@ defects:
     description: "Demo script passes composite (npt.NDArray[np.bool_]) as second argument to find_worst_corridors, which now expects list[tuple[SensorDefinition, SensorPlacement]]. Will crash with TypeError/AttributeError at runtime."
     resolution: "I-9 audit-confirmed fixed in demo/06_slice6/generate_s6_demo.py:185-186. Demo now passes `all_pairs` (list[tuple[SensorDefinition, SensorPlacement]]) to find_worst_corridors."
     status: resolved
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-149
     severity: medium
@@ -1646,7 +1646,7 @@ defects:
     description: "Magic sentinel -1.0 used for det_start_d to mean 'no detection period started'. Violates no-magic-numbers rule and is fragile against future refactoring."
     resolution: "I-9 audit-confirmed fixed in trajectory.py:252. Magic -1.0 replaced with `det_start_d: float | None = 0.0 if prev_any else None`; None is the explicit 'no detection period started' state."
     status: resolved
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-150
     severity: medium
@@ -1657,7 +1657,7 @@ defects:
     description: "covered_cells computed as round(time_in_detection_s * speed / resolution). If time_in_det is negative (D-147), covered_cells becomes negative integer stored in CorridorResult without any clamp or guard."
     resolution: "I-9 audit-confirmed fixed in threat_corridor.py:275-276. covered_cells and total_cells now use max(0, round(...)) to clamp against any negative time_in_detection."
     status: resolved
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-151
     severity: medium
@@ -1668,7 +1668,7 @@ defects:
     description: "Regression tests for find_worst_corridors do not include a test verifying ~100% coverage_pct under full-sensor coverage, nor a test verifying mixed coverage across bearings with a partial-coverage sensor. Spec requires regression tests comparing old and new outputs."
     resolution: "I-9 audit-confirmed fixed in tests/test_threat_corridor.py. test_coverage_pct_100 (full coverage), test_coverage_pct_zero (no coverage), test_coverage_pct_between_zero_and_100 (partial), and test_different_bearings_produce_results (per-bearing) cover the regression cases."
     status: resolved
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-152
     severity: medium
@@ -2130,7 +2130,7 @@ defects:
     description: "render_coverage_comparison_chart: per_zone_coverage_pct_a.get(z, 0.0) silently substitutes 0.0 for a missing zone key. If a manually-constructed ComparisonResult has a zone in per_zone_delta_pct absent from per_zone_coverage_pct_a, the delta annotation on that bar is computed against 0.0 rather than the true A value — wrong output with no error."
     resolution: "I-9 audit-confirmed fixed in charts.py:655-660. render_coverage_comparison_chart uses direct indexing (per_zone_coverage_pct_a[z], not .get with 0.0 default); per_zone_delta_pct keys are guaranteed by compare_configs to exist in both A and B dicts. Hand-constructed bad ComparisonResults now surface as KeyError rather than wrong silent output."
     status: resolved
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-194
     severity: high
@@ -2141,7 +2141,7 @@ defects:
     description: "_load_site_for_comparison has no exception handling. Failure in load_scenario or load_dem is swallowed by a catch-all at the render call site; the compare command exits 0 even though no delta map was produced, with only a one-line warning."
     resolution: "I-9 audit-confirmed fixed in cli.py:1844-1864. _load_site_for_comparison wraps load_scenario in try/except for FileNotFoundError, ValueError, OSError and load_dem in try/except for FileNotFoundError, OSError, ValueError, RuntimeError; both re-raise the same exception type with a 'Failed to load X for delta map rendering' prefix preserving the diagnostic chain."
     status: resolved
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-195
     severity: high
@@ -2152,7 +2152,7 @@ defects:
     description: "compare_configs: no bounds/NaN check on total_coverage_pct before arithmetic. If upstream produces NaN or out-of-range coverage, coverage_delta_pct silently becomes NaN and flows into ComparisonResult and CLI output with no error raised."
     resolution: "I-9 audit-confirmed fixed in comparison.py:210-217. compare_configs validates np.isfinite on both total_coverage_pct values and raises ValueError naming the offending config when either is non-finite."
     status: resolved
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-196
     severity: medium
@@ -2163,7 +2163,7 @@ defects:
     description: "compare_configs: NaN cells in a float composite cast silently to True by .astype(bool), causing those cells to appear covered in the delta grid. Wrong cell-level output with no warning."
     resolution: "I-9 audit-confirmed fixed in comparison.py:184-202. compare_configs warns on NaN cells with count and config label, then uses np.nan_to_num(..., nan=0.0) to coerce NaN to uncovered before bool cast. Object/non-numeric dtypes are rejected with TypeError."
     status: resolved
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-197
     severity: medium
@@ -2174,7 +2174,7 @@ defects:
     description: "render_delta_map: _hillshade ValueError for NaN DEM surfaces only as a generic CLI warning; the diagnostic (DEM path, NaN count) is lost and the output directory is silently incomplete."
     resolution: "I-9 audit-confirmed fixed in maps.py:1676-1684. render_delta_map catches ValueError from _hillshade and re-raises with NaN cell count diagnostic ('hillshade failed (N NaN cell(s) in DEM): <orig>')."
     status: resolved
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-198
     severity: medium
@@ -2185,7 +2185,7 @@ defects:
     description: "ConfigurationResult: no shape-consistency check between composite and stats.redundancy_map. A caller can pair a populated composite with the zero-shape default redundancy_map, producing shape mismatches that only surface as confusing index errors downstream."
     resolution: "I-9 audit-confirmed fixed in comparison.py:162-170. compare_configs validates ndim==2 on both composites with explicit ValueError including the config label; shape mismatches between A/B are caught at lines 174-178 with both shapes named in the error."
     status: resolved
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-199
     severity: medium
@@ -2196,7 +2196,7 @@ defects:
     description: "render_delta_map is missing its '-> Path' return type annotation, violating the project-wide type-annotation rule (CLAUDE.md). mypy infers '-> None'."
     resolution: "I-9 audit-confirmed fixed in maps.py:1628. render_delta_map signature now includes the `-> Path` return type annotation."
     status: resolved
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-200
     severity: medium
@@ -2207,7 +2207,7 @@ defects:
     description: "ConfigurationResult.composite has no runtime ndim guard. compare_configs checks .size == 0 but not .ndim == 2. A 1-D array of non-zero length would pass the guard and silently produce a malformed delta_grid."
     resolution: "I-9 audit-confirmed fixed in comparison.py:162-170 (same fix as D-198). compare_configs raises ValueError when either composite has ndim != 2."
     status: resolved
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-201
     severity: high
@@ -4342,7 +4342,7 @@ defects:
     description: "Gantt chart renders two generic rows (Available, Required) instead of individual D-T-I-D-E-A phase segments. Per-phase durations are not present in kill_chain_results serialisation from the backend API; this deferred pending backend API extension to include phase breakdown."
     resolution: "I-9: confirmed deferred. KillChainResult does not currently expose per-phase durations (track_time_s, identify_time_s, decide_time_s, engage_time_s, assess_time_s); requires extending the engine result, _serialise_kill_chain() in export.py, and the kill-chain-analyser module. Out of scope for I-9; scheduled for a future S14.10b backend-API-extension slice."
     status: deferred
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-395
     severity: medium
@@ -4353,7 +4353,7 @@ defects:
     description: "Sensor name not shown alongside first detection range. kill_chain_results serialisation does not include sensor name field."
     resolution: "I-9: confirmed deferred. _serialise_kill_chain() in export.py does not include first_detection_sensor_name; requires extending the engine result and serialiser. Out of scope for I-9; scheduled for S14.10b."
     status: deferred
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-396
     severity: medium
@@ -4364,7 +4364,7 @@ defects:
     description: "Only one detection-event circle shown (at first_detection_range_m); spec requires a circle per DetectionEvent with sensor name and time. DetectionEvent positions not included in kill_chain_results."
     resolution: "I-9: confirmed deferred. kill_chain_results does not include DetectionEvent list with positions. Out of scope for I-9; scheduled for S14.10b."
     status: deferred
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-397
     severity: medium
@@ -4375,7 +4375,7 @@ defects:
     description: "Overwhelmed effectors source is intentionally empty; spec requires red pulsing ring markers on overwhelmed effectors. Effector positions not in sim_results from current API."
     resolution: "I-9: confirmed deferred. sim_results does not include effector_placements with positions; requires extending SimResultsPayload. Out of scope for I-9; scheduled for S14.10b."
     status: deferred
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-398
     severity: medium
@@ -4386,7 +4386,7 @@ defects:
     description: "Approach vectors only implement green=engaged and red=unengaged; orange=engaged-after-reload not implemented. Per-N engagement status not in saturation_result."
     resolution: "I-9: confirmed deferred. saturation_result does not include per-N per-vector engagement-after-reload data. Out of scope for I-9; scheduled for S14.10b."
     status: deferred
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-399
     severity: medium
@@ -4736,7 +4736,7 @@ defects:
     description: "_serialise_corridor returns {} (empty dict) on any serialisation exception; caller list-comprehension has no filter, so empty dicts enter ViewerData.corridor_results and corrupt threat-corridor display in JS modules."
     resolution: "I-9 fixed in viewer/export.py. The corridor_list comprehension now filters out falsy serialiser results; empty dicts cannot enter ViewerData.corridor_results."
     status: resolved
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-430
     severity: high
@@ -4747,7 +4747,7 @@ defects:
     description: "pyproj.Transformer.from_crs called unconditionally in export_viewer_data; if pyproj unavailable or CRS lookup fails, unhandled exception aborts entire viewer export."
     resolution: "I-9 fixed in viewer/export.py. The pyproj import + Transformer.from_crs call is wrapped in try/except; on failure transformer is None and corridor WGS84 paths degrade to empty rather than aborting the entire viewer export. Logged at warning level."
     status: resolved
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-431
     severity: high
@@ -4758,7 +4758,7 @@ defects:
     description: "coverage_pct guards time_to_asset_s > 0 but not time_in_detection_s isfinite; NaN timing propagates silently to corridor stats."
     resolution: "I-9 fixed in threat_corridor.py. coverage_pct now requires math.isfinite on both time_in_detection_s and time_to_asset_s; non-finite values produce 0.0 instead of propagating NaN downstream."
     status: resolved
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-432
     severity: medium
@@ -4780,7 +4780,7 @@ defects:
     description: "When sensor_map is empty due to library load failure, every placement is listed as skipped and simulation proceeds with 0% coverage and a 'complete' SSE event — no error surfaced."
     resolution: "I-9 fixed in interface_api/app.py. /api/simulate now emits an SSE error event (and returns) when config.sensor_placements is non-empty but every placement was skipped due to sensor_map lookup failure. Error message distinguishes 'library empty' from 'no placement matched any library entry'. Added test_simulate_all_placements_unknown_yields_error_event regression test."
     status: resolved
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-434
     severity: medium
@@ -4791,7 +4791,7 @@ defects:
     description: "_serialise_kill_chain and _serialise_saturation return {} on exception; unfiltered list-comprehension in caller propagates malformed dicts to JS kill-chain modules."
     resolution: "I-9 fixed in viewer/export.py. kc_list comprehension drops falsy serialiser results; sat_dict only set when _serialise_saturation returned a non-empty dict, otherwise None."
     status: resolved
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-435
     severity: high
@@ -4802,7 +4802,7 @@ defects:
     description: "Single-writer rule violated: placements declared in writes[] of both optimiser and placement-editor manifests. Optimiser's applyBtn calls api.state.set('placements') directly — architectural redesign via event delegation needed."
     resolution: "I-9 fixed via event delegation. Optimiser's applyBtn now emits the new `optimiser:apply` event (added to VALID_EVENTS) carrying the proposed list; placement-editor (sole owner of the placements key) subscribes to this event and performs the merge + emits placement:added. Removed `placements` from optimiser writes[] and `placement:added` from optimiser emits[]; added `optimiser:apply` to optimiser emits[] and to placement-editor subscribes[]. Updated optimiser test for new behavior; added 4 placement-editor regression tests."
     status: resolved
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-436
     severity: medium
@@ -4846,7 +4846,7 @@ defects:
     description: "CHM CRS mismatch reprojection path (Bug #15) has no test coverage. DSM path has test_dsm_crs_mismatch_warns_and_reprojects but CHM equivalent is missing."
     resolution: "I-9 fixed in tests/test_terrain.py. Added test_chm_crs_mismatch_warns_and_reprojects mirroring the DSM test: writes a WGS84 CHM, asserts UserWarning on load_dem, asserts canopy shape matches DEM and constant 3 m canopy values are preserved through reprojection."
     status: resolved
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-440
     severity: low
@@ -5126,7 +5126,7 @@ defects:
     description: "D-429/D-434 filtering of empty serialiser results breaks index alignment between corridor_results and kill_chain_results, which the legacy static viewer (src/salus/viewer/static/app.js:656) relies on to look up the corridor's threat name for each kill chain entry. The engine guarantees 1:1 ordering (kill_chain.py:128); independently filtering both lists shifts indices when either serialiser fails, mislabelling kill chains."
     resolution: "Replaced the two independent comprehensions with a single zip-pair walk: corridor i and kill_chain[i] are paired and both are dropped together when either serialiser fails. Saturation is unaffected (single dict, no pairing)."
     status: resolved
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-465
     severity: medium
@@ -5137,7 +5137,7 @@ defects:
     description: "D-431 isfinite guard returns coverage_pct=0.0 when time_in_detection_s or time_to_asset_s is non-finite, but emits no log. A NaN bug elsewhere in analyse_trajectory would silently produce a 'worst-case' corridor result with no observable signal."
     resolution: "Added _log.warning() call on the non-finite branch including bearing, time_in_detection_s, and time_to_asset_s so a NaN in the trajectory engine is observable."
     status: resolved
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-466
     severity: medium
@@ -5148,7 +5148,7 @@ defects:
     description: "_serialise_corridor / _serialise_kill_chain / _serialise_saturation each catch broad Exception and return {}. After D-429/D-434 those empty dicts are dropped (paired) — a bug in serialisation now silently removes data from the viewer with only a warning log. WARNING level is below the production-monitoring threshold."
     resolution: "Bumped the three serialiser log calls from .warning to .error so silent data drop is visible in production logs."
     status: resolved
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-467
     severity: medium
@@ -5159,7 +5159,7 @@ defects:
     description: "Apply button emits optimiser:apply and immediately clears local state. If no module subscribed (e.g. placement-editor errored during init), the proposed configuration is irrecoverably lost — user sees the modal close, ghost markers vanish, and assumes apply succeeded, but placements was never updated."
     resolution: "Accepted with documentation. The bus does not currently expose a listener-count return value; adding receipt/ack semantics would touch the bus contract more broadly than I-9. Documented the dependency on placement-editor in optimiser docstring (already done in D-435)."
     status: accepted_documented
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-468
     severity: low
@@ -5170,7 +5170,7 @@ defects:
     description: "optimiser:apply handler silently no-ops on empty/non-array proposed list with no console.warn. The related placement:pending handler does warn on similar malformed input — inconsistent defensive logging style."
     resolution: "Added console.warn in the early-return branch when proposed yields no valid placements, matching the placement:pending pattern."
     status: resolved
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-469
     severity: low
@@ -5181,7 +5181,7 @@ defects:
     description: "skipped_sensor_names list in the D-433 error event is built by re-iterating config.sensor_placements and may include duplicates if a sensor name appears in multiple placements."
     resolution: "Wrapped skipped_sensor_names with sorted(set(...)) and reused the deduped list in both the error and progress branches so the user-facing message is clean."
     status: resolved
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-470
     severity: low
@@ -5192,7 +5192,7 @@ defects:
     description: "Pre-existing dual-path UX: placement-editor still subscribes to optimiser:complete and shows its own modal Apply button (line 735); the optimiser ALSO has its own Apply button now emitting optimiser:apply. If a user clicks both, placements double-merge."
     resolution: "Out of scope for I-9 — the dual-path UX is a pre-existing concern that D-435 did not introduce, and removing one path is a UX decision that warrants its own task. Logged here so it is visible in the next interface-tier task."
     status: deferred
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-471
     severity: low
@@ -5203,7 +5203,7 @@ defects:
     description: "D-430 try/except wraps only the corridor path Transformer construction. _vectorise_coverage and _build_sensor_geojson construct pyproj.Transformer.from_crs without the same guard and run earlier — under realistic failure modes (missing pyproj, malformed src_crs) the function aborts before the new guard executes."
     resolution: "Acknowledged. The narrow scope is intentional: by the time the corridor path runs, the earlier vectorisation calls have already proved pyproj is available; the new guard catches transient/Transformer-specific construction failure for that one call. Comment in export.py refined to make this explicit."
     status: resolved
-    commit: ""
+    commit: "9d0e6b0"
 
   - id: D-472
     severity: low
@@ -5214,4 +5214,4 @@ defects:
     description: "isfinite guard for D-431 protects coverage_pct, but covered_cells (line 280) and time_in_coverage_s (line 290) still derive from tr.time_in_detection_s without the same check. CorridorResult can have coverage_pct=0.0 alongside non-finite covered_cells/time_in_coverage_s — internally inconsistent."
     resolution: "When the non-finite branch fires, set covered_cells=0 and time_in_coverage_s=0.0 alongside coverage_pct=0.0 so all four fields stay internally consistent."
     status: resolved
-    commit: ""
+    commit: "9d0e6b0"
