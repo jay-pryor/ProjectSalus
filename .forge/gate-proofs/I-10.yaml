@@ -1,0 +1,67 @@
+task_id: I-10
+title: "Auto-load pre-generated terrain session in the interactive interface"
+timestamp: 2026-05-10T05:30:00Z
+
+scope: |
+  Bug surfaced by manually firing up the interface against the
+  E01_dramatic_terrain demo: salus interface --scenario pre-generates terrain
+  tiles via pregen_terrain_from_path() but the JS shell has no way to discover
+  the session at startup, so the user sees an empty map.
+
+  Fix:
+  - Backend: new GET /api/terrain/sessions/latest endpoint returning the same
+    metadata shape as POST /api/terrain/load, or 404 (no session / errored
+    session).
+  - Frontend: terrain-loader/init() now calls _adoptLatestSessionIfAvailable
+    when api.state.get('terrain') is null, and on success writes terrain state,
+    emits terrain:loaded, applies map layers, and fits bounds. Strict metadata
+    validation, race-cancellation, and unmount-cancellation guards were added
+    after the L2 review of the initial implementation.
+
+quality_gates:
+  G1_lint: pass
+  G2_format: pass
+  G3_import: pass
+  G4_type: N/A — pre-existing import-untyped warnings only; no new errors
+  G5_security: pass
+  G6_unit_test: pass
+  G7_coverage: pass
+  G8_secrets: pass
+  coverage_pct: 81
+
+review:
+  l1_standards:
+    testing: pass
+    error_handling: pass
+    logging: pass
+    security: pass
+    interface_modules: pass
+  l2_agents:
+    silent_failure_hunter: {status: pass, findings: 6, severities: "0 critical / 1 high / 4 medium / 1 low — all resolved or accepted_documented"}
+    spec_compliance: N/A
+    type_design_analyzer: N/A
+    regression_reviewer: N/A
+    module_architecture_reviewer: {status: pass, findings: 0}
+
+defect_ids:
+  resolved:
+    - D-473  # spec: pregen session not adopted by client
+    - D-474  # high: race between adopt and user upload
+    - D-475  # medium: malformed metadata adopted without validation
+    - D-476  # low: errored session advertised as adoptable
+    - D-477  # medium: double summary render on adopt
+  accepted_documented:
+    - D-478  # medium: silent fallback on transient backend errors
+
+files_changed:
+  python:
+    - src/salus/interface_api/app.py
+    - tests/test_interface_api.py
+  interface:
+    - src/salus/viewer/interface/modules/terrain-loader/index.js
+    - src/salus/viewer/interface/tests/test-terrain-loader.js
+  forge:
+    - .forge/defect-register.yaml
+    - .forge/gate-proofs/I-10.yaml
+
+overall: pass

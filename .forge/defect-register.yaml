@@ -5215,3 +5215,74 @@ defects:
     resolution: "When the non-finite branch fires, set covered_cells=0 and time_in_coverage_s=0.0 alongside coverage_pct=0.0 so all four fields stay internally consistent."
     status: resolved
     commit: "9d0e6b0"
+
+  # ---------------------------------------------------------------------------
+  # I-10 — Auto-load pregen terrain session in interface
+  # plus L2 follow-up findings (D-474..D-478)
+  # ---------------------------------------------------------------------------
+
+  - id: D-473
+    severity: high
+    task: I-10
+    found_by: spec_compliance
+    file: src/salus/interface_api/app.py
+    line: 1681
+    description: "salus interface --scenario calls pregen_terrain_from_path() to register a terrain session and generate tiles, but the JS shell has no way to discover that session at startup. The terrain-loader module's only entry point is the user-driven file-input change event, so the user sees an empty map even when the server already has a usable session waiting."
+    resolution: "Added GET /api/terrain/sessions/latest returning the same metadata shape as POST /api/terrain/load (or 404 when no session exists). terrain-loader/init() now calls _adoptLatestSessionIfAvailable when api.state.get('terrain') is null; on success writes terrain state, emits terrain:loaded, applies map layers, fits bounds — same as upload flow. New JS tests + three new pytest tests."
+    status: resolved
+    commit: ""
+
+  - id: D-474
+    severity: high
+    task: I-10
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/terrain-loader/index.js
+    line: 115
+    description: "_adoptLatestSessionIfAvailable was fire-and-forget — if the user clicked the file input and _loadTerrain completed before the in-flight adopt resolved, the late adopt unconditionally overwrote api.state.set('terrain', ...) with the server's pregen metadata, silently swapping the user's chosen DEM."
+    resolution: "Added a mutable cancellation context object owned by init(); set ctx.cancelled = true in onUnmount. The helper re-checks ctx.cancelled and api.state.get('terrain') just before state.set and bails if either condition rules out the adopt. Two new tests cover the user-upload-first race and the unmount-mid-flight case."
+    status: resolved
+    commit: ""
+
+  - id: D-475
+    severity: medium
+    task: I-10
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/terrain-loader/index.js
+    line: 274
+    description: "Initial adopt validator only checked tile_url_template; a malformed-but-shaped payload (NaN in bounds_wgs84, missing zoom fields, non-integer zoom) would propagate NaN into fitBounds or 404 every tile request silently."
+    resolution: "Extracted _isAdoptableSessionMetadata() helper that validates session_id (non-empty string), tile_url_template (non-empty string), terrain_min_zoom and terrain_max_zoom (integers, min<=max), and bounds_wgs84 (4 finite numbers). Three new tests: NaN bounds, non-integer zoom, inverted zoom range."
+    status: resolved
+    commit: ""
+
+  - id: D-476
+    severity: low
+    task: I-10
+    found_by: silent_failure_hunter
+    file: src/salus/interface_api/app.py
+    line: 1693
+    description: "terrain_session_latest() returned the metadata for the latest session even when its tile-generation thread had reported an error, so the JS shell would adopt a known-broken session and request tiles that 404 forever."
+    resolution: "Endpoint now also reads session.get('error') under the lock and returns 404 when an error is set. Half-generated sessions (done=False, error=None) are still advertised — tiles are served as they appear and the client can poll tile-progress. Test test_terrain_sessions_latest_returns_404_when_session_errored locks in the behaviour."
+    status: resolved
+    commit: ""
+
+  - id: D-477
+    severity: medium
+    task: I-10
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/terrain-loader/index.js
+    line: 277
+    description: "Initial implementation called _updateSummary explicitly at the end of _adoptLatestSessionIfAvailable in addition to the watcher's call, causing a double summary render on adopt that the upload flow did not produce."
+    resolution: "Removed the explicit _updateSummary call from the helper; the watcher registered in init() handles summary rendering for both adopt and upload paths uniformly."
+    status: resolved
+    commit: ""
+
+  - id: D-478
+    severity: medium
+    task: I-10
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/terrain-loader/index.js
+    line: 248
+    description: "Non-404 backend errors (5xx, network failure, malformed JSON) reduce to console.warn and a silent return; the user sees an empty upload panel and a backend regression is invisible to operators in the field."
+    resolution: "Accepted with documentation. Surfacing a banner in the panel for transient sessions/latest failures is a UX decision out of scope for this architectural fix; the manual upload path is not blocked, and dev-tools logs distinguish the failure modes."
+    status: accepted_documented
+    commit: ""

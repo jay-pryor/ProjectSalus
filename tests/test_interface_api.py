@@ -764,6 +764,98 @@ def test_terrain_tile_404_when_no_session_active() -> None:
     assert resp.status_code == 404
 
 
+def test_terrain_sessions_latest_returns_404_when_no_session() -> None:
+    """D-473: GET /api/terrain/sessions/latest returns 404 when no session
+    has been registered (clean process / nothing pre-generated)."""
+    from salus.interface_api import app as _app
+
+    with _app._terrain_session_lock:
+        _app._terrain_sessions.clear()
+        _app._terrain_latest_session_id = None
+
+    with TestClient(app) as client:
+        resp = client.get("/api/terrain/sessions/latest")
+    assert resp.status_code == 404
+
+
+def test_terrain_sessions_latest_returns_metadata_after_load(flat_dem_path: Path) -> None:
+    """D-473: GET /api/terrain/sessions/latest returns the same metadata shape
+    that POST /api/terrain/load returned, so the JS shell can adopt a
+    pre-generated session without re-uploading the DEM."""
+    with open(flat_dem_path, "rb") as f:
+        dem_bytes = f.read()
+
+    with TestClient(app) as client:
+        load = client.post(
+            "/api/terrain/load",
+            files={"dem_file": ("flat.tif", dem_bytes, "image/tiff")},
+        )
+        assert load.status_code == 200
+        loaded = load.json()
+
+        latest = client.get("/api/terrain/sessions/latest")
+        assert latest.status_code == 200
+        body = latest.json()
+
+    assert body["session_id"] == loaded["session_id"]
+    assert body["tile_url_template"] == loaded["tile_url_template"]
+    assert body["bounds_wgs84"] == loaded["bounds_wgs84"]
+    for required in (
+        "centre_wgs84",
+        "tile_progress_url",
+        "terrain_min_zoom",
+        "terrain_max_zoom",
+    ):
+        assert required in body, f"sessions/latest must include '{required}'"
+
+
+def test_terrain_sessions_latest_returns_404_when_session_errored(flat_dem_path: Path) -> None:
+    """D-476: a session whose tile-generation thread reported an error must
+    not be advertised — the client must not adopt a known-broken session."""
+    from salus.interface_api import app as _app
+
+    with open(flat_dem_path, "rb") as f:
+        dem_bytes = f.read()
+
+    with TestClient(app) as client:
+        load = client.post(
+            "/api/terrain/load",
+            files={"dem_file": ("flat.tif", dem_bytes, "image/tiff")},
+        )
+        assert load.status_code == 200
+        sid = load.json()["session_id"]
+
+        # Inject a tile-generation error onto the session record.
+        with _app._terrain_session_lock:
+            _app._terrain_sessions[sid]["error"] = "simulated tile-gen failure"
+
+        latest = client.get("/api/terrain/sessions/latest")
+
+    assert latest.status_code == 404, "errored session must surface as 404 from sessions/latest"
+
+
+def test_terrain_sessions_latest_tracks_most_recent(flat_dem_path: Path) -> None:
+    """D-473: when two loads complete, sessions/latest reflects the second one."""
+    with open(flat_dem_path, "rb") as f:
+        dem_bytes = f.read()
+
+    with TestClient(app) as client:
+        first = client.post(
+            "/api/terrain/load",
+            files={"dem_file": ("a.tif", dem_bytes, "image/tiff")},
+        )
+        second = client.post(
+            "/api/terrain/load",
+            files={"dem_file": ("b.tif", dem_bytes, "image/tiff")},
+        )
+        latest = client.get("/api/terrain/sessions/latest")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert latest.status_code == 200
+    assert latest.json()["session_id"] == second.json()["session_id"]
+
+
 def test_terrain_concurrent_loads_keep_disjoint_tile_paths(flat_dem_path: Path) -> None:
     """Two ``/api/terrain/load`` calls produce two distinct sessions whose
     tile_dirs and metadata do not collide (D-406 race fix).

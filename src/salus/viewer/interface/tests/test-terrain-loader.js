@@ -555,3 +555,201 @@ test('terrain:loaded event is emitted after successful load', async () => {
 
   delete globalThis.fetch;
 });
+
+// ---------------------------------------------------------------------------
+// D-473: adopt pre-generated terrain session on init
+// ---------------------------------------------------------------------------
+
+const PREGEN_METADATA = {
+  session_id: '20260510T050559181708',
+  dem_path: '/tmp/dem.tif',
+  dsm_path: null,
+  crs_epsg: 28354,
+  bounds_wgs84: [148.0, -36.0, 149.0, -35.0],
+  centre_wgs84: [148.5, -35.5],
+  resolution_m: 1.0,
+  tile_url_template: '/api/terrain/sessions/abc/tiles/{z}/{x}/{y}.png',
+  tile_progress_url: '/api/terrain/sessions/abc/tile-progress',
+  terrain_tile_count: 12,
+  terrain_min_zoom: 8,
+  terrain_max_zoom: 13,
+};
+
+test('init adopts a pre-generated session when state.terrain is null (D-473)', async () => {
+  const api = makeMockApi();
+  let fetchedUrl = null;
+  globalThis.fetch = async (url) => {
+    fetchedUrl = url;
+    return { ok: true, status: 200, json: async () => PREGEN_METADATA };
+  };
+  init(api);
+  await new Promise(r => setTimeout(r, 10));
+
+  assert.ok(
+    fetchedUrl && fetchedUrl.endsWith('/api/terrain/sessions/latest'),
+    `init must GET /api/terrain/sessions/latest; got ${fetchedUrl}`
+  );
+  assert.deepEqual(
+    api._terrainValue(),
+    PREGEN_METADATA,
+    'terrain state must be set from the pre-generated session metadata'
+  );
+  const emitted = api.bus.emitCalls.find(c => c.event === 'terrain:loaded');
+  assert.ok(emitted, 'terrain:loaded must be emitted after adopting pregen session');
+
+  delete globalThis.fetch;
+});
+
+test('init does NOT call sessions/latest when terrain already in state (D-473)', async () => {
+  const api = makeMockApi({ terrainValue: PREGEN_METADATA });
+  let fetched = false;
+  globalThis.fetch = async () => {
+    fetched = true;
+    return { ok: true, status: 200, json: async () => ({}) };
+  };
+  init(api);
+  await new Promise(r => setTimeout(r, 10));
+
+  assert.equal(
+    fetched,
+    false,
+    'sessions/latest must not be polled when state.terrain is already populated',
+  );
+
+  delete globalThis.fetch;
+});
+
+test('init silently no-ops when sessions/latest returns 404 (D-473)', async () => {
+  const api = makeMockApi();
+  globalThis.fetch = async () => ({ ok: false, status: 404, json: async () => ({}) });
+  init(api);
+  await new Promise(r => setTimeout(r, 10));
+
+  assert.equal(api._terrainValue(), null, 'terrain state must remain null on 404');
+  const emitted = api.bus.emitCalls.find(c => c.event === 'terrain:loaded');
+  assert.equal(emitted, undefined, '404 must not emit terrain:loaded');
+
+  delete globalThis.fetch;
+});
+
+test('init silently no-ops when sessions/latest payload is malformed (D-473)', async () => {
+  const api = makeMockApi();
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ session_id: 'x' }), // missing tile_url_template
+  });
+  init(api);
+  await new Promise(r => setTimeout(r, 10));
+
+  assert.equal(
+    api._terrainValue(),
+    null,
+    'malformed metadata (missing tile_url_template) must not be adopted',
+  );
+
+  delete globalThis.fetch;
+});
+
+test('init silently no-ops when sessions/latest fetch rejects (D-473)', async () => {
+  const api = makeMockApi();
+  globalThis.fetch = async () => { throw new Error('network down'); };
+  init(api);
+  await new Promise(r => setTimeout(r, 10));
+
+  assert.equal(api._terrainValue(), null, 'fetch rejection must leave terrain state null');
+
+  delete globalThis.fetch;
+});
+
+test('adopt is preempted by a user upload that completes first (D-474)', async () => {
+  const api = makeMockApi();
+  // sessions/latest is slow; the user-driven upload finishes before it returns.
+  let resolveLatest;
+  globalThis.fetch = (url) => {
+    if (url.endsWith('/api/terrain/sessions/latest')) {
+      return new Promise((resolve) => { resolveLatest = resolve; });
+    }
+    // Fallback for any other fetch the upload path makes.
+    return Promise.resolve({ ok: true, json: async () => UPLOAD_METADATA });
+  };
+
+  const UPLOAD_METADATA = { ...PREGEN_METADATA, session_id: 'user-upload-session' };
+  const PREGEN = { ...PREGEN_METADATA, session_id: 'pregen-session' };
+
+  init(api);
+
+  // Simulate a user upload that lands first by setting state directly (mirrors
+  // what _loadTerrain does on success).
+  api.state.set('terrain', UPLOAD_METADATA);
+
+  // Now release the in-flight sessions/latest with the pre-gen metadata.
+  resolveLatest({ ok: true, status: 200, json: async () => PREGEN });
+  await new Promise(r => setTimeout(r, 10));
+
+  assert.equal(
+    api._terrainValue().session_id,
+    'user-upload-session',
+    'user upload must NOT be overwritten by a late adopt response',
+  );
+
+  delete globalThis.fetch;
+});
+
+test('adopt is preempted when the panel is unmounted mid-flight (D-474)', async () => {
+  const api = makeMockApi();
+  let resolveLatest;
+  globalThis.fetch = () =>
+    new Promise((resolve) => { resolveLatest = resolve; });
+
+  init(api);
+  // Trigger unmount before the adopt-fetch resolves.
+  for (const cb of api._unmountCallbacks) cb();
+
+  resolveLatest({ ok: true, status: 200, json: async () => PREGEN_METADATA });
+  await new Promise(r => setTimeout(r, 10));
+
+  assert.equal(
+    api._terrainValue(),
+    null,
+    'unmount before resolution must prevent state.set on a stale adopt',
+  );
+
+  delete globalThis.fetch;
+});
+
+test('adopt rejects metadata with non-finite bounds_wgs84 (D-475)', async () => {
+  const api = makeMockApi();
+  const bad = { ...PREGEN_METADATA, bounds_wgs84: [148.0, NaN, 149.0, -35.0] };
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => bad });
+  init(api);
+  await new Promise(r => setTimeout(r, 10));
+
+  assert.equal(api._terrainValue(), null, 'NaN in bounds_wgs84 must fail validation');
+
+  delete globalThis.fetch;
+});
+
+test('adopt rejects metadata with non-integer zoom levels (D-475)', async () => {
+  const api = makeMockApi();
+  const bad = { ...PREGEN_METADATA, terrain_min_zoom: 'eight' };
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => bad });
+  init(api);
+  await new Promise(r => setTimeout(r, 10));
+
+  assert.equal(api._terrainValue(), null, 'non-integer zoom must fail validation');
+
+  delete globalThis.fetch;
+});
+
+test('adopt rejects metadata when min_zoom > max_zoom (D-475)', async () => {
+  const api = makeMockApi();
+  const bad = { ...PREGEN_METADATA, terrain_min_zoom: 14, terrain_max_zoom: 8 };
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => bad });
+  init(api);
+  await new Promise(r => setTimeout(r, 10));
+
+  assert.equal(api._terrainValue(), null, 'inverted zoom range must fail validation');
+
+  delete globalThis.fetch;
+});

@@ -104,9 +104,21 @@ export function init(api) {
   // Map layer operations are also re-applied so the canvas stays consistent.
   // This is an approved one-time initial read; reactive updates go through watch().
   const existing = api.state.get('terrain'); // initial read
+  // D-474: cancellation flag for the in-flight adopt-fetch so a user-driven
+  // upload (or onUnmount) can preempt a late server response that would
+  // otherwise overwrite a freshly-uploaded DEM.
+  const adoptCtx = { cancelled: false };
   if (existing) {
     _updateSummary(panel, existing);
     _applyMapLayers(api, existing, apiBase);
+  } else {
+    // D-473: when no terrain is in state, see if the server already has a
+    // pre-generated session waiting (salus interface --scenario seeds one in
+    // app.py but cannot reach into the JS state directly). If found, adopt it
+    // exactly as if the user had just uploaded the same DEM.
+    _adoptLatestSessionIfAvailable(api, apiBase, adoptCtx).catch((err) => {
+      console.warn('[terrain-loader] adopt-latest-session failed:', err);
+    });
   }
 
   // Reactive summary — all future terrain state changes re-render the summary
@@ -117,6 +129,7 @@ export function init(api) {
 
   // Cleanup on deactivation (MUST Rules 9 and 15)
   api.panel.onUnmount(() => {
+    adoptCtx.cancelled = true; // D-474: stop the in-flight adopt from acting
     demInput.removeEventListener('change', handleDemChange);
     unwatchTerrain(); // paired with api.state.watch above (MUST Rule 9)
     _cleanupMapLayers(api);
@@ -214,6 +227,93 @@ async function _loadTerrain(api, panel, demFile, dsmFile, apiBase) {
     }
   }
 }
+
+/**
+ * Validate the metadata payload from /api/terrain/sessions/latest. Returns
+ * true only when every field the downstream consumers rely on is sane —
+ * see D-475: a malformed-but-shaped payload could otherwise propagate NaN
+ * into fitBounds or 404 every tile request silently.
+ *
+ * @param {*} m
+ * @returns {boolean}
+ */
+function _isAdoptableSessionMetadata(m) {
+  if (m == null || typeof m !== 'object') return false;
+  if (typeof m.session_id !== 'string' || m.session_id.length === 0) return false;
+  if (typeof m.tile_url_template !== 'string' || m.tile_url_template.length === 0) return false;
+  if (!Number.isInteger(m.terrain_min_zoom) || !Number.isInteger(m.terrain_max_zoom)) return false;
+  if (m.terrain_min_zoom > m.terrain_max_zoom) return false;
+  if (!Array.isArray(m.bounds_wgs84) || m.bounds_wgs84.length !== 4) return false;
+  for (const v of m.bounds_wgs84) {
+    if (typeof v !== 'number' || !Number.isFinite(v)) return false;
+  }
+  return true;
+}
+
+/**
+ * D-473: poll /api/terrain/sessions/latest and, if a session is registered,
+ * adopt it as if the user had just uploaded the same DEM via the file input.
+ *
+ * Only runs when api.state.get('terrain') is null (initial-read branch above).
+ * On HTTP 404 (no session) or any error, this is a silent no-op so the user
+ * can still drive the upload flow normally.
+ *
+ * D-474: re-checks the cancellation flag and api.state.get('terrain') just
+ * before the state.set so a user upload that completes during the in-flight
+ * fetch is not overwritten by a late server response.
+ *
+ * @param {object} api
+ * @param {string} apiBase
+ * @param {{cancelled: boolean}} ctx - mutable cancellation flag
+ */
+async function _adoptLatestSessionIfAvailable(api, apiBase, ctx) {
+  if (typeof fetch !== 'function') return; // Node test envs without global fetch
+  let resp;
+  try {
+    resp = await fetch(`${apiBase}/api/terrain/sessions/latest`);
+  } catch (err) {
+    console.warn('[terrain-loader] /api/terrain/sessions/latest unreachable:', err);
+    return;
+  }
+  if (resp.status === 404) return; // no pregenerated session
+  if (!resp.ok) {
+    console.warn(
+      `[terrain-loader] /api/terrain/sessions/latest returned HTTP ${resp.status}`
+    );
+    return;
+  }
+  let metadata;
+  try {
+    metadata = await resp.json();
+  } catch (err) {
+    console.warn('[terrain-loader] sessions/latest response was not valid JSON:', err);
+    return;
+  }
+  if (!_isAdoptableSessionMetadata(metadata)) {
+    console.warn('[terrain-loader] sessions/latest payload failed validation:', metadata);
+    return;
+  }
+
+  // D-474: bail if the panel was unmounted or a user upload landed first.
+  if (ctx.cancelled || api.state.get('terrain') != null) {
+    return;
+  }
+
+  console.log(
+    '[terrain-loader] Adopting pre-generated terrain session:', metadata.session_id
+  );
+
+  // Same path as the upload flow: write state, emit terrain:loaded, apply
+  // map layers, fly to bounds. The watcher set up in init() will re-render
+  // the summary panel — we deliberately do NOT call _updateSummary here so
+  // adopt produces exactly one summary render, matching the upload flow.
+  api.state.set('terrain', metadata);
+  api.bus.emit('terrain:loaded', {});
+  _applyMapLayers(api, metadata, apiBase);
+  const [west, south, east, north] = metadata.bounds_wgs84;
+  api.map.fitBounds([[west, south], [east, north]], { padding: 40 });
+}
+
 
 // ---------------------------------------------------------------------------
 // Tile progress SSE
