@@ -1,0 +1,47 @@
+task_id: I-13
+timestamp: 2026-05-11T13:36:46Z
+title: "Hard-fail on boundary load failure in report and viewer commands"
+
+quality_gates:
+  G1_lint: pass            # ruff check src/ tests/ — "All checks passed!"
+  G2_format: pass          # ruff format --check src/ tests/ — "85 files already formatted"
+  G3_import: pass          # ruff check --select I src/ — "All checks passed!"
+  G4_type: pass            # mypy src/salus/ — 37 errors, all pre-existing "import-untyped" warnings on rasterio / shapely / yaml / mercantile / weasyprint stubs; none introduced by I-13. Per CLAUDE.md G4 warnings are informational unless they indicate clear correctness errors.
+  G5_security: pass        # bandit -r src/ -ll — "No issues identified" at medium+ severity
+  G6_unit_test: pass       # pytest tests/ — 1327 passed, 4 skipped, 0 failed (1422.54 s, slowed by parallel I-11/I-12 worker pytest contention on the same workspace)
+  G7_coverage: pass        # 82.14% total coverage, above 80% threshold
+  G8_secrets: pass         # detect-secrets scan src/ — 0 files with potential secrets
+  coverage_pct: 82.14
+
+review:
+  l1_standards:
+    testing: pass          # tests use descriptive names (test_*_unreadable_boundary_exits_nonzero), tmp_path fixtures, real YAML files (not MagicMock), grouped in existing TestCliReport / TestCliViewer classes
+    error_handling: pass   # the change ELIMINATES a silent-swallow path (rule 1) by replacing `click.echo Warning + continue` with `click.echo Error + sys.exit(1)`. The `except Exception` is named (not bare; rule 2), consistent with the existing D-116 pattern at cli.py:534.
+    logging: pass          # click.echo + sys.exit(1) is the documented CLI pattern; no print() added; no library-level logger added (not required for this change).
+    security: N/A          # No file I/O, path-handling, or input-validation surface touched.
+    interface_modules: N/A # No .js, .html, or manifest.json files modified.
+
+  l2_agents:
+    silent_failure_hunter: {status: pass, findings: 0}    # confirmed sys.exit(1) raises SystemExit (BaseException, not Exception), so it is NOT intercepted by the surrounding `except Exception` at cli.py:2157/2333. No silent-failure paths introduced; the pattern matches the D-116 fix at cli.py:534.
+    spec_compliance: {status: pass, findings: 0}          # 7/7 acceptance criteria met. Two informational notes: (a) tests live in test_report_pdf.py / test_viewer_export.py rather than test_cli.py — placement deviation pre-acknowledged in spec note 5; (b) tests do not explicitly assert "Coverage:" is absent, but it is structurally guaranteed (sys.exit fires before the Coverage echo).
+    type_design_analyzer: N/A                              # No type annotations added or modified.
+    regression_reviewer: {status: pass, findings: 0}      # 0 findings. Confirmed: behaviour change is strictly limited to broken-boundary scenarios; no tests removed; SystemExit propagation correct; error message format consistent with D-116; no stale `loaded_boundary` references downstream of the modified blocks.
+    module_architecture_reviewer: N/A                      # No .js, .html, or manifest.json files modified.
+
+defect_ids:
+  - D-482   # report command silent boundary-load fallback (cli.py:2148)
+  - D-483   # viewer command silent boundary-load fallback (cli.py:2326)
+
+files_changed:
+  - src/salus/cli.py                 # two `except Exception` blocks: warning+continue → click.echo + sys.exit(1)
+  - tests/test_report_pdf.py         # +test_report_unreadable_boundary_exits_nonzero
+  - tests/test_viewer_export.py      # +test_viewer_unreadable_boundary_exits_nonzero
+  - .forge/defect-register.yaml      # +D-482, +D-483 (status open; flipped to resolved in follow-up chore commit)
+  - docs/Technical/ProjectPath.md    # I-13 spec entry (committed earlier under 08e76ea by I-11 worker; no diff in this commit)
+
+notes:
+  - Source: bug-triage 2026-05-11 finding O-6 in .forge/bug-triage-2026-05-11.md
+  - Pattern aligned with simulate command's D-116 fix at cli.py:534
+  - Parallel worker contention: I-11 and I-12 sessions ran pytest concurrently on the same workspace, which slowed G6 (23 min 42 s) and required isolated COVERAGE_FILE=.coverage.i13
+
+overall: pass

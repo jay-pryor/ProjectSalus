@@ -523,3 +523,39 @@ class TestCliReport:
             ],
         )
         assert result.exit_code != 0
+
+    def test_report_unreadable_boundary_exits_nonzero(self, flat_dem_path, tmp_path):
+        """D-482: a scenario referencing a non-existent boundary file must abort,
+        not silently fall back to the full-DEM bitmask (which would inflate the
+        reported coverage percentage)."""
+        scenario_data = {
+            "site_dem_path": str(flat_dem_path),
+            "boundary_path": str(tmp_path / "nonexistent_boundary.geojson"),
+            "sensor_placements": [
+                {
+                    "sensor_name": "DroneShield RfOne Mk2",
+                    "position_x": 500050.0,
+                    "position_y": 6100050.0,
+                    "bearing_deg": 0.0,
+                }
+            ],
+        }
+        scenario_path = tmp_path / "scenario_bad_boundary.yaml"
+        scenario_path.write_text(yaml.dump(scenario_data), encoding="utf-8")
+        out_pdf = tmp_path / "report.pdf"
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "report",
+                str(scenario_path),
+                "--output",
+                str(out_pdf),
+                "--sensors",
+                str(_BUNDLED_SENSOR_DIR),
+            ],
+        )
+        assert result.exit_code != 0, result.output
+        assert "Error loading boundary" in result.output
+        assert not out_pdf.exists()

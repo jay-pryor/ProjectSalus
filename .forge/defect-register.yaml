@@ -5320,6 +5320,27 @@ defects:
     status: resolved
     commit: "08e76ea"
 
+  - id: D-482
+    severity: high
+    task: I-13
+    found_by: bug_triage_2026_05_11
+    file: src/salus/cli.py
+    line: 2148
+    description: "`salus report` command's boundary-load except block (cli.py:2148-2154) catches Exception, prints a one-line warning, and silently falls back to bitmask = np.ones((site.rows, site.cols), dtype=bool). The coverage-stats denominator silently grows from the intended boundary area to the entire DEM. A scenario whose real coverage is 45% will be reported in the PDF as 78% with no operator-visible signal that anything went wrong. simulate at cli.py:534 already exits non-zero per D-116; report was never aligned to that policy."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-483
+    severity: high
+    task: I-13
+    found_by: bug_triage_2026_05_11
+    file: src/salus/cli.py
+    line: 2326
+    description: "`salus viewer` command's boundary-load except block (cli.py:2326-2329) catches Exception, prints a one-line warning, and silently falls back to bitmask = np.ones((site.rows, site.cols), dtype=bool). Same failure mode as D-482: the packaged viewer reports inflated coverage_pct against the entire DEM rather than the intended boundary. The customer-delivered viewer artefact silently misrepresents the scenario."
+    resolution: ""
+    status: open
+    commit: ""
 
   - id: D-484
     severity: medium

@@ -2147,11 +2147,9 @@ def report(
                     try:
                         loaded_boundary = load_boundary(sc.boundary_path, site_epsg=site.crs_epsg)
                         bitmask = boundary_mask(site, loaded_boundary)
-                    except Exception as exc:
-                        click.echo(
-                            f"  Warning: boundary load failed ({exc}), using full DEM.",
-                            err=True,
-                        )
+                    except Exception as exc:  # D-482: boundary failure is a hard error
+                        click.echo(f"Error loading boundary: {exc}", err=True)
+                        sys.exit(1)
                 gaps = compute_gaps(composite, bitmask)
                 report_stats = compute_coverage_stats(
                     site, layer_coverages, composite, gaps, site.zones
@@ -2325,8 +2323,9 @@ def viewer(
                 try:
                     loaded_boundary = load_boundary(sc.boundary_path, site_epsg=site.crs_epsg)
                     bitmask = boundary_mask(site, loaded_boundary)
-                except Exception as exc:
-                    click.echo(f"  Warning: boundary load failed ({exc})", err=True)
+                except Exception as exc:  # D-483: boundary failure is a hard error
+                    click.echo(f"Error loading boundary: {exc}", err=True)
+                    sys.exit(1)
             gaps = compute_gaps(composite, bitmask)
             report_stats = compute_coverage_stats(
                 site, layer_coverages, composite, gaps, site.zones
