@@ -5327,9 +5327,9 @@ defects:
     file: src/salus/cli.py
     line: 2148
     description: "`salus report` command's boundary-load except block (cli.py:2148-2154) catches Exception, prints a one-line warning, and silently falls back to bitmask = np.ones((site.rows, site.cols), dtype=bool). The coverage-stats denominator silently grows from the intended boundary area to the entire DEM. A scenario whose real coverage is 45% will be reported in the PDF as 78% with no operator-visible signal that anything went wrong. simulate at cli.py:534 already exits non-zero per D-116; report was never aligned to that policy."
-    resolution: ""
-    status: open
-    commit: ""
+    resolution: "Replaced the silent-fallback except block with the simulate command's D-116 pattern: click.echo(f\"Error loading boundary: {exc}\", err=True); sys.exit(1). SystemExit inherits from BaseException, so it propagates cleanly through the surrounding `except Exception` at cli.py:2157. Added test_report_unreadable_boundary_exits_nonzero in tests/test_report_pdf.py::TestCliReport."
+    status: resolved
+    commit: "3485433"
 
   - id: D-483
     severity: high
@@ -5338,9 +5338,9 @@ defects:
     file: src/salus/cli.py
     line: 2326
     description: "`salus viewer` command's boundary-load except block (cli.py:2326-2329) catches Exception, prints a one-line warning, and silently falls back to bitmask = np.ones((site.rows, site.cols), dtype=bool). Same failure mode as D-482: the packaged viewer reports inflated coverage_pct against the entire DEM rather than the intended boundary. The customer-delivered viewer artefact silently misrepresents the scenario."
-    resolution: ""
-    status: open
-    commit: ""
+    resolution: "Same fix as D-482, applied to the viewer command's except block at cli.py:2326. Added test_viewer_unreadable_boundary_exits_nonzero in tests/test_viewer_export.py::TestCliViewer asserting non-zero exit, 'Error loading boundary' in output, and that index.html is not written."
+    status: resolved
+    commit: "3485433"
 
   - id: D-484
     severity: medium
