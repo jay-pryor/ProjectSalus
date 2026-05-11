@@ -5286,3 +5286,80 @@ defects:
     resolution: "Accepted with documentation. Surfacing a banner in the panel for transient sessions/latest failures is a UX decision out of scope for this architectural fix; the manual upload path is not blocked, and dev-tools logs distinguish the failure modes."
     status: accepted_documented
     commit: "68462d0"
+
+  - id: D-479
+    severity: medium
+    task: I-11
+    found_by: triage_interactive
+    file: src/salus/interface_api/app.py
+    line: 820
+    description: "_compute_zoom_levels hard-caps max_zoom at 13 regardless of DEM resolution and extent. For a 5 m DEM the ideal Mercator zoom is ~15; clamping to 13 yields ~19 m/pixel tiles, a 4x linear (16x pixel-count) resolution loss versus the source DEM. The older standalone viewer (src/salus/viewer/export.py) uses a fixed _TERRAIN_MAX_ZOOM = 16 and renders noticeably crisper terrain. The 'tile count' rationale in the comment does not engage for small-area DEMs — dramatic_terrain.tif at z=16 produces only 42 tiles."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-480
+    severity: medium
+    task: I-11
+    found_by: triage_interactive
+    file: src/salus/viewer/interface/shell.js
+    line: 329
+    description: "MapLibre map is instantiated with an empty style (sources: {}, layers: []) and the #map div has no CSS background. The terrain-loader adds only a hillshade layer, which is a shading effect rather than a fill — slopes get light/dark modulation but flat-ish areas have no colour. Combined with the absent background, the body's #0d0d1a shows through and the terrain looks semi-translucent."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-481
+    severity: low
+    task: I-11
+    found_by: triage_interactive
+    file: src/salus/viewer/interface/modules/terrain-loader/index.js
+    line: 414
+    description: "Hillshade paint uses hillshade-shadow-color: #473B24 (brown) with no explicit hillshade-highlight-color or hillshade-illumination-anchor. The standalone viewer (src/salus/viewer/static/app.js:153-156) uses #1a1a2e shadow + explicit white highlight + viewport illumination anchor, producing a far more solid-looking terrain even without a colour underlayer. The low-contrast paint compounds the translucency of D-480."
+    resolution: ""
+    status: open
+    commit: ""
+
+  - id: D-488
+    severity: low
+    task: I-11
+    found_by: silent_failure_hunter
+    file: tests/test_interface_api.py
+    line: 958
+    description: "test_compute_zoom_levels_extreme_overflow_returns_floor uses rec.message in its caplog assertion. LogRecord.message is populated by Formatter.format() and may be absent if the handler did not format the record; rec.getMessage() is the documented idiom that interpolates args on demand."
+    resolution: "Switched the assertion to rec.getMessage()."
+    status: resolved
+    commit: ""
+
+  - id: D-489
+    severity: low
+    task: I-11
+    found_by: silent_failure_hunter
+    file: src/salus/interface_api/app.py
+    line: 881
+    description: "When _compute_zoom_levels exhausts every candidate zoom under the configured tile budget and falls back to (0, 5), the WARNING is server-side only. The /api/terrain/load response carries no flag for the JS shell, so a user uploading a global-extent fine-resolution DEM sees coarse terrain with no UI explanation."
+    resolution: "Accepted with documentation. The configured budget of 500 tiles accommodates every realistic DEM tested; the fallback path only triggers for pathological inputs (e.g. global extents at sub-metre resolution) that the upload size limit at _MAX_DEM_UPLOAD_BYTES blocks in practice. Adding a UI banner / metadata flag is a UX decision best scoped to a follow-up task once the pathological path is actually observed."
+    status: accepted_documented
+    commit: ""
+
+  - id: D-490
+    severity: low
+    task: I-11
+    found_by: silent_failure_hunter
+    file: src/salus/interface_api/app.py
+    line: 1584
+    description: "When _compute_zoom_levels returns the (0, 5) fallback, the two callers recompute total_tiles via a full mercantile.tiles() materialisation across z=0..5. For global extents this materialises hundreds of mercantile generators worth of work, defeating the budget's intent. Not a correctness failure — terrain_tile_count is informational — but the same short-circuit applied inside _compute_zoom_levels is not applied at the caller's total-tile metric."
+    resolution: "Accepted with documentation. The fallback path is only reached for inputs the upload-size limit blocks in practice (see D-489). When the fallback path is exercised intentionally in a follow-up UX task, callers should switch to a capped tile-count using the same _tile_count_capped pattern."
+    status: accepted_documented
+    commit: ""
+
+  - id: D-491
+    severity: low
+    task: I-11
+    found_by: type_design_analyzer
+    file: src/salus/interface_api/app.py
+    line: 826
+    description: "_compute_zoom_levels accepts bounds_wgs84 as list[float] | None and unpacks exactly 4 elements at runtime. A fixed-arity tuple[float, float, float, float] would make the contract checkable at type time. The looseness is inherited from _compute_dem_bounds_wgs84's existing list-return shape; tightening would require updating that function and its other callers."
+    resolution: "Accepted with documentation. The fix is contained but touches _compute_dem_bounds_wgs84's return signature (already list[float]) and the two existing callers, broadening the I-11 blast radius. Logged for follow-up as a type-safety improvement; not a correctness bug since every caller goes through _compute_dem_bounds_wgs84 which always produces a 4-element list."
+    status: accepted_documented
+    commit: ""

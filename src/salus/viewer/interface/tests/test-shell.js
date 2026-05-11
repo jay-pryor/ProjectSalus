@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 
 import {
   fetchLibraries,
+  initialMapStyle,
   saveScenario,
   validateScenarioPayload,
   applyScenarioPayload,
@@ -340,4 +341,22 @@ test('fetchLibraries(): no fetch + no SALUS_DATA — returns empty objects witho
     globalThis.fetch = originalFetch;
     globalThis.SALUS_DATA = originalData;
   }
+});
+
+// ---------------------------------------------------------------------------
+// I-11 / D-480: initial MapLibre style carries one opaque background layer
+// ---------------------------------------------------------------------------
+
+test('initialMapStyle(): exposes a single opaque background layer', () => {
+  const style = initialMapStyle();
+  assert.equal(style.version, 8);
+  assert.deepEqual(style.sources, {});
+  assert.equal(style.layers.length, 1);
+  const layer = style.layers[0];
+  assert.equal(layer.type, 'background');
+  const color = layer.paint['background-color'];
+  // Reject any transparent / undefined paint value — the whole point of the
+  // layer is to be opaque so hillshade has solid colour to shade against.
+  assert.ok(typeof color === 'string' && color.length > 0, 'background-color must be a non-empty string');
+  assert.notEqual(color, 'transparent');
 });

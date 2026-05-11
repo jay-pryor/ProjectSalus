@@ -406,14 +406,23 @@ function _applyMapLayers(api, terrain, apiBase) {
     api.map.setTerrainSource(SOURCE_ID);
   }
 
-  // Add hillshade layer for depth cues (MUST Rule 13: prefixed ID)
+  // Add hillshade layer for depth cues (MUST Rule 13: prefixed ID).
+  //
+  // Paint properties mirror the standalone viewer (src/salus/viewer/static/
+  // app.js): a near-black shadow with a pure-white highlight and a viewport-
+  // anchored light produce a high-contrast, solid-looking terrain even when
+  // no colour underlayer is present. The previous brown #473B24 + no explicit
+  // highlight rendered as a soft wash that compounded the apparent
+  // transparency of the missing basemap (D-481).
   api.map.addLayer({
     id: HILLSHADE_LAYER_ID,
     type: 'hillshade',
     source: SOURCE_ID,
     paint: {
-      'hillshade-shadow-color': '#473B24',
+      'hillshade-illumination-anchor': 'viewport',
       'hillshade-exaggeration': 0.5,
+      'hillshade-shadow-color': '#1a1a2e',
+      'hillshade-highlight-color': '#ffffff',
     },
   });
 }

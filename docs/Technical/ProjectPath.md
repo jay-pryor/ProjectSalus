@@ -965,6 +965,58 @@ _Exploration scenarios are stored in `demo/explore/` with the naming convention 
   13. `optimiser/index.js` sends `[]` instead of `null` when `allowed_sensor_ids` is absent.
   14. `docs/BugTriage.md` Haiku section annotated with resolution and defect IDs.
 
+**I-11: Restore terrain fidelity and solid appearance in the interactive interface**
+- _Source:_ Triage — firing up `salus interface --scenario demo/explore/E01_dramatic_terrain/scenario.yaml` shows the DEM rendered at noticeably lower resolution than the older standalone `salus viewer` export, and the terrain appears semi-translucent because the page background bleeds through the hillshade.
+- _Root causes:_
+  - `_compute_zoom_levels` in `src/salus/interface_api/app.py` hard-caps `max_zoom` at 13. For a 5 m DEM the ideal zoom is ~15; clamping to 13 quarters the linear resolution. The older standalone exporter (`src/salus/viewer/export.py`) uses a fixed `_TERRAIN_MAX_ZOOM = 16`.
+  - `shell.js` initialises MapLibre with an empty style (`sources: {}`, `layers: []`) and `#map` has no CSS background, so the body's `#0d0d1a` shows through any unshaded area.
+  - The terrain-loader's hillshade paint uses a soft brown shadow (`#473B24`) with no explicit highlight or viewport illumination anchor — much lower contrast than the standalone viewer's `#1a1a2e` shadow + white highlight.
+- _Fix:_
+  - Replace the absolute `max_zoom=13` cap with a tile-budget walk-down (`_TERRAIN_TILE_BUDGET = 500`): start from the resolution-ideal zoom (capped at 16) and step down until the total tile count across the 6-zoom pyramid stays within budget. Small-area DEMs now generate up to z=16; very large DEMs naturally back off to keep tile generation tractable.
+  - Add an opaque `background` layer to the MapLibre initial style in `shell.js` so the hillshade has a solid colour underneath rather than the page bleeding through.
+  - Update the terrain-loader hillshade paint properties to match the standalone viewer: `hillshade-shadow-color: #1a1a2e`, explicit `hillshade-highlight-color: #ffffff`, `hillshade-illumination-anchor: viewport`.
+- _Acceptance criteria:_
+  1. `_compute_zoom_levels` accepts optional `bounds_wgs84` and `tile_budget` arguments; when bounds are supplied, returned (min,max) zooms yield a total tile count ≤ budget.
+  2. For `dramatic_terrain.tif` (5 m / 2 km square), `_compute_zoom_levels` returns `max_zoom == 15` or `16` (within the 500-tile budget), not 13.
+  3. For a synthetic large-area / low-resolution DEM, the walk-down picks a lower max_zoom rather than blowing the budget.
+  4. The MapLibre style instantiated in `shell.js` contains exactly one initial layer of type `background` with a non-transparent paint colour.
+  5. The terrain-loader hillshade layer paint includes the three updated properties (`hillshade-shadow-color`, `hillshade-highlight-color`, `hillshade-illumination-anchor`).
+  6. `pytest tests/` passes, including updated/new tests for the budget logic.
+  7. `node --test src/salus/viewer/interface/tests/*.js` passes.
+  8. Defect register records D-479, D-480, D-481 (open → resolved with commit hash).
+
+**I-12: Modular PDF report architecture — protocol, orchestrator, and first migrated section**
+- _Source:_ Enhancement — the current PDF generator (`src/salus/report/pdf.py`) is monolithic: `assemble_report_data()` builds all data and `render_pdf()` renders all 10 sections in one Jinja2 pass through `base.html`. To enable (a) per-customer curation of report contents, (b) a fast single-section dev loop in future tasks, and (c) eventual sharing of analysis code with the viewer, the report needs a formal module contract.
+- _Goal:_ Add a `ReportModule` protocol, a `build_report` orchestrator, and one migrated section (`executive_summary`) as proof. No behaviour change to the existing pipeline — the new path runs alongside the old until subsequent I-tasks migrate the remaining 9 sections.
+- _Architecture notes:_
+  - **Protocol-first migration.** Each section becomes a `ReportModule` with a `ModuleManifest` (`id`, `title`, `placement` ∈ {"body","appendix"}, `page_break_before`, `landscape`, `optional`), an `is_applicable(sim) -> bool` predicate, and a `render(sim, ctx) -> RenderedSection` method.
+  - **Self-contained sections in v1.** No module-to-module references; cross-section TOC/anchor support deferred.
+  - **Orchestrator at `src/salus/report/builder.py`.** Takes `SimulationResults`, an ordered list of modules, and an output path. Calls `is_applicable` then `render` on each; concatenates HTML fragments; wraps in `base.html`; runs WeasyPrint once. Inapplicable modules are skipped with a logged info message.
+  - **Existing code untouched.** `assemble_report_data()` and `render_pdf()` remain unchanged. CLI continues to use the old path. New code is purely additive.
+  - **First migration target: `executive_summary`.** Smallest non-trivial section (prose + stats summary, no charts/maps). Reuses `generate_executive_summary()` and the `executive_summary.html` template — the module is a thin adapter that calls these and returns the rendered fragment.
+- _Acceptance criteria:_
+  1. `src/salus/report/modules/_base.py` defines `ModuleManifest` (frozen dataclass), `RenderedSection`, `RenderContext`, and `ReportModule` (runtime-checkable Protocol with `manifest`, `is_applicable`, and `render`).
+  2. `src/salus/report/builder.py` defines `build_report(sim, modules, output_path, template_dir=None) -> Path` that constructs the `RenderContext`, calls `is_applicable` then `render` on each module in order, wraps the concatenated fragments in `base.html`, and runs WeasyPrint to produce a PDF. Inapplicable modules are skipped with `_log.info`. Returns the resolved `Path`.
+  3. `src/salus/report/modules/executive_summary.py` defines `ExecutiveSummaryModule` implementing `ReportModule`. `manifest` has `id="executive_summary"`, `title="Executive Summary"`, `placement="body"`, `page_break_before=True`, `landscape=False`, `optional=True`. `is_applicable` returns `True` whenever `sim.stats` is present. `render` invokes `generate_executive_summary()` and renders the existing `executive_summary.html` template with the same variables the legacy path provides.
+  4. `build_report(sim, [ExecutiveSummaryModule()], output_path)` produces a valid single-section PDF (non-zero bytes, opens cleanly, contains the executive-summary heading).
+  5. Existing `assemble_report_data()` and `render_pdf()` are untouched. All existing tests in `tests/test_report_pdf.py` pass without modification.
+  6. New unit tests in `tests/test_report_module_contract.py` cover: (a) `ExecutiveSummaryModule` conforms to the `ReportModule` Protocol via `isinstance(m, ReportModule)`; (b) `build_report` skips a module whose `is_applicable` returns False and still produces a valid PDF when at least one applicable module remains; (c) the HTML fragment produced by `ExecutiveSummaryModule.render` contains the same executive-summary text that `generate_executive_summary()` returns for a known fixture.
+  7. The CLI (`src/salus/cli.py`) is not modified.
+- _Out of scope (later I-tasks):_ standalone-render dev path, YAML profile loader, migration of the remaining 9 sections, refactoring `maps.py`/`charts.py`, any change to the existing single-pass `render_pdf` entry point.
+
+**I-13: Hard-fail on boundary load failure in `report` and `viewer` commands**
+- _Source:_ Triage (bug-hunt 2026-05-11, finding O-6 in `.forge/bug-triage-2026-05-11.md`) — when a scenario references a boundary file that becomes unreadable or has invalid geometry, the `simulate` command exits cleanly with `sys.exit(1)` per D-116, but the `report` (`cli.py:2148`) and `viewer` (`cli.py:2326`) commands print a one-line warning and silently fall back to `bitmask = np.ones((site.rows, site.cols), dtype=bool)` (full DEM). The coverage-stats denominator silently grows from the intended boundary area to the entire DEM — a scenario whose real coverage is 45% will be reported as 78% in the PDF/viewer with no operator-visible signal that anything went wrong. For a defence-proposal output this is the textbook "looks complete, isn't" failure mode.
+- _Root cause:_ The two `except Exception` blocks below an inner `try` that wraps `load_boundary` + `boundary_mask` only emit a click.echo warning and continue with the full-DEM fallback. The simulate command's analogous block (`cli.py:534`) correctly mirrors the D-116 policy by exiting non-zero, but the report and viewer commands were never aligned.
+- _Fix:_ Replace the silent-fallback `except` blocks in the `report` (line 2148-2154) and `viewer` (line 2326-2329) commands with the same pattern simulate already uses: `click.echo(f"Error loading boundary: {exc}", err=True); sys.exit(1)`. Successful boundary loads are unchanged; scenarios that have no `boundary_path` continue to use the full-DEM bitmask (this is the documented intent in that case, not a fallback).
+- _Acceptance criteria:_
+  1. Invoking `salus report` with a scenario whose `boundary_path` points to a non-existent file exits with non-zero status and writes `Error loading boundary: ...` to stderr; no `Coverage:` summary line is printed.
+  2. Invoking `salus viewer` with the same input behaves identically (non-zero exit, error on stderr, no viewer package written).
+  3. Invoking either command with a scenario that has no `boundary_path` continues to succeed and uses the full-DEM bitmask (documented intent in that case).
+  4. Existing `salus simulate` behaviour is unchanged (already mirrors D-116).
+  5. New tests in `tests/test_cli.py` cover the three paths above for both `report` and `viewer`.
+  6. `pytest tests/` passes.
+  7. Defect register records D-482, D-483 (open → resolved with commit hash).
+
 ---
 
 ### Slice 15 — Populate Full Sensor/Effector/Threat Database

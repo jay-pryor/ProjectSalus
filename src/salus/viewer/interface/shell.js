@@ -35,6 +35,27 @@ import {
   createModuleAPI,
 } from './registry.js';
 
+// Initial MapLibre style. Owns exactly one shell-level layer — an opaque
+// background — so any module-added layer (e.g. hillshade) renders on top of
+// solid colour rather than the page bleed-through that previously made
+// terrain look semi-translucent (D-480, I-11).
+//
+// Exported as a factory so the shape can be asserted from tests without
+// instantiating MapLibre.
+export function initialMapStyle() {
+  return {
+    version: 8,
+    sources: {},
+    layers: [
+      {
+        id: 'background',
+        type: 'background',
+        paint: { 'background-color': '#1a1a2e' },
+      },
+    ],
+  };
+}
+
 // State keys that are persisted in a saved scenario file (excludes 'ui' which
 // is ephemeral shell-owned state).
 const SCENARIO_KEYS = [
@@ -326,11 +347,7 @@ async function main() {
   // MapLibreGL is loaded via <script> tag in index.html; maplibregl is global.
   const map = new maplibregl.Map({  // eslint-disable-line no-undef
     container: 'map',
-    style: {
-      version: 8,
-      sources: {},
-      layers: [],
-    },
+    style: initialMapStyle(),
     center: [133.7751, -25.2744], // Geographic centre of Australia
     zoom: 4,
   });

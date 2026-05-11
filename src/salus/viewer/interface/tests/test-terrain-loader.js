@@ -328,6 +328,30 @@ test('init() applies map layers when terrain state is already set', () => {
   assert.equal(addLayerCall.args[0].id, 'terrain-loader:hillshade');
 });
 
+test('hillshade layer paint matches the standalone-viewer high-contrast preset (I-11/D-481)', () => {
+  // Locks in the three properties the older salus viewer export uses to give
+  // terrain a solid, high-contrast look without a colour underlayer.
+  const metadata = {
+    crs_epsg: 28354,
+    bounds_wgs84: [148.0, -36.0, 149.0, -35.0],
+    centre_wgs84: [148.5, -35.5],
+    resolution_m: 1.0,
+    tile_url_template: '/api/terrain/tiles/{z}/{x}/{y}.png',
+    terrain_tile_count: 12,
+    terrain_min_zoom: 8,
+    terrain_max_zoom: 13,
+  };
+  const api = makeMockApi({ terrainValue: metadata });
+  init(api);
+
+  const addLayerCall = api.map._calls.find(c => c.method === 'addLayer');
+  assert.ok(addLayerCall, 'addLayer must be called when terrain is pre-loaded');
+  const paint = addLayerCall.args[0].paint;
+  assert.equal(paint['hillshade-illumination-anchor'], 'viewport');
+  assert.equal(paint['hillshade-shadow-color'], '#1a1a2e');
+  assert.equal(paint['hillshade-highlight-color'], '#ffffff');
+});
+
 test('init() calls setTerrainSource when terrain is pre-loaded', () => {
   const metadata = {
     crs_epsg: 28354,

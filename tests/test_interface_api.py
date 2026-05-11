@@ -898,10 +898,10 @@ def test_terrain_concurrent_loads_keep_disjoint_tile_paths(flat_dem_path: Path) 
 
 def test_compute_zoom_levels_reasonable_range() -> None:
     """_compute_zoom_levels returns sensible zoom ranges for typical DEM resolutions."""
-    from salus.interface_api.app import _compute_zoom_levels
+    from salus.interface_api.app import _TERRAIN_MAX_ZOOM_CAP, _compute_zoom_levels
 
     min_z_1m, max_z_1m = _compute_zoom_levels(1.0)
-    assert 5 <= max_z_1m <= 13
+    assert 5 <= max_z_1m <= _TERRAIN_MAX_ZOOM_CAP
     assert min_z_1m <= max_z_1m
 
     min_z_30m, max_z_30m = _compute_zoom_levels(30.0)
@@ -909,6 +909,55 @@ def test_compute_zoom_levels_reasonable_range() -> None:
 
     min_z_100m, max_z_100m = _compute_zoom_levels(100.0)
     assert max_z_100m < max_z_30m
+
+
+def test_compute_zoom_levels_tile_budget_walks_down() -> None:
+    """When bounds are supplied, the walk-down picks the highest zoom that fits the budget."""
+    import mercantile
+
+    from salus.interface_api.app import _compute_zoom_levels
+
+    # 2 km square at lat -35 — matches dramatic_terrain.tif extent.
+    bounds = [141.0, -35.243, 141.022, -35.225]
+    # Generous budget — should reach the resolution-ideal cap (~15-16 for 5 m).
+    min_z, max_z = _compute_zoom_levels(5.0, bounds_wgs84=bounds, tile_budget=500)
+    assert max_z >= 15, f"expected max_zoom >= 15 for small-area 5 m DEM, got {max_z}"
+    assert min_z == max(0, max_z - 5)
+
+    # Verify the returned range really does fit the budget.
+    total = sum(len(list(mercantile.tiles(*bounds, zooms=z))) for z in range(min_z, max_z + 1))
+    assert total <= 500
+
+
+def test_compute_zoom_levels_large_area_backs_off() -> None:
+    """A large-area DEM at fine resolution backs off below the resolution-ideal cap."""
+    from salus.interface_api.app import _compute_zoom_levels
+
+    # 1° square (~110 km) at the equator — large enough that 5 m ideal zoom blows the budget.
+    bounds = [0.0, 0.0, 1.0, 1.0]
+    min_z_with_budget, max_z_with_budget = _compute_zoom_levels(
+        5.0, bounds_wgs84=bounds, tile_budget=500
+    )
+    # Without bounds the function would return the ideal cap (~15 for 5 m).
+    _, max_z_ideal = _compute_zoom_levels(5.0)
+    assert max_z_with_budget < max_z_ideal
+    assert min_z_with_budget <= max_z_with_budget
+
+
+def test_compute_zoom_levels_extreme_overflow_returns_floor(caplog) -> None:
+    """Budget that cannot be met at any zoom falls back to (0, 5) and logs a warning."""
+    import logging
+
+    from salus.interface_api.app import _compute_zoom_levels
+
+    # Global bounds — even z=5 alone is >> any reasonable single-DEM budget.
+    bounds = [-180.0, -85.0, 180.0, 85.0]
+    with caplog.at_level(logging.WARNING):
+        min_z, max_z = _compute_zoom_levels(1.0, bounds_wgs84=bounds, tile_budget=10)
+    assert (min_z, max_z) == (0, 5)
+    # rec.getMessage() handles unformatted records safely; rec.message can
+    # be absent until the formatter has run (silent-failure-hunter L2).
+    assert any("tile budget" in rec.getMessage() for rec in caplog.records)
 
 
 def test_generate_terrain_tile_returns_png_bytes(flat_dem_path: Path) -> None:

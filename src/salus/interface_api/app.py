@@ -809,17 +809,82 @@ def _run_optimise_pipeline(
 # ---------------------------------------------------------------------------
 
 
-def _compute_zoom_levels(resolution_m: float) -> tuple[int, int]:
+# Maximum total terrain tiles generated across the full zoom pyramid for one
+# DEM. Bigger budgets give crisper terrain on small-area DEMs at the cost of
+# longer pregen times and disk usage on large-area DEMs. Tuned so a typical
+# 2 km square 5 m DEM (E01_dramatic_terrain) reaches z=16 (42 tiles total).
+_TERRAIN_TILE_BUDGET: int = 500
+
+# Absolute zoom cap. Above z=16 the per-pixel benefit plateaus while Terrarium
+# tile size grows linearly with the DEM pixel-count covered, so we never go
+# higher even if budget + ideal-zoom would allow it (D-479).
+_TERRAIN_MAX_ZOOM_CAP: int = 16
+
+
+def _compute_zoom_levels(
+    resolution_m: float,
+    bounds_wgs84: list[float] | None = None,
+    tile_budget: int = _TERRAIN_TILE_BUDGET,
+) -> tuple[int, int]:
     """Return (min_zoom, max_zoom) for an XYZ tile pyramid at *resolution_m*.
 
     Targets the zoom level where the WebMercator pixel size is closest to the
-    DEM pixel size.  Clamped to [5, 13] to keep tile counts manageable.
+    DEM pixel size, then — when *bounds_wgs84* is supplied — walks the cap
+    down until the total tile count across the 6-zoom pyramid fits within
+    *tile_budget* (D-479: prior fixed cap of 13 silently quartered the linear
+    resolution of small-area DEMs versus the standalone viewer's z=16 output).
+
+    The hard floor is z=5 and the hard ceiling is _TERRAIN_MAX_ZOOM_CAP — even
+    a giant DEM that blows the budget at every zoom will not drop below z=5.
+    Callers that omit *bounds_wgs84* get the resolution-ideal cap with no
+    budget enforcement (backward-compatible for tests / synthetic inputs).
     """
     # Pixel size at zoom Z (WebMercator) = 40_075_016.686 / (256 * 2^Z) metres
     z_ideal = math.log2(max(40_075_016.686 / (256.0 * max(resolution_m, 0.1)), 1.0))
-    max_zoom = int(max(5, min(13, round(z_ideal))))
-    min_zoom = max(0, max_zoom - 5)
-    return min_zoom, max_zoom
+    max_zoom_ideal = int(max(5, min(_TERRAIN_MAX_ZOOM_CAP, round(z_ideal))))
+
+    if bounds_wgs84 is None:
+        return max(0, max_zoom_ideal - 5), max_zoom_ideal
+
+    import mercantile  # lazy — keep import-time cost off the hot path
+
+    west, south, east, north = bounds_wgs84
+
+    def _tile_count_capped(z: int, cap: int) -> int:
+        """Count tiles for the bounds at zoom *z*, but stop counting once *cap*
+        is exceeded. Returns a value strictly greater than *cap* on overflow.
+
+        Without this short-circuit, a global-extent DEM at z=15 would generate
+        a billion-element iterator just to decide it does not fit the budget.
+        """
+        count = 0
+        for _ in mercantile.tiles(west, south, east, north, zooms=z):
+            count += 1
+            if count > cap:
+                return count
+        return count
+
+    for candidate_max in range(max_zoom_ideal, 4, -1):
+        candidate_min = max(0, candidate_max - 5)
+        running = 0
+        for z in range(candidate_min, candidate_max + 1):
+            running += _tile_count_capped(z, tile_budget - running)
+            if running > tile_budget:
+                break
+        if running <= tile_budget:
+            return candidate_min, candidate_max
+
+    # Even the z=5 pyramid blows the budget — return the floor (z=0..5) and
+    # let the caller deal with it rather than silently dropping below z=5.
+    # We do not propagate a min_zoom derived from max_zoom_ideal here: that
+    # would produce min > max for high-ideal/over-budget DEMs.
+    _log.warning(
+        "DEM bounds %s exceed tile budget %d at every candidate zoom; "
+        "falling back to z=0..5 pyramid.",
+        bounds_wgs84,
+        tile_budget,
+    )
+    return 0, 5
 
 
 def _compute_dem_bounds_wgs84(
@@ -1513,7 +1578,7 @@ async def terrain_load(
 
     import mercantile  # lazy — avoid adding to app startup time
 
-    min_zoom, max_zoom = _compute_zoom_levels(resolution_m)
+    min_zoom, max_zoom = _compute_zoom_levels(resolution_m, bounds_wgs84=bounds_wgs84)
     west, south, east, north = bounds_wgs84
 
     total_tiles = sum(
@@ -1746,7 +1811,7 @@ def pregen_terrain_from_path(dem_path: Path) -> str | None:
 
     import mercantile  # lazy — avoid adding to import-time cost
 
-    min_zoom, max_zoom = _compute_zoom_levels(resolution_m)
+    min_zoom, max_zoom = _compute_zoom_levels(resolution_m, bounds_wgs84=bounds_wgs84)
     west, south, east, north = bounds_wgs84
     total_tiles = sum(
         len(list(mercantile.tiles(west, south, east, north, zooms=z)))
