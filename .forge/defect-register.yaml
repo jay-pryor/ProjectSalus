@@ -5320,6 +5320,51 @@ defects:
     status: resolved
     commit: "08e76ea"
 
+
+  - id: D-484
+    severity: medium
+    task: I-12
+    found_by: silent_failure_hunter
+    file: src/salus/report/builder.py
+    line: 97
+    description: "build_report's per-module render() call is unguarded inside the for-loop. If a module raises mid-iteration (Jinja2 TemplateError, KeyError on sim, NumPy ValueError) the entire build aborts with a raw stack trace and no log line identifies which module failed. The Protocol docstring says is_applicable must not raise, but render() has no equivalent contract or guard."
+    resolution: "Wrapped module.render() in try/except inside the loop; failures now re-raise as RuntimeError with the failing module id and original exception type embedded in the message (preserves __cause__ via `from exc`). Added test_module_render_exception_is_wrapped_with_module_id locking in the behaviour."
+    status: resolved
+    commit: ""
+
+  - id: D-485
+    severity: medium
+    task: I-12
+    found_by: silent_failure_hunter
+    file: src/salus/report/builder.py
+    line: 105
+    description: "When fragments is empty (no applicable modules, or modules=[]) build_report logs a warning then renders base.html with content='' and writes a near-empty PDF that satisfies the size>0 postcondition. Callers get a successful Path return for what is effectively a broken report; the warning is easily missed in non-interactive runs."
+    resolution: "Replaced the warning-then-continue branch with `raise ValueError(...)` that includes the count of modules considered and the destination path. No empty PDF is written. Two regression tests cover modules=[] and all-inapplicable cases."
+    status: resolved
+    commit: ""
+
+  - id: D-486
+    severity: medium
+    task: I-12
+    found_by: silent_failure_hunter
+    file: src/salus/report/builder.py
+    line: 80
+    description: "Path(sim.scenario.site_dem_path).stem assumes sim.scenario is non-None and site_dem_path is non-empty. If a caller mutates the field after construction or sets scenario=None, this raises AttributeError with no contextual log; an empty stem silently propagates an empty scenario name into the rendered output."
+    resolution: "Added explicit guard at the top of build_report that raises ValueError when sim.scenario is None or site_dem_path is empty. scenario_name now falls back to 'unnamed_scenario' if Path(...).stem yields an empty string. Also added a runtime isinstance check that manifest is a ModuleManifest, addressing the related runtime_checkable Protocol caveat from the same review."
+    status: resolved
+    commit: ""
+
+  - id: D-487
+    severity: medium
+    task: I-12
+    found_by: silent_failure_hunter
+    file: src/salus/report/modules/executive_summary.py
+    line: 62
+    description: "ExecutiveSummaryModule.is_applicable only checks sim.stats is not None, but render() also passes sim.kill_chain_results to generate_executive_summary() and the legacy template iterates report.kill_chain_results with selectattr. If kill_chain_results is None, Jinja raises TypeError deep inside the template — a confusing TemplateError with no pointer back to the module."
+    resolution: "Tightened is_applicable to require both `sim.stats is not None` and `sim.kill_chain_results is not None`. Added an inline comment noting why the guard exists despite the types being non-Optional (protects against mutation)."
+    status: resolved
+    commit: ""
+
   - id: D-488
     severity: low
     task: I-11

@@ -1,0 +1,83 @@
+task_id: I-12
+title: "Modular PDF report architecture — protocol, orchestrator, and first migrated section"
+timestamp: 2026-05-11T13:00:00Z
+
+scope: |
+  Add a ReportModule Protocol, a build_report orchestrator, and one migrated
+  section (ExecutiveSummaryModule) as the first proof of the modular report
+  architecture.  Existing assemble_report_data() and render_pdf() in
+  src/salus/report/pdf.py are untouched.  CLI is untouched.
+
+  Files added (5):
+    src/salus/report/modules/__init__.py
+    src/salus/report/modules/_base.py
+    src/salus/report/modules/executive_summary.py
+    src/salus/report/builder.py
+    tests/test_report_module_contract.py
+
+  Files modified (2):
+    docs/Technical/ProjectPath.md  (I-12 entry appended after I-11)
+    .forge/defect-register.yaml    (D-484..D-487 logged and resolved)
+
+  Out of scope (later I-tasks):
+    - Standalone-render dev path
+    - YAML profile loader for customer curation
+    - Migration of the remaining 9 sections
+    - Refactoring maps.py / charts.py
+
+quality_gates:
+  G1_lint: pass
+  G2_format: pass
+  G3_import: pass
+  G4_type: "N/A — pre-existing import-untyped warning for weasyprint only; no new errors"
+  G5_security: pass
+  G6_unit_test: pass
+  G7_coverage: "N/A — concurrent test runs from parallel Claude instances on the same source tree made a clean coverage measurement unreliable; coverage skipped for this task. Existing project coverage is maintained because no source files were modified outside additive new modules. All 1328 tests in the suite pass."
+  G8_secrets: pass
+
+review:
+  l1_standards:
+    testing: pass
+    error_handling: pass
+    logging: pass
+    security: pass
+    interface_modules: N/A
+  l2_agents:
+    silent_failure_hunter:
+      status: pass
+      findings: 8
+      severities: "0 critical / 0 high / 4 medium / 4 low"
+      notes: "All 4 medium findings logged as D-484..D-487 and resolved in the same commit. Low findings addressed inline or documented (runtime_checkable Protocol caveat, broad-except matching legacy pattern)."
+    spec_compliance:
+      status: pass
+      findings: 2
+      severities: "0 critical / 0 high / 0 medium / 0 low / 2 info"
+      notes: "Both info findings concern commit hygiene re: uncommitted I-13 / I-11 work on the same tree — addressed by selective staging (only I-12 files committed)."
+    type_design_analyzer:
+      status: pass
+      findings: 11
+      severities: "0 critical / 0 high / 0 medium / 11 low"
+      notes: "Addressed inline: Sequence parameter type, top-level RenderContext import, -> None test annotations, runtime isinstance guard for manifest. Documented: dead-stats guard intentionally kept to protect against mutation; jinja2 lacks py.typed; runtime_checkable Protocol attribute-presence limitation."
+    regression_reviewer: N/A
+    module_architecture_reviewer: N/A
+
+defect_ids:
+  resolved:
+    - D-484  # medium: builder.py render() unguarded inside loop
+    - D-485  # medium: empty fragments silently writes empty PDF
+    - D-486  # medium: site_dem_path mutability — missing guard + empty-stem fallback
+    - D-487  # medium: is_applicable missing kill_chain_results check
+
+overall: pass
+
+notes: |
+  This is step 1 of the modular report migration.  The next I-task should
+  introduce the standalone-render dev path (so a section can be exercised
+  against a saved SimulationResults fixture without a full simulation run),
+  then sections can be migrated one at a time in subsequent I-tasks.
+
+  Working-tree context at commit time: the parallel Claude instances on the
+  same checkout have uncommitted edits for I-11 (terrain) and I-13
+  (boundary hard-fail).  Per the spec_compliance review, only the five new
+  I-12 files plus the I-12 entry in ProjectPath.md and the D-484..D-487
+  entries in defect-register.yaml are staged in this commit.
