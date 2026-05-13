@@ -6,13 +6,39 @@
  * Responsibilities:
  *   - Build the nav bar from the module registry at init() time.
  *   - Gate each button: enabled only when all prerequisites[] keys are non-null.
- *   - On module activation: run onUnmount callbacks, lazy-init the module if
- *     first visit, mount its panel, update state.ui.
+ *   - On module activation: run onUnmount callbacks on the outgoing module,
+ *     call mod.init(api) on the incoming module (every activation), update
+ *     state.ui.
  *   - Maintain nav history and a Back button.
+ *   - Route handoff events (e.g. optimiser:apply) to receiver modules that
+ *     are not currently active so their scoped subscriptions can fire.
  *
  * The mode manager is shell code: it calls state.setState/getState (bypassing
- * the module proxy) to own the `ui` state key.
+ * the module proxy) to own the `ui` state key, and it uses the raw
+ * (unscoped) bus.
+ */
+
+/**
+ * Handoff events whose semantics are "the receiver becomes active and processes
+ * this payload." These are emitted by a module that, by design, the user is
+ * currently sitting on (so the receiver is NOT active and has no live bus
+ * subscription). The mode manager intercepts the event on the raw bus,
+ * activates the receiver (which runs its init and registers its scoped
+ * subscription), then re-emits so the receiver's handler fires.
  *
+ * Listed by event name → receiver moduleId. Only events listed here trigger
+ * the route; ordinary intra-active-module events flow through the scoped bus
+ * unchanged.
+ *
+ * D-493: `optimiser:apply` is emitted from the Optimiser panel — placement-
+ * editor (the sole writer of `placements`) is inactive at that moment, so
+ * without routing the event is silently dropped.
+ */
+const _HANDOFF_EVENT_TARGETS = Object.freeze({
+  'optimiser:apply': 'placement-editor',
+});
+
+/**
  * @param {HTMLElement} navContainer - element to append nav buttons to
  * @param {HTMLElement} panelSlot - panel slot element (unused directly here; panel
  *   mounting is delegated to api.panel.mount which the module calls from its init)
@@ -25,8 +51,12 @@ export function createModeManager(navContainer, panelSlot, state, bus, moduleReg
   let activeModuleId = null;
   const navHistory = [];
 
-  // moduleId → true once init(api) has been called successfully
-  const initialised = new Set();
+  // Handoff events currently being routed. Used as a per-event in-flight
+  // guard that handles both re-entrancy (the router's own re-emit firing the
+  // listener again) AND rapid duplicates (e.g. user double-clicks Apply,
+  // emitting twice before the first activation has completed). Either case
+  // is a no-op while the first route is still in flight.
+  const _pendingHandoff = new Set();
 
   // ---------------------------------------------------------------------------
   // Prerequisite check
@@ -53,15 +83,17 @@ export function createModeManager(navContainer, panelSlot, state, bus, moduleReg
   /**
    * Activate a module by ID.
    * - Unmounts the current module (runUnmount protected with try/catch).
-   * - Lazy-loads module code on first activation (init called exactly once).
-   * - Errors from loadModule() and init() are caught and logged; the module
-   *   is removed from initialised so it can be retried on next click.
+   * - Calls mod.init(api) on the incoming module on every activation (D-492);
+   *   ES module loading is browser-cached so this is cheap on repeat visits.
+   * - Errors from loadModule() and init() are caught and logged so a failed
+   *   activation can be retried by the user clicking the nav button again.
    *
    * @param {string} moduleId
-   * @returns {Promise<void>}
+   * @returns {Promise<boolean>} true if init succeeded, false on caught error
+   *   (return value used by the handoff router to decide whether to re-emit).
    */
   async function activateModule(moduleId) {
-    if (moduleId === activeModuleId) return;
+    if (moduleId === activeModuleId) return true;
 
     // Unmount the current module — never let a cleanup error block activation
     if (activeModuleId !== null) {
@@ -87,22 +119,78 @@ export function createModeManager(navContainer, panelSlot, state, bus, moduleReg
     });
 
     const entry = moduleRegistry.find(m => m.manifest.id === moduleId);
-    if (!entry) return;
+    if (!entry) return false;
 
-    // Lazy init: call module.init(api) exactly once on success
-    if (!initialised.has(moduleId)) {
-      try {
-        const mod = await entry.loadModule();
-        if (!mod || typeof mod.init !== 'function') {
-          throw new Error(`Module '${moduleId}' index.js must export { init(api) }`);
-        }
-        mod.init(entry.api);
-        // Only mark as initialised on success so a failed load can be retried
-        initialised.add(moduleId);
-      } catch (err) {
-        console.error(`[mode-manager] Failed to activate module '${moduleId}':`, err);
-        // Do not add to initialised — allow retry on next click
+    // D-492: call module.init(api) on every activation, not just the first.
+    // Deactivation tears the module down completely — runUnmount removes the
+    // panel DOM from the slot, removes map sources/layers, unsubscribes from
+    // state.watch and bus.on. A previously-initialised module that the user
+    // navigates back to has no live UI or subscriptions; init() must run
+    // again to rebuild them.
+    //
+    // Module init() functions are required to be idempotent across an
+    // unmount/mount cycle: every addSource/addLayer/watch/on must be paired
+    // with a removal in onUnmount (Interface Module Standard §15, §9, §12).
+    // The dynamic import inside loadModule() is cached by the browser's ES
+    // module system, so re-calling it returns the same module record without
+    // re-fetching.
+    try {
+      const mod = await entry.loadModule();
+      if (!mod || typeof mod.init !== 'function') {
+        throw new Error(`Module '${moduleId}' index.js must export { init(api) }`);
       }
+      mod.init(entry.api);
+      return true;
+    } catch (err) {
+      console.error(`[mode-manager] Failed to activate module '${moduleId}':`, err);
+      return false;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Handoff event routing (D-493)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Handle a handoff event observed on the raw bus.
+   *
+   * Cases handled:
+   *   1. A route for this event is already in flight (re-entrancy from our
+   *      own re-emit, or a rapid duplicate user click) — no-op.
+   *   2. The target module is already active — its own scoped subscription
+   *      fired through the normal bus dispatch; nothing extra to do.
+   *   3. The target is inactive — activate it (its init registers the scoped
+   *      subscription) and re-emit so the now-active handler receives it.
+   *      If activation fails (init threw and was caught), the re-emit is
+   *      skipped and a warning is logged — re-emitting onto a target with
+   *      no live listener would silently drop the payload.
+   *
+   * @param {string} event - handoff event name (e.g. 'optimiser:apply')
+   * @param {string} targetId - moduleId that owns the receiving logic
+   * @param {*} payload
+   * @returns {Promise<void>}
+   */
+  async function _routeHandoff(event, targetId, payload) {
+    if (_pendingHandoff.has(event)) return; // re-entry or rapid duplicate
+    if (activeModuleId === targetId) return; // native dispatch handled it
+
+    _pendingHandoff.add(event);
+    try {
+      const ok = await activateModule(targetId);
+      if (!ok) {
+        console.warn(
+          `[mode-manager] handoff '${event}' dropped: '${targetId}' failed to initialise`,
+        );
+        return;
+      }
+      bus.emit(event, payload);
+    } catch (err) {
+      console.error(
+        `[mode-manager] handoff routing failed for '${event}' → '${targetId}':`,
+        err,
+      );
+    } finally {
+      _pendingHandoff.delete(event);
     }
   }
 
@@ -158,7 +246,25 @@ export function createModeManager(navContainer, panelSlot, state, bus, moduleReg
     backBtn.addEventListener('click', () => {
       if (navHistory.length > 0) {
         const prev = navHistory.pop();
-        // Temporarily clear activeModuleId so activateModule re-runs for prev
+        // Tear down the current module before clearing activeModuleId.
+        // activateModule's own unmount block is keyed off activeModuleId !==
+        // null; clearing it without first running runUnmount would leak the
+        // current module's map sources, layers, and bus subscriptions.
+        // Back navigation does NOT push the current module onto navHistory
+        // (the user is moving backwards through it, not deepening the stack).
+        if (activeModuleId !== null) {
+          const current = moduleRegistry.find(m => m.manifest.id === activeModuleId);
+          if (current) {
+            try {
+              current.runUnmount();
+            } catch (err) {
+              console.error(`[mode-manager] runUnmount error during Back:`, err);
+            }
+          }
+        }
+        // Clear activeModuleId so activateModule's same-module guard does
+        // not short-circuit, and so its unmount block does not run a second
+        // time (already done above).
         activeModuleId = null;
         activateModule(prev).catch(err =>
           console.error(`[mode-manager] Back navigation error:`, err)
@@ -173,6 +279,16 @@ export function createModeManager(navContainer, panelSlot, state, bus, moduleReg
     });
 
     navContainer.appendChild(backBtn);
+
+    // Wire handoff event routing on the raw bus (D-493).
+    // These listeners persist for the page lifetime — no cleanup needed.
+    for (const [event, targetId] of Object.entries(_HANDOFF_EVENT_TARGETS)) {
+      bus.on(event, (payload) => {
+        _routeHandoff(event, targetId, payload).catch(err =>
+          console.error(`[mode-manager] Unhandled handoff error for '${event}':`, err)
+        );
+      });
+    }
   }
 
   // ---------------------------------------------------------------------------

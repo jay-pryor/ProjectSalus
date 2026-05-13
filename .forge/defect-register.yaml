@@ -5429,3 +5429,76 @@ defects:
     resolution: "Accepted with documentation. The fix is contained but touches _compute_dem_bounds_wgs84's return signature (already list[float]) and the two existing callers, broadening the I-11 blast radius. Logged for follow-up as a type-safety improvement; not a correctness bug since every caller goes through _compute_dem_bounds_wgs84 which always produces a 4-element list."
     status: accepted_documented
     commit: "08e76ea"
+
+  - id: D-492
+    severity: critical
+    task: triage-2026-05-11
+    triage_ref: O-1
+    found_by: bug_triage_2026_05_11
+    file: src/salus/viewer/interface/mode-manager.js
+    line: 93
+    description: "Module panels and map layers never re-mount on second activation — init() runs once per session (initialised.add(moduleId) guard). Re-activating any module after first deactivation leaves panel empty and map layers gone. Affects 13 modules."
+    resolution: "Removed the initialised Set guard in mode-manager.js. mod.init(api) now runs on every activation. Modules' onUnmount blocks fully tear down what init creates (map sources/layers, watch/bus subscriptions, panel DOM), so re-init is idempotent. Browser ES module cache makes repeat loadModule() calls cheap. Added regression tests in test-mode-manager.js verifying init re-runs on navigation back and that each cycle runs onUnmount once."
+    status: resolved
+    commit: ""
+
+
+  - id: D-493
+    severity: critical
+    task: triage-2026-05-11
+    triage_ref: O-2
+    found_by: bug_triage_2026_05_11
+    file: src/salus/viewer/interface/modules/optimiser/index.js
+    line: 520
+    description: "optimiser:apply event silently dropped — placement-editor is not active when optimiser emits the event, its bus subscription already torn down. Modal closes, ghost markers vanish, user believes Apply succeeded but placements state is unchanged."
+    resolution: "mode-manager.js now subscribes to a _HANDOFF_EVENT_TARGETS map ({'optimiser:apply': 'placement-editor'}) on the raw shell bus. When the event fires with the target inactive, the router activates the target (whose init registers its scoped subscription) and re-emits so the handler fires. Per-event _pendingHandoff Set guards against re-entry (router's own re-emit) and rapid duplicates (double-clicks). Activation failure causes re-emit to be skipped with a warning instead of dropping the payload onto a dead target."
+    status: resolved
+    commit: ""
+
+
+  - id: D-582
+    severity: high
+    task: triage-2026-05-11
+    found_by: module_architecture_reviewer
+    file: src/salus/viewer/interface/mode-manager.js
+    line: 173
+    description: "Handoff routing race: two optimiser:apply emissions within the same tick (e.g. user double-clicks Apply) could schedule interleaved activate-then-reemit sequences. The original payload-identity WeakSet guard only de-duped within a single re-emit chain, not across distinct user actions with different payload objects. Discovered during L2 review of the D-493 fix."
+    resolution: "Replaced WeakSet of payload references with a per-event _pendingHandoff Set. The guard fires whenever a route for the event is in flight, regardless of payload identity, so re-entry (router re-emit) AND rapid duplicate user clicks both collapse to a single activation. Wrapped activate/emit in try/finally so the in-flight token is always released. Added regression test 'rapid duplicate optimiser:apply emits collapse to one activation'."
+    status: resolved
+    commit: ""
+
+
+  - id: D-583
+    severity: medium
+    task: triage-2026-05-11
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/mode-manager.js
+    line: 179
+    description: "Handoff router re-emitted the handoff event unconditionally after await activateModule, but activateModule catches and logs init errors internally. If init failed, the target had no live scoped subscription, so the re-emit silently dropped the payload — defeating the D-493 fix. Discovered during L2 review."
+    resolution: "activateModule now returns Promise<boolean> (true on success, false on caught error). _routeHandoff checks the result; on false it logs a warning ('[mode-manager] handoff dropped: target failed to initialise') and skips the re-emit so the failure is observable rather than silent."
+    status: resolved
+    commit: ""
+
+
+  - id: D-584
+    severity: medium
+    task: triage-2026-05-11
+    found_by: module_architecture_reviewer
+    file: src/salus/viewer/interface/mode-manager.js
+    line: 235
+    description: "Back-button handler set activeModuleId = null before calling activateModule(prev). Because activateModule's unmount block is keyed off activeModuleId !== null, this meant the outgoing module never had runUnmount called when the user navigated via Back — leaking map sources, layers, and bus subscriptions. Pre-existing bug, but the D-492 fix (init runs every activation) made the resulting state divergence more visible and dangerous."
+    resolution: "Back-button handler now looks up the current registry entry and calls current.runUnmount() (with try/catch) BEFORE clearing activeModuleId. Back navigation does not push the current module onto navHistory (it is moving backwards through the stack, not extending it)."
+    status: resolved
+    commit: ""
+
+
+  - id: D-585
+    severity: high
+    task: triage-2026-05-11
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/mode-manager.js
+    line: 111
+    description: "activateModule sets activeModuleId and state.ui.active_module_id BEFORE calling mod.init(api). If init throws (caught at the bottom of activateModule), the UI advertises a module that has no panel, no map layers, and no live subscriptions — user sees a blank panel with no error surfaced. Pre-existing behaviour, made more reachable by the D-492 fix (init runs every activation rather than once). Deferred from this commit — proposed fix is to roll back activeModuleId on init failure and emit a shell:error event."
+    resolution: ""
+    status: open
+    commit: ""

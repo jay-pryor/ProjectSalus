@@ -1,0 +1,53 @@
+task_id: triage-2026-05-11-group-1
+timestamp: 2026-05-13T00:00:00Z
+title: "JS module panel re-mount (D-492) + optimiser:apply handoff routing (D-493)"
+
+quality_gates:
+  G1_lint: "N/A — JS-only task"
+  G2_format: "N/A — JS-only task"
+  G3_import: "N/A — JS-only task"
+  G4_type: "N/A — JS-only task"
+  G5_security: "N/A — JS-only task"
+  G6_unit_test: pass         # node --test src/salus/viewer/interface/tests/*.js — 696 passed, 0 failed (25.1 s); 20 of 696 are mode-manager tests including 7 new tests for D-492 + D-493 + race + handoff cases
+  G7_coverage: "N/A — JS-only task"
+  G8_secrets: "N/A — JS-only task"
+  coverage_pct: null
+
+review:
+  l1_standards:
+    testing: pass            # New tests use descriptive names (D-492:..., D-493:...), pre-existing makeMockDoc / makeEntry / makeBusForModules fixtures, no MagicMock, real bus contracts for handoff path. Rapid-double-click race test guards H-1 finding.
+    error_handling: pass     # All catches are named (Exception type, not bare). activateModule returns Promise<boolean> so the handoff router can distinguish init success from caught failure and skip re-emit instead of silently dropping the payload (D-583). console.error/console.warn paired with each catch.
+    logging: pass            # Three new log sites: 'handoff dropped: target failed to initialise' (warn), 'handoff routing failed for ... → ...' (error), 'runUnmount error during Back' (error). All include the event/target/module ID for forensic context.
+    security: N/A            # No file I/O, path handling, user input, or external data touched.
+    interface_modules: pass  # mode-manager.js is shell code, not module code, but the changes respect the interface-modules.md contract: it uses the raw bus only because the shell legitimately owns it (state.js / shell.js precedent); modules still receive scoped buses unchanged. _HANDOFF_EVENT_TARGETS is shell-internal, not exposed to modules. Module init/onUnmount idempotency invariant (§15) is the load-bearing assumption for D-492 — verified by regression-reviewer on terrain-loader, simulation-runner, placement-editor.
+
+  l2_agents:
+    silent_failure_hunter: {status: pass, findings: 5}
+      # Findings: (1) High — activeModuleId set before init, no rollback on failure (pre-existing, logged as D-585 deferred); (2) Medium — re-emit after silent activation failure (fixed inline → activateModule returns boolean, _routeHandoff checks it, logged as D-583); (3) Low — WeakSet cleanup absent (fixed inline → replaced WeakSet with per-event _pendingHandoff Set using try/finally, see D-582); (4) Low — handoff listeners no unsubscribe (intentional, page-lifetime); (5) Low — no telemetry sink for catches (pre-existing, out of scope).
+    spec_compliance: N/A     # JS-only task, no Python module changes.
+    type_design_analyzer: N/A # No type annotations added or modified.
+    regression_reviewer: {status: pass, findings: 2}
+      # Both low: (1) Misleading test name "does not call init twice for same module" reads as if init-once-per-session was the contract (fixed inline → renamed to "re-activating the already-active module short-circuits before init", clarifying comments added); (2) Handoff listener teardown documented as page-lifetime, fine for production (no fix needed). Spot-checked terrain-loader, simulation-runner, placement-editor onUnmount: all fully reverse what init creates → re-init idempotency holds.
+    module_architecture_reviewer: {status: pass, findings: 6}
+      # Findings: (C-1, Critical) Stale test name → fixed inline (regression-reviewer's #1 dup); (H-1, High) Rapid-double-click race → fixed inline (logged as D-582, regression test added); (M-1, Medium) Primitive/null payloads bypass WeakSet guard → resolved by switching to per-event Set in D-582 fix (payload type-agnostic); (M-2, Medium) Back-button skips current module's runUnmount → fixed inline (logged as D-584); (L-1, Low) Race test missing → fixed (added 'rapid duplicate optimiser:apply emits collapse to one activation'); (L-2, Low) Listener teardown comment → noted, not material in production.
+
+defect_ids:
+  - D-492   # CRITICAL — Module panels never re-mount on second activation (FIXED)
+  - D-493   # CRITICAL — optimiser:apply silently dropped, placements never merged (FIXED)
+  - D-582   # HIGH — Handoff routing race on rapid duplicate emits (FIXED inline during L2 review)
+  - D-583   # MEDIUM — Re-emit silently dropped after init failure (FIXED inline during L2 review)
+  - D-584   # MEDIUM — Back-button skipped runUnmount of outgoing module (pre-existing, FIXED inline)
+  - D-585   # HIGH — activeModuleId set before init with no rollback on failure (pre-existing, DEFERRED)
+
+files_changed:
+  - src/salus/viewer/interface/mode-manager.js                    # D-492 (init runs every activation), D-493 (handoff routing), D-582/583/584 (race + failure handling + Back fix)
+  - src/salus/viewer/interface/tests/test-mode-manager.js         # 7 new tests; 1 existing test renamed for clarity
+  - .forge/defect-register.yaml                                   # D-492, D-493 resolved; D-582..D-585 appended
+
+notes:
+  - Source: bug-triage 2026-05-11 findings O-1 + O-2 in .forge/bug-triage-2026-05-11.md
+  - Architecturally coupled: both defects stem from the assumption that modules re-init cleanly across deactivate/activate. The fix lives in mode-manager.js; optimiser/index.js and placement-editor/index.js are unchanged (their existing onUnmount blocks already meet the idempotency contract, verified by regression-reviewer).
+  - The handoff routing pattern in _HANDOFF_EVENT_TARGETS generalises to other bus-handoff drops mentioned in the triage (placement:pending from library-browser, gap-analysis). Out of scope for this commit; recorded for future expansion.
+  - D-585 deferred: rolling back activeModuleId on init failure requires deciding the user-visible failure surface (toast? status bar? shell:error event?) — separable design question. Failure path is loggable today via console.error.
+
+overall: pass

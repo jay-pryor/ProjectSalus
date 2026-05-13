@@ -236,7 +236,11 @@ test('activateModule calls loadModule and init(api) on first activation', async 
   assert.deepEqual(entry._initCalls, ['mod-a']);
 });
 
-test('activateModule does not call init twice for same module', async () => {
+test('re-activating the already-active module short-circuits before init', async () => {
+  // Tests the `if (moduleId === activeModuleId) return;` guard at the top
+  // of activateModule. Note: this is NOT a guarantee of "init only once per
+  // session" — under D-492, init runs every time the user navigates BACK to
+  // a module (see "navigating away and back re-runs init" below).
   const doc = makeMockDoc();
   const state = makeStateForModules(['mod-a']);
   const nav = makeElement('nav');
@@ -247,12 +251,14 @@ test('activateModule does not call init twice for same module', async () => {
   mm.init();
 
   await mm.activateModule('mod-a');
-  await mm.activateModule('mod-a'); // same module — should be no-op
+  await mm.activateModule('mod-a'); // same module already active — no-op
 
   assert.equal(entry._initCalls.length, 1);
 });
 
 test('activateModule is a no-op if module is already active', async () => {
+  // Companion to the test above — asserts activeModuleId is unchanged and
+  // init did not re-run for the already-active module.
   const doc = makeMockDoc();
   const state = makeStateForModules(['mod-a']);
   const nav = makeElement('nav');
@@ -265,7 +271,8 @@ test('activateModule is a no-op if module is already active', async () => {
   await mm.activateModule('mod-a');
   await mm.activateModule('mod-a');
 
-  // activeModuleId unchanged, init still only called once
+  // activeModuleId unchanged; init only ran once because the same-module
+  // short-circuit fired (not because of any one-shot init contract).
   assert.equal(mm.activeModuleId, 'mod-a');
   assert.equal(entry._initCalls.length, 1);
 });
@@ -369,4 +376,220 @@ test('nav history grows as modules are activated', async () => {
   const ui = state.getState('ui');
   assert.ok(ui.nav_history.includes('mod-a'));
   assert.ok(ui.nav_history.includes('mod-b'));
+});
+
+// ---------------------------------------------------------------------------
+// Tests: D-492 — init() re-runs on every activation (panel re-mount)
+// ---------------------------------------------------------------------------
+
+test('D-492: navigating away and back re-runs init() (panel re-mount)', async () => {
+  const doc = makeMockDoc();
+  const state = makeStateForModules(['mod-a', 'mod-b']);
+  const nav = makeElement('nav');
+  const slot = makeElement('div');
+
+  const entryA = makeEntry('mod-a');
+  const entryB = makeEntry('mod-b');
+  const mm = createModeManager(nav, slot, state, stubBus, [entryA, entryB], doc);
+  mm.init();
+
+  await mm.activateModule('mod-a');
+  await mm.activateModule('mod-b');
+  await mm.activateModule('mod-a'); // back to A — panel must re-mount
+
+  // mod-a init called twice: once on first activation, again on re-activation
+  assert.equal(entryA._initCalls.length, 2);
+});
+
+test('D-492: each re-mount cycle runs the module\'s onUnmount once', async () => {
+  const doc = makeMockDoc();
+  const state = makeStateForModules(['mod-a', 'mod-b']);
+  const nav = makeElement('nav');
+  const slot = makeElement('div');
+
+  const unmountCalls = [];
+  const entryA = makeEntry('mod-a');
+  entryA.loadModule = () => Promise.resolve({
+    init(api) {
+      api.panel.onUnmount(() => unmountCalls.push('a-unmounted'));
+    },
+  });
+  const entryB = makeEntry('mod-b');
+
+  const mm = createModeManager(nav, slot, state, stubBus, [entryA, entryB], doc);
+  mm.init();
+
+  await mm.activateModule('mod-a');
+  await mm.activateModule('mod-b');
+  await mm.activateModule('mod-a');
+  await mm.activateModule('mod-b');
+
+  // Two complete mount→unmount cycles for mod-a → two unmount fires
+  assert.deepEqual(unmountCalls, ['a-unmounted', 'a-unmounted']);
+});
+
+// ---------------------------------------------------------------------------
+// Tests: D-493 — optimiser:apply handoff routing
+// ---------------------------------------------------------------------------
+
+test('D-493: optimiser:apply activates placement-editor when inactive', async () => {
+  const doc = makeMockDoc();
+  const state = makeStateForModules(['optimiser', 'placement-editor']);
+  state.setState('ui', { active_module_id: null, nav_history: [] });
+  const nav = makeElement('nav');
+  const slot = makeElement('div');
+
+  const bus = makeBusForModules(['optimiser', 'placement-editor']);
+
+  const optimiser = makeEntry('optimiser');
+  const placementEditor = makeEntry('placement-editor');
+  const mm = createModeManager(nav, slot, state, bus, [optimiser, placementEditor], doc);
+  mm.init();
+
+  await mm.activateModule('optimiser');
+  assert.equal(mm.activeModuleId, 'optimiser');
+
+  // Optimiser emits optimiser:apply. placement-editor is inactive, but the
+  // mode-manager must route the event by activating placement-editor and
+  // re-emitting so its scoped subscription fires.
+  bus.emit('optimiser:apply', { proposed: [{ sensor_name: 'X' }] });
+
+  // Wait for the async activation chain to settle
+  await new Promise(r => setTimeout(r, 0));
+  await new Promise(r => setTimeout(r, 0));
+
+  assert.equal(mm.activeModuleId, 'placement-editor',
+    'mode-manager must activate placement-editor on optimiser:apply');
+  assert.ok(placementEditor._initCalls.includes('placement-editor'),
+    'placement-editor.init must have run as part of the handoff');
+});
+
+test('D-493: optimiser:apply re-emit reaches placement-editor\'s scoped listener', async () => {
+  const doc = makeMockDoc();
+  const state = makeStateForModules(['optimiser', 'placement-editor']);
+  state.setState('ui', { active_module_id: null, nav_history: [] });
+  const nav = makeElement('nav');
+  const slot = makeElement('div');
+
+  // Use a real bus contract: placement-editor declares subscribes for optimiser:apply
+  const contracts = new Map([
+    ['optimiser', { emits: ['optimiser:apply'], subscribes: [] }],
+    ['placement-editor', { emits: [], subscribes: ['optimiser:apply'] }],
+  ]);
+  const bus = createBus(contracts);
+
+  // placement-editor.init: register the scoped optimiser:apply listener
+  const receivedPayloads = [];
+  const placementEditor = makeEntry('placement-editor');
+  placementEditor.api = {
+    moduleId: 'placement-editor',
+    panel: { mount() {}, onUnmount(cb) { placementEditor._unmountCalls.push(cb); } },
+    bus: bus.createScopedBus('placement-editor'),
+  };
+  placementEditor.loadModule = () => Promise.resolve({
+    init(api) {
+      const off = api.bus.on('optimiser:apply', (p) => receivedPayloads.push(p));
+      api.panel.onUnmount(off);
+    },
+  });
+
+  const optimiser = makeEntry('optimiser');
+  const mm = createModeManager(nav, slot, state, bus, [optimiser, placementEditor], doc);
+  mm.init();
+
+  await mm.activateModule('optimiser');
+
+  const payload = { proposed: [{ sensor_name: 'Y' }] };
+  bus.emit('optimiser:apply', payload);
+
+  // Yield several ticks for the handoff promise chain (activateModule is async)
+  for (let i = 0; i < 4; i++) await new Promise(r => setTimeout(r, 0));
+
+  assert.equal(receivedPayloads.length, 1,
+    'placement-editor must receive the re-emitted optimiser:apply exactly once');
+  assert.deepEqual(receivedPayloads[0], payload);
+});
+
+test('D-493: optimiser:apply is a no-op routing when placement-editor already active', async () => {
+  const doc = makeMockDoc();
+  const state = makeStateForModules(['optimiser', 'placement-editor']);
+  state.setState('ui', { active_module_id: null, nav_history: [] });
+  const nav = makeElement('nav');
+  const slot = makeElement('div');
+
+  const bus = makeBusForModules(['optimiser', 'placement-editor']);
+
+  const optimiser = makeEntry('optimiser');
+  const placementEditor = makeEntry('placement-editor');
+  const mm = createModeManager(nav, slot, state, bus, [optimiser, placementEditor], doc);
+  mm.init();
+
+  await mm.activateModule('placement-editor');
+  const initCallsBefore = placementEditor._initCalls.length;
+
+  // Already on placement-editor — router must NOT re-activate or re-emit
+  bus.emit('optimiser:apply', { proposed: [] });
+
+  await new Promise(r => setTimeout(r, 0));
+
+  assert.equal(mm.activeModuleId, 'placement-editor');
+  assert.equal(placementEditor._initCalls.length, initCallsBefore,
+    'placement-editor must not be re-init when handoff target is already active');
+});
+
+test('D-493: rapid duplicate optimiser:apply emits collapse to one activation', async () => {
+  // Regression guard against the race where a user clicks Apply twice within
+  // one tick: both emits hit _routeHandoff before the first's activateModule
+  // has yielded, both could schedule interleaved activate-then-reemit
+  // sequences. The per-event _pendingHandoff guard must collapse the second
+  // emit to a no-op.
+  const doc = makeMockDoc();
+  const state = makeStateForModules(['optimiser', 'placement-editor']);
+  state.setState('ui', { active_module_id: null, nav_history: [] });
+  const nav = makeElement('nav');
+  const slot = makeElement('div');
+
+  const bus = makeBusForModules(['optimiser', 'placement-editor']);
+
+  const optimiser = makeEntry('optimiser');
+  const placementEditor = makeEntry('placement-editor');
+  const mm = createModeManager(nav, slot, state, bus, [optimiser, placementEditor], doc);
+  mm.init();
+
+  await mm.activateModule('optimiser');
+
+  // Two emits synchronously, no awaits between
+  bus.emit('optimiser:apply', { proposed: [{ sensor_name: 'A' }] });
+  bus.emit('optimiser:apply', { proposed: [{ sensor_name: 'B' }] });
+
+  for (let i = 0; i < 5; i++) await new Promise(r => setTimeout(r, 0));
+
+  assert.equal(placementEditor._initCalls.length, 1,
+    'rapid duplicate emits must trigger exactly one activation, not race');
+});
+
+test('D-493: re-entry guard prevents infinite re-emit loop', async () => {
+  const doc = makeMockDoc();
+  const state = makeStateForModules(['optimiser', 'placement-editor']);
+  state.setState('ui', { active_module_id: null, nav_history: [] });
+  const nav = makeElement('nav');
+  const slot = makeElement('div');
+
+  const bus = makeBusForModules(['optimiser', 'placement-editor']);
+
+  const optimiser = makeEntry('optimiser');
+  const placementEditor = makeEntry('placement-editor');
+  const mm = createModeManager(nav, slot, state, bus, [optimiser, placementEditor], doc);
+  mm.init();
+
+  await mm.activateModule('optimiser');
+
+  bus.emit('optimiser:apply', { proposed: [] });
+
+  // Drain microtasks: if the guard fails, the router would re-fire the event
+  // indefinitely. Yield several macrotasks then assert init was called once.
+  for (let i = 0; i < 5; i++) await new Promise(r => setTimeout(r, 0));
+
+  assert.equal(placementEditor._initCalls.length, 1,
+    'handoff must result in exactly one placement-editor activation per emit');
 });
