@@ -5466,7 +5466,7 @@ defects:
     description: "compute_viewshed_through_canopy: transmission initialised to zeros; perimeter cells not hit by integer-rounded ray paths silently stay 0.0 (fully blocked), distinct from terrain-blocked. Coverage layers shrink at perimeter without warning."
     resolution: "I-17: compute_viewshed_through_canopy now initialises transmission = binary.astype(float32) so visible cells start at 1.0; a ray_touched mask applies max-over-rays results only to ray-hit cells, so visible cells missed by integer-rounded rays retain 1.0 instead of silently dropping to fully-blocked."
     status: "resolved"
-    commit: ""
+    commit: "2039359"
 
 
   - id: D-495
@@ -5479,7 +5479,7 @@ defects:
     description: "compute_viewshed_through_canopy: t_ray not reset when ray hits terrain-blocked cell (continue skips without resetting). A second visible cell beyond the occluder receives transmission contaminated by canopy along an irrelevant geometric path."
     resolution: "I-17: ray walk now stops (break) at the first non-visible cell; ray_path holds only pre-occluder cells and each target's attenuation accumulator is computed fresh from ray_path[:k+1], so a cell beyond an occluder never inherits canopy attenuation from the far side."
     status: "resolved"
-    commit: ""
+    commit: "2039359"
 
 
   - id: D-496
@@ -5492,7 +5492,7 @@ defects:
     description: "PDF report renders blank sections silently — _render_to_b64 and three helper functions wrap rendering in except Exception -> log warning -> return None. PDF renders with missing images/sections and returns Path, giving no programmatic signal of failure."
     resolution: "I-16: introduced ReportRenderError + section-criticality policy. _render_to_b64 and _render_gap_map_to_b64 now raise on failure (composite + gap maps are REQUIRED). Per-layer maps and optional charts (kill_chain, saturation) append to ReportData.section_failures and are omitted from the PDF. CLI emits stderr warning, API logs each entry."
     status: resolved
-    commit: I-16
+    commit: "67f2c5c"
 
 
   - id: D-497
@@ -5505,7 +5505,7 @@ defects:
     description: "salus interface --host accepts 0.0.0.0 with no warning; API has no authentication. app.py declares localhost-only contract but CLI allows any bind address. POST /api/terrain/load accepts 500 MB uploads and POST /api/simulate triggers GB-scale work — all unauthenticated from any peer."
     resolution: "I-14: salus interface now refuses any non-loopback --host unless --allow-public is passed (exits non-zero with a stderr error before uvicorn starts); with --allow-public a multi-line warning block lists the unauthenticated attack surface. Loopback binds (127.0.0.1, ::1, localhost) and the default are unchanged."
     status: "resolved"
-    commit: ""
+    commit: "67f2c5c"
 
 
   - id: D-498
@@ -5518,7 +5518,7 @@ defects:
     description: "Sanitiser does not redact sensor_library / effector_library in packaged viewer export. _range_band and _RANGE_BANDS exist but no caller invokes the helper; sanitise_for_export does not touch embedded sensor_library / effector_library payloads (including max_range_m, vendor fields). A REDACTED viewer ships the full proprietary sensor DB."
     resolution: "Moved sensor/effector library loading into export_viewer_data() so libraries are part of ViewerData (single trust boundary). Added _PUBLIC_SENSOR_FIELDS / _PUBLIC_EFFECTOR_FIELDS whitelists and a _redact_library helper in sanitise.py. sanitise_for_export() now at REDACTED level whitelists fields, renames entries to '{type}-{i}', and bands max_range_m via _range_band; at FULL level it clears both libraries to {}. package_viewer() reads libraries from ViewerData instead of reloading from disk so the redaction cannot be bypassed."
     status: resolved
-    commit: ""
+    commit: "02db913"
 
 
   - id: D-499
@@ -5531,7 +5531,7 @@ defects:
     description: "validateScenarioPayload only checks key names — values written to state without escaping. Load Scenario validates that JSON keys are a subset of SCENARIO_KEYS then writes every value into state. A crafted .salus.json with HTML/JS payload in sensor name fields reaches downstream renderers."
     resolution: "Rewrote validateScenarioPayload in shell.js as a deep-recursive structural validator. Top-level must be a plain Object; every nested value must be plain JSON (null/boolean/finite-number/string/array/plain object). __proto__, constructor, and prototype keys are rejected at any depth; max depth is 32; strings are capped at 100_000 chars; strings containing HTML-tag openers (<[!?/A-Za-z]) or 'javascript:' URIs (whitespace-tolerant, case-insensitive) are rejected. applyScenarioPayload is unchanged and still trusts the validator."
     status: resolved
-    commit: ""
+    commit: "02db913"
 
 
   - id: D-500
@@ -5544,7 +5544,7 @@ defects:
     description: "Unbounded thread spawn per /api/simulate request — trivial DoS. Each simulate request spawns Thread(daemon=True) with no pool/semaphore. Ten concurrent valid requests OOM-kill the process; combined with D-497 (--host 0.0.0.0) reachable from any peer."
     resolution: "I-14: /api/simulate and /api/optimise share a module-level threading.BoundedSemaphore (default 2, tunable via SALUS_MAX_CONCURRENT_SIMULATIONS); a non-blocking acquire returns HTTP 503 with Retry-After when saturated, and the worker wrapper releases the slot in finally."
     status: "resolved"
-    commit: ""
+    commit: "67f2c5c"
 
 
   - id: D-501
@@ -5570,7 +5570,7 @@ defects:
     description: "PDF template syntax errors silently drop entire sections — TemplateError caught with warning log and section dropped. PDF still renders missing kill_chain / saturation / threat_analysis sections; caller has no programmatic signal."
     resolution: "I-16: render_pdf template loop now applies section criticality. TemplateError/TemplateNotFound for any REQUIRED section (cover, executive_summary, site_overview, coverage_analysis, gap_analysis, assumptions, appendix_sensors) raises ReportRenderError. For OPTIONAL sections (threat_analysis, kill_chain, saturation) the failure is appended to ReportData.section_failures and the section is omitted; caller surfaces the audit log."
     status: resolved
-    commit: I-16
+    commit: "67f2c5c"
 
 
   - id: D-503
@@ -5609,7 +5609,7 @@ defects:
     description: "compute_viewshed_through_canopy: observer cell forced to transmission=1.0 unconditionally even when observer is under canopy. If canopy_height_m[obs_row, obs_col] > observer_height the sensor is physically buried but the transmission map says self-cell unobscured."
     resolution: "I-17: observer cell transmission is no longer forced to 1.0 — when observer_height < canopy_height_m[obs] it is penetration ** ((chm-h)/ref), reflecting the canopy depth above a buried sensor; above-canopy / no-canopy observers stay at 1.0."
     status: "resolved"
-    commit: ""
+    commit: "2039359"
 
 
   - id: D-506
@@ -5622,7 +5622,7 @@ defects:
     description: "Canopy attenuation conflates 2D cell traversal with 3D LOS path — t_ray *= penetration**(ch/10.0) for every visible canopy cell regardless of where the 3D LOS ray passes vertically through the cell. A ray skimming the canopy top vs trunk-piercing get identical penalty; undocumented if deliberate."
     resolution: "I-17: attenuation now uses a 3D LOS check — the interpolated line-of-sight elevation is compared against dem[j]+canopy_height_m[j] at each intermediate cell; a ray skimming above the canopy receives no penalty, only rays dipping into the canopy column are attenuated."
     status: "resolved"
-    commit: ""
+    commit: "2039359"
 
 
   - id: D-507
@@ -6657,7 +6657,7 @@ defects:
     description: "compute_viewshed_through_canopy: obs_z = float(dem[obs_row, obs_col]) + observer_height. DEM nodata cells are np.nan (terrain.py). If the observer cell is nodata, obs_z is NaN, every los_slope and los_z is NaN, the canopy guard 'los_z < canopy_top_j' is always False, and the entire 3D LOS attenuation pass is silently disabled — every visible cell returns transmission 1.0 with no error or warning."
     resolution: "Not reachable as described — compute_viewshed (called first inside compute_viewshed_through_canopy) already raises ValueError for a nodata observer DEM cell, so obs_z can never be NaN. The silent-failure-hunter finding over-stated reachability. A clarifying comment was added at the obs_z computation documenting the invariant; no behavioural change."
     status: "resolved"
-    commit: ""
+    commit: "2039359"
 
   - id: D-587
     severity: high
@@ -6668,7 +6668,7 @@ defects:
     description: "compute_viewshed_through_canopy: target_z = float(surface[rk, ck]) reads site.surface_array() (DSM/DEM), whose nodata cells are np.nan. A NaN target_z makes los_slope NaN so the canopy elevation guard never fires and that target's canopy attenuation is silently skipped — the cell reports 1.0 (fully visible) instead of an attenuated value."
     resolution: "I-17: a nodata (NaN) target surface elevation is now detected via a los_defined flag; when the LOS geometry is undefined the target falls back to conservative 2D accumulation (every canopy cell on the path penalised, no elevation gate) instead of silently leaving the cell unattenuated at 1.0."
     status: "resolved"
-    commit: ""
+    commit: "2039359"
 
   - id: D-588
     severity: medium
@@ -6679,7 +6679,7 @@ defects:
     description: "_spawn_simulate_worker: the caller acquires _SIMULATE_SEMAPHORE (non-blocking) and the release lives in the worker thread wrapper's finally. If threading.Thread.start() raises (e.g. RuntimeError 'can't start new thread' under resource exhaustion) the thread never runs, the finally never executes, and the acquired slot leaks permanently. After _MAX_CONCURRENT_SIMULATIONS such failures /api/simulate and /api/optimise return 503 forever."
     resolution: "I-14: _spawn_simulate_worker now wraps thread.start() in try/except BaseException — if the thread fails to start the caller-acquired semaphore slot is released before re-raising, so a start failure cannot permanently leak a slot."
     status: "resolved"
-    commit: ""
+    commit: "67f2c5c"
 
   - id: D-589
     severity: medium
@@ -6690,7 +6690,7 @@ defects:
     description: "I-16 behaviour change: render_pdf now raises ReportRenderError when a REQUIRED section template fails. The /api/report endpoint previously returned a degraded 200 PDF for a broken/missing required template; it now returns HTTP 500 (caught by the handler's except Exception). The change is intended and handled safely, but no test in tests/test_interface_api.py exercises the required-template-failure path, so the new API behaviour is unverified."
     resolution: "I-16: added tests/test_interface_api.py::test_report_required_section_failure_returns_500 — monkeypatches render_pdf to raise ReportRenderError and asserts /api/report returns HTTP 500 with the reason in the JSON body, locking in the intended (spec-compliant) behaviour change."
     status: "resolved"
-    commit: ""
+    commit: "67f2c5c"
 
   - id: D-590
     severity: low
@@ -6701,7 +6701,7 @@ defects:
     description: "_spawn_simulate_worker(target: Any, ...) — Any defeats type checking; both call sites pass concretely (...)->None pipeline functions. mypy cannot verify target is callable or returns None. Should be typed Callable[..., None]."
     resolution: "I-14: _spawn_simulate_worker target parameter retyped from Any to Callable[..., None] (imported from collections.abc); args stays tuple[Any, ...] as the element types are intentionally heterogeneous (documented in the docstring)."
     status: "resolved"
-    commit: ""
+    commit: "67f2c5c"
 
   - id: D-591
     severity: low
@@ -6712,4 +6712,4 @@ defects:
     description: "SiteModel.surface_array() is annotated -> np.ndarray (unparameterised). It is now a load-bearing input to the rewritten compute_viewshed_through_canopy LOS path, which consumes it as a float array; viewshed.py annotates every other array surface with npt.NDArray[...]. Should be npt.NDArray[np.float64] for interface consistency."
     resolution: "Accepted without code change: SiteModel.dem/dsm are themselves declared bare np.ndarray, so tightening only surface_array()'s return annotation to npt.NDArray[np.float64] would misrepresent the field types and create a mypy return-type mismatch. A consistent fix belongs to a SiteModel-wide type pass and is out of scope for I-17."
     status: "accepted_documented"
-    commit: ""
+    commit: "2039359"
