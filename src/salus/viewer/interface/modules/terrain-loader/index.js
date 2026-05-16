@@ -17,7 +17,10 @@
  *   - All external access goes through the injected api object (MUST Rule 2).
  *   - Exactly { init(api) } exported (MUST Rule 3).
  *   - Only 'terrain' written; only declared events emitted (MUST Rules 4, 10).
- *   - Every watch() and map listener paired with unsubscribe in onUnmount (MUST 9, 15).
+ *   - watch() and the file-input listener are unsubscribed in onUnmount
+ *     (MUST Rule 9). The terrain source, hillshade layer and 3D canvas are
+ *     the permanent base map and survive unmount by design (D-592) — MUST
+ *     Rule 15 does not apply to the permanent base canvas.
  */
 
 // API_BASE is resolved inside init() from the execution environment to avoid
@@ -110,7 +113,17 @@ export function init(api) {
   const adoptCtx = { cancelled: false };
   if (existing) {
     _updateSummary(panel, existing);
-    _applyMapLayers(api, existing, apiBase);
+    // D-592: the terrain source/hillshade/3D canvas are the permanent base
+    // map (InterfaceArchitecture.md §1 principle 3) — they survive a module
+    // unmount. On a re-mount they are already present, so re-apply the map
+    // layers only when the canvas is absent or stale, avoiding a needless
+    // remove/re-add flicker of an unchanged base canvas.
+    // D-593: the reuse check is identity-aware (tile URL must match), not a
+    // bare presence check — a source left over from a different DEM must be
+    // rebuilt, never silently kept while the panel shows new metadata.
+    if (!_terrainSourceMatches(api, existing, apiBase)) {
+      _applyMapLayers(api, existing, apiBase);
+    }
   } else {
     // D-473: when no terrain is in state, see if the server already has a
     // pre-generated session waiting (salus interface --scenario seeds one in
@@ -127,12 +140,21 @@ export function init(api) {
     _updateSummary(panel, terrain);
   });
 
-  // Cleanup on deactivation (MUST Rules 9 and 15)
+  // Cleanup on deactivation (MUST Rule 9).
+  //
+  // D-592: onUnmount tears down only this module's panel-scoped resources —
+  // the file-input listener, the terrain watch, and the in-flight adopt.
+  // It deliberately does NOT call _cleanupMapLayers: the terrain source,
+  // hillshade layer and 3D canvas are the permanent base map every other
+  // module renders on top of (InterfaceArchitecture.md §1 principle 3), so
+  // they must outlive a terrain-loader unmount. Removing them here blanked
+  // the terrain whenever the user opened any other module. The base canvas
+  // is replaced only by a new load/adoption (via _applyMapLayers), never by
+  // navigation. MUST Rule 15 does not apply to the permanent base canvas.
   api.panel.onUnmount(() => {
     adoptCtx.cancelled = true; // D-474: stop the in-flight adopt from acting
     demInput.removeEventListener('change', handleDemChange);
     unwatchTerrain(); // paired with api.state.watch above (MUST Rule 9)
-    _cleanupMapLayers(api);
   });
 }
 
@@ -369,6 +391,27 @@ function _pollTileProgress(panel, progressUrl) {
 // ---------------------------------------------------------------------------
 
 /**
+ * D-593: report whether the terrain-dem source currently on the map was built
+ * from this terrain metadata — i.e. its first tile URL matches. init() uses
+ * this to decide whether the permanent base canvas can be reused as-is (a
+ * re-mount of the same terrain) or must be rebuilt (a different DEM). A
+ * presence-only check would silently keep a stale canvas while the panel
+ * showed the new metadata.
+ *
+ * @param {object} api - injected module API
+ * @param {object} terrain - terrain metadata from state
+ * @param {string} apiBase - API base URL (resolved inside init — D-329)
+ * @returns {boolean} true when the on-map source matches `terrain`
+ */
+function _terrainSourceMatches(api, terrain, apiBase) {
+  const source = api.map.getSource(SOURCE_ID);
+  if (!source || !terrain || !terrain.tile_url_template) return false;
+  const expectedTileUrl = apiBase + terrain.tile_url_template;
+  const tiles = Array.isArray(source.tiles) ? source.tiles : [];
+  return tiles.length > 0 && tiles[0] === expectedTileUrl;
+}
+
+/**
  * Add the raster-dem source, set 3D terrain, and add the hillshade layer.
  * Cleans up existing layers first to handle remount safely.
  *
@@ -430,7 +473,11 @@ function _applyMapLayers(api, terrain, apiBase) {
 /**
  * Remove the hillshade layer and terrain-dem source from the map canvas.
  * Also clears the 3D terrain property if setTerrainSource is available.
- * Called in onUnmount (MUST Rule 15: all map layers cleaned up).
+ *
+ * Called by _applyMapLayers before re-adding, so a fresh load/adoption
+ * replaces the canvas idempotently. Deliberately NOT called from onUnmount —
+ * the terrain canvas is the permanent base map (D-592 / InterfaceArchitecture
+ * .md §1 principle 3); module navigation must not tear it down.
  *
  * @param {object} api - injected module API
  */

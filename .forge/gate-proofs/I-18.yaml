@@ -1,0 +1,49 @@
+task_id: I-18
+timestamp: 2026-05-16T00:00:00Z
+title: "Terrain canvas persists across module navigation — terrain-loader stops tearing down the permanent 3D canvas on unmount"
+
+quality_gates:
+  G1_lint: N/A             # N/A — JS-only task (only .js files under modules/ + tests/ changed; no Python files modified)
+  G2_format: N/A           # N/A — JS-only task
+  G3_import: N/A           # N/A — JS-only task
+  G4_type: N/A             # N/A — JS-only task
+  G5_security: N/A         # N/A — JS-only task
+  G6_unit_test: N/A        # N/A — JS-only task (Python pytest). JS suite below.
+  G7_coverage: N/A         # N/A — JS-only task
+  G8_secrets: pass         # detect-secrets scan on the two changed JS files — "results": {} (0 secrets)
+  coverage_pct: N/A
+  js_tests: pass           # node --test src/salus/viewer/interface/tests/test-terrain-loader.js — 29 passed, 0 failed. Full JS suite (node --test 'tests/test-*.js') — 699 passed, 0 failed.
+
+review:
+  l1_standards:
+    testing: pass          # test-terrain-loader.js — two obsolete onUnmount-teardown tests (which asserted the now-fixed buggy behaviour) replaced by three persistence assertions; a re-mount idempotence test and a D-593 different-DEM rebuild test added; shared _PRELOADED_TERRAIN fixture extracted; descriptive names, node:assert/strict, no mocks beyond the existing makeMockApi
+    error_handling: pass   # no exception handling changed; onUnmount no longer calls _cleanupMapLayers but still tears down the file-input listener, terrain watch and adopt cancellation; _terrainSourceMatches null-guards source/terrain/tile_url_template
+    logging: pass          # no logging surface changed
+    security: pass         # no file I/O, path handling or user input; pure map-layer lifecycle logic
+    interface_modules: pass  # InterfaceArchitecture.md §1 principle 3 ("3D terrain canvas is permanent") honoured; layer/source IDs remain terrain-loader-prefixed; only 'terrain' written; watch paired with unsubscribe; init() idempotent via the identity-aware guard; no cross-module imports or module-level globals
+  l2_agents:
+    silent_failure_hunter: {status: pass, findings: 2}        # D-593 (medium — presence-only guard could silently keep a stale canvas; fixed via _terrainSourceMatches). D-594 (low, pre-existing — _pollTileProgress EventSource not closed on unmount; deferred, outside I-18 scope).
+    spec_compliance: N/A                                       # JS-only task — no Python modules introduced or modified
+    type_design_analyzer: N/A                                  # no type annotations added or modified (JS)
+    regression_reviewer: {status: pass, findings: 2}           # 2 low — stale doc comments (file header line 20, _cleanupMapLayers docstring) now inaccurate after the fix; both corrected. Removed-test analysis: dropping the two onUnmount-teardown tests is legitimate (they asserted the bug); no genuine coverage lost.
+    module_architecture_reviewer: {status: pass, findings: 2}  # 2 low — same two stale comments; corrected. Reviewer explicitly ruled the MUST-Rule-15 deviation ACCEPTABLE: not cleaning up the terrain canvas in onUnmount is mandated by InterfaceArchitecture.md §1 principle 3; the fix resolves a principle-3 violation rather than creating a Rule-15 one. All five module invariants pass.
+
+defect_ids:
+  - D-592   # terrain-loader onUnmount tore down the permanent 3D terrain canvas — fixed (resolved)
+  - D-593   # presence-only re-mount guard — replaced with identity-aware _terrainSourceMatches (resolved)
+  - D-594   # pre-existing _pollTileProgress EventSource leak — logged, deferred (outside I-18 scope)
+
+files_changed:
+  - docs/Technical/ProjectPath.md                                            # +I-18 spec entry (after I-17, before Slice 15)
+  - src/salus/viewer/interface/modules/terrain-loader/index.js               # onUnmount no longer calls _cleanupMapLayers; +_terrainSourceMatches identity guard; init() reuse guard; doc comments corrected
+  - src/salus/viewer/interface/tests/test-terrain-loader.js                  # persistence + re-mount idempotence + D-593 rebuild tests; getSource mock returns the stored source spec
+  - .forge/defect-register.yaml                                              # D-592/D-593/D-594 logged; D-592/D-593 resolved (commit hash backfilled post-commit)
+
+notes:
+  - Source — user-reported viewer bug (2026-05-16): rendered terrain disappears whenever a non-map module panel (e.g. the library browser) is opened. Not present in the open defect register before this task.
+  - Root cause — mode-manager.activateModule runs the outgoing module's runUnmount() on every navigation; terrain-loader's onUnmount called _cleanupMapLayers, removing the terrain source/hillshade/3D canvas. Non-map modules never restored it.
+  - The two onUnmount-teardown tests removed in this task encoded the bug (they asserted removeLayer/removeSource/setTerrainSource(null) on unmount). Replacing them with persistence assertions is a deliberate test correction, confirmed legitimate by the regression-reviewer.
+  - D-594 is pre-existing and out of scope for I-18 (terrain-canvas persistence) — logged as deferred for a dedicated follow-up.
+  - Commit hash for D-592/D-593 and this gate-proof is backfilled in a follow-up chore commit, matching the I-14..I-17 pattern on this branch.
+
+overall: pass

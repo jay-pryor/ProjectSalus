@@ -155,8 +155,10 @@ function makeMockApi({ terrainValue = null } = {}) {
   const unmountCallbacks = [];
   const mapCalls = [];
 
-  // Track source/layer existence for getSource/getLayer
-  const sources = new Set();
+  // Track source specs / layer existence for getSource/getLayer.
+  // sources is a Map so getSource can return the spec (incl. tiles) — the
+  // D-593 identity check reads source.tiles to detect a stale base canvas.
+  const sources = new Map();
   const layers = new Set();
 
   const api = {
@@ -187,9 +189,9 @@ function makeMockApi({ terrainValue = null } = {}) {
 
     map: {
       _calls: mapCalls,
-      getSource(id) { return sources.has(id) ? { id } : null; },
+      getSource(id) { return sources.has(id) ? { id, ...sources.get(id) } : null; },
       getLayer(id) { return layers.has(id) ? { id } : null; },
-      addSource(id, spec) { sources.add(id); mapCalls.push({ method: 'addSource', args: [id, spec] }); },
+      addSource(id, spec) { sources.set(id, spec); mapCalls.push({ method: 'addSource', args: [id, spec] }); },
       addLayer(spec) { layers.add(spec.id); mapCalls.push({ method: 'addLayer', args: [spec] }); },
       removeSource(id) { sources.delete(id); mapCalls.push({ method: 'removeSource', args: [id] }); },
       removeLayer(id) { layers.delete(id); mapCalls.push({ method: 'removeLayer', args: [id] }); },
@@ -399,54 +401,102 @@ test('terrain watch callback updates summary section', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Tests: map layer cleanup on unmount
+// Tests: terrain canvas persistence across unmount (D-592)
+//
+// The terrain source, hillshade layer and 3D canvas are the permanent base
+// map (InterfaceArchitecture.md §1 principle 3). They MUST survive a
+// terrain-loader unmount so that opening any other module (e.g. the library
+// browser) does not blank the terrain.
 // ---------------------------------------------------------------------------
 
-test('onUnmount removes hillshade layer and terrain-dem source', () => {
-  const metadata = {
-    crs_epsg: 28354,
-    bounds_wgs84: [148.0, -36.0, 149.0, -35.0],
-    centre_wgs84: [148.5, -35.5],
-    resolution_m: 1.0,
-    tile_url_template: '/api/terrain/tiles/{z}/{x}/{y}.png',
-    terrain_tile_count: 12,
-    terrain_min_zoom: 8,
-    terrain_max_zoom: 13,
-  };
-  const api = makeMockApi({ terrainValue: metadata });
+const _PRELOADED_TERRAIN = {
+  crs_epsg: 28354,
+  bounds_wgs84: [148.0, -36.0, 149.0, -35.0],
+  centre_wgs84: [148.5, -35.5],
+  resolution_m: 1.0,
+  tile_url_template: '/api/terrain/tiles/{z}/{x}/{y}.png',
+  terrain_tile_count: 12,
+  terrain_min_zoom: 8,
+  terrain_max_zoom: 13,
+};
+
+test('onUnmount preserves the permanent terrain source and hillshade layer (D-592)', () => {
+  const api = makeMockApi({ terrainValue: { ..._PRELOADED_TERRAIN } });
   init(api);
 
-  // Fire all onUnmount callbacks
+  // Fire all onUnmount callbacks — simulates navigating to another module.
   for (const cb of api._unmountCallbacks) cb();
 
   const removeLayerCall = api.map._calls.find(c => c.method === 'removeLayer');
-  assert.ok(removeLayerCall, 'removeLayer must be called on unmount');
-  assert.equal(removeLayerCall.args[0], 'terrain-loader:hillshade');
+  assert.equal(removeLayerCall, undefined, 'removeLayer must NOT be called on unmount');
 
   const removeSourceCall = api.map._calls.find(c => c.method === 'removeSource');
-  assert.ok(removeSourceCall, 'removeSource must be called on unmount');
-  assert.equal(removeSourceCall.args[0], 'terrain-loader:terrain-dem');
+  assert.equal(removeSourceCall, undefined, 'removeSource must NOT be called on unmount');
 });
 
-test('onUnmount clears terrain source via setTerrainSource(null)', () => {
-  const metadata = {
-    crs_epsg: 28354,
-    bounds_wgs84: [148.0, -36.0, 149.0, -35.0],
-    centre_wgs84: [148.5, -35.5],
-    resolution_m: 1.0,
-    tile_url_template: '/api/terrain/tiles/{z}/{x}/{y}.png',
-    terrain_tile_count: 12,
-    terrain_min_zoom: 8,
-    terrain_max_zoom: 13,
-  };
-  const api = makeMockApi({ terrainValue: metadata });
+test('onUnmount does not clear the 3D terrain via setTerrainSource(null) (D-592)', () => {
+  const api = makeMockApi({ terrainValue: { ..._PRELOADED_TERRAIN } });
   init(api);
 
   for (const cb of api._unmountCallbacks) cb();
 
-  const clearCall = api.map._calls.filter(c => c.method === 'setTerrainSource').at(-1);
-  assert.ok(clearCall, 'setTerrainSource must be called on unmount');
-  assert.equal(clearCall.args[0], null, 'setTerrainSource(null) clears terrain canvas');
+  const nullClear = api.map._calls.find(
+    c => c.method === 'setTerrainSource' && c.args[0] === null
+  );
+  assert.equal(nullClear, undefined, 'setTerrainSource(null) must NOT be called on unmount');
+});
+
+test('re-init with the terrain source already present does not re-add layers (D-592)', () => {
+  const api = makeMockApi({ terrainValue: { ..._PRELOADED_TERRAIN } });
+
+  // First activation: fresh canvas — layers are added.
+  init(api);
+  const addSourceFirst = api.map._calls.filter(c => c.method === 'addSource').length;
+  const addLayerFirst = api.map._calls.filter(c => c.method === 'addLayer').length;
+  assert.equal(addSourceFirst, 1, 'first init must add the terrain source once');
+  assert.equal(addLayerFirst, 1, 'first init must add the hillshade layer once');
+
+  // Navigate away, then back: the persistent canvas is still present.
+  for (const cb of api._unmountCallbacks) cb();
+  init(api);
+
+  const addSourceTotal = api.map._calls.filter(c => c.method === 'addSource').length;
+  const addLayerTotal = api.map._calls.filter(c => c.method === 'addLayer').length;
+  assert.equal(addSourceTotal, 1, 're-init must NOT re-add the already-present terrain source');
+  assert.equal(addLayerTotal, 1, 're-init must NOT re-add the already-present hillshade layer');
+});
+
+test('re-init with a different DEM rebuilds the base canvas (D-593)', () => {
+  const terrainA = {
+    ..._PRELOADED_TERRAIN,
+    tile_url_template: '/api/terrain/sessions/AAA/tiles/{z}/{x}/{y}.png',
+  };
+  const terrainB = {
+    ..._PRELOADED_TERRAIN,
+    tile_url_template: '/api/terrain/sessions/BBB/tiles/{z}/{x}/{y}.png',
+  };
+  const api = makeMockApi({ terrainValue: terrainA });
+
+  init(api);
+  assert.equal(
+    api.map._calls.filter(c => c.method === 'addSource').length, 1,
+    'first init adds DEM A'
+  );
+
+  // Navigate away, then the terrain state is replaced by a different DEM
+  // before terrain-loader is re-activated.
+  for (const cb of api._unmountCallbacks) cb();
+  api.state.set('terrain', terrainB);
+  init(api);
+
+  // The identity-aware guard (D-593) must detect the stale DEM-A source and
+  // rebuild the canvas rather than silently keeping it.
+  const addSourceCalls = api.map._calls.filter(c => c.method === 'addSource');
+  assert.equal(addSourceCalls.length, 2, 're-init with a different DEM must rebuild the source');
+  assert.ok(
+    addSourceCalls.at(-1).args[1].tiles[0].endsWith('/api/terrain/sessions/BBB/tiles/{z}/{x}/{y}.png'),
+    'the rebuilt source must point at DEM B tiles'
+  );
 });
 
 // ---------------------------------------------------------------------------

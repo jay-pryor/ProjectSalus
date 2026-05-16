@@ -6713,3 +6713,36 @@ defects:
     resolution: "Accepted without code change: SiteModel.dem/dsm are themselves declared bare np.ndarray, so tightening only surface_array()'s return annotation to npt.NDArray[np.float64] would misrepresent the field types and create a mypy return-type mismatch. A consistent fix belongs to a SiteModel-wide type pass and is out of scope for I-17."
     status: "accepted_documented"
     commit: "2039359"
+
+  - id: D-592
+    severity: high
+    task: I-18
+    found_by: user_report
+    file: src/salus/viewer/interface/modules/terrain-loader/index.js
+    line: 136
+    description: "terrain-loader onUnmount calls _cleanupMapLayers(api), which removes the terrain-loader:terrain-dem raster-dem source, removes the terrain-loader:hillshade layer, and clears the 3D terrain via setTerrainSource(null). mode-manager.activateModule runs the outgoing module's runUnmount() on every navigation, so opening any other module (e.g. library-browser) tears down the rendered terrain. Non-map modules never restore it — the 3D canvas stays blank until the user navigates back to terrain-loader and init() re-adds the layers. Violates InterfaceArchitecture.md section 1 principle 3 'The 3D terrain canvas is permanent'."
+    resolution: "I-18: removed the _cleanupMapLayers(api) call from terrain-loader's onUnmount. The terrain raster-dem source, hillshade layer and 3D canvas are the permanent base map (InterfaceArchitecture.md section 1 principle 3) and now survive a module unmount; onUnmount still tears down the panel-scoped resources (file-input listener, terrain watch, adopt-fetch cancellation). init() re-applies the layers only when the canvas is absent or stale. Opening another module no longer blanks the terrain. module-architecture-reviewer confirmed the MUST-Rule-15 deviation is correct (it resolves a principle-3 violation rather than creating a Rule-15 one)."
+    status: resolved
+    commit: ""
+
+  - id: D-593
+    severity: medium
+    task: I-18
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/terrain-loader/index.js
+    line: 118
+    description: "The D-592 re-mount guard 'if (!api.map.getSource(SOURCE_ID))' checks only that a source with SOURCE_ID is present, not its identity. If 'terrain' state were updated to a different DEM and init() re-ran while the stale source object was still on the map, the guard would suppress _applyMapLayers — the 3D canvas would keep rendering the old DEM's tiles while the panel summary showed the new metadata, with nothing logged. Not reachable via terrain-loader's own flows (it is the sole declared writer of 'terrain' and re-applies the canvas in the same turn as every write), but the presence-only guard is a latent silent map/panel desync that the pre-D-592 unconditional re-apply could not produce."
+    resolution: "I-18: replaced the presence-only guard with the identity-aware _terrainSourceMatches() helper — it compares the on-map source's first tile URL against apiBase + terrain.tile_url_template, so a source left from a different DEM is rebuilt rather than silently kept. Regression test 're-init with a different DEM rebuilds the base canvas (D-593)' added; the test mock's getSource now returns the stored source spec so the tile-URL identity check is exercised."
+    status: resolved
+    commit: ""
+
+  - id: D-594
+    severity: low
+    task: I-18
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/terrain-loader/index.js
+    line: 351
+    description: "Pre-existing: the EventSource opened in _pollTileProgress is closed only on the SSE 'complete'/'error' events. terrain-loader's onUnmount holds no handle to the in-flight EventSource, so navigating away mid-tile-generation leaves the SSE connection open and _loadTerrain keeps mutating DOM nodes of an unmounted panel. Not introduced by I-18 (the onUnmount change does not touch _pollTileProgress); surfaced because the thinner onUnmount makes it the most material remaining unhandled resource."
+    resolution: "Deferred — pre-existing leak, outside the I-18 acceptance criteria (terrain-canvas persistence). Fix is to store the EventSource on a cancellation context and es.close() it in onUnmount; tracked for a dedicated follow-up task."
+    status: deferred
+    commit: ""

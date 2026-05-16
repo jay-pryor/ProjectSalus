@@ -1118,6 +1118,27 @@ _Exploration scenarios are stored in `demo/explore/` with the naming convention 
 
 ---
 
+**I-18: Terrain canvas persists across module navigation — terrain-loader stops tearing down the permanent 3D canvas on unmount**
+- _Source:_ User-reported viewer bug (2026-05-16): the rendered terrain disappears whenever a non-map module panel (e.g. the Sensor/Effector Library Browser) is opened. Logged as D-592.
+- _Diagnosis:_ `mode-manager.activateModule` runs the outgoing module's `runUnmount()` before mounting the incoming module. `terrain-loader`'s `onUnmount` calls `_cleanupMapLayers(api)`, which removes the `terrain-loader:terrain-dem` raster-dem source, removes the `terrain-loader:hillshade` layer, and clears the 3D terrain via `setTerrainSource(null)`. Navigating from terrain-loader to any other module therefore destroys the terrain rendering; modules with no map output (library-browser, budget-tracker, report-configurator, …) never restore it, so the canvas stays blank until the user navigates back to terrain-loader and `init()` re-adds the layers.
+- _Conflict:_ This directly violates InterfaceArchitecture.md §1 principle 3 ("The 3D terrain canvas is permanent"). The terrain source / hillshade layer / 3D terrain are the shared base canvas every other module renders on top of — they are not module-private decoration and must outlive a terrain-loader unmount. The blanket "clean up all map layers in onUnmount" rule (Interface Module Standard §15) does not apply to the permanent base canvas.
+- _Fix policy (decided here):_
+  1. Remove the `_cleanupMapLayers(api)` call from terrain-loader's `onUnmount`. onUnmount still tears down its panel-scoped resources: the DEM-input `change` listener, the `terrain` `watch()` subscription, and the in-flight adopt-fetch cancellation flag.
+  2. The `_cleanupMapLayers` helper is retained — it is still called inside `_applyMapLayers` so a *new* terrain load (or first session adoption) replaces any prior canvas idempotently.
+  3. In `init()`'s pre-loaded-terrain branch, only call `_applyMapLayers` when the terrain source is not already on the map (`api.map.getSource(SOURCE_ID)` is null). On a re-mount the permanent canvas is already present, so re-adding it is skipped — avoiding a remove/re-add flicker of the base layer.
+- _Acceptance criteria:_
+  1. After `terrain-loader` `init()` runs with terrain present, firing all `onUnmount` callbacks leaves the `terrain-loader:terrain-dem` source and `terrain-loader:hillshade` layer on the map — `removeSource` / `removeLayer` are not called.
+  2. `onUnmount` does not call `setTerrainSource(null)`; the 3D terrain canvas stays bound after navigation away from terrain-loader.
+  3. `onUnmount` still unsubscribes the `terrain` watch and removes the DEM-input `change` listener (no leaked subscriptions or listeners).
+  4. Re-running `init()` after an unmount, with the terrain source already present, does not call `addSource` / `addLayer` again — the permanent canvas is reused, not rebuilt.
+  5. A first `init()` with pre-loaded terrain and no existing source still adds the source, hillshade layer, and 3D terrain exactly as before.
+  6. A new terrain upload (`_loadTerrain`) and first session adoption (`_adoptLatestSessionIfAvailable`) still replace the canvas via `_applyMapLayers` (unchanged behaviour).
+  7. `node --test src/salus/viewer/interface/tests/test-terrain-loader.js` passes; the two obsolete onUnmount-teardown tests are replaced by persistence assertions, and a re-mount idempotence test is added.
+  8. Defect register records D-592 (open → resolved with commit hash).
+- _Out of scope:_ Promoting the terrain source/layers to shell-owned state — terrain-loader remains the sole creator of the canvas. Reworking the `removeSource`-before-`setTerrainSource(null)` ordering inside `_cleanupMapLayers` (the helper is no longer on the unmount path; its upload-replace use is unaffected). Changes to any other module.
+
+---
+
 ### Slice 15 — Populate Full Sensor/Effector/Threat Database
 
 _Goal: populate the YAML database with all sensors from the research files to enable realistic configurations._
