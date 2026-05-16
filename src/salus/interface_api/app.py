@@ -19,6 +19,7 @@ import os
 import queue as _queue
 import tempfile
 import threading
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncGenerator
@@ -178,6 +179,82 @@ def _resolve_terrain_session_id(session_id: str | None) -> str | None:
 # Prevents the connection from hanging forever if a worker thread exits
 # without pushing a terminal event.
 _QUEUE_TIMEOUT_S: float = 300.0
+
+# Maximum number of concurrent /api/simulate + /api/optimise workers (D-500).
+# Each worker runs GB-scale NumPy + viewshed compute; ten unconstrained
+# concurrent requests OOM-kill the process.  Defaults to 2; operators can
+# tune via SALUS_MAX_CONCURRENT_SIMULATIONS (positive integer).  Invalid
+# values fall back to the default and emit a warning so a typo in deployment
+# config never silently disables the cap.
+_DEFAULT_MAX_CONCURRENT_SIMULATIONS: int = 2
+
+
+def _resolve_max_concurrent_simulations() -> int:
+    raw = os.environ.get("SALUS_MAX_CONCURRENT_SIMULATIONS")
+    if raw is None or raw == "":
+        return _DEFAULT_MAX_CONCURRENT_SIMULATIONS
+    try:
+        value = int(raw)
+    except ValueError:
+        _log.warning(
+            "SALUS_MAX_CONCURRENT_SIMULATIONS=%r is not an integer; falling back to %d.",
+            raw,
+            _DEFAULT_MAX_CONCURRENT_SIMULATIONS,
+        )
+        return _DEFAULT_MAX_CONCURRENT_SIMULATIONS
+    if value < 1:
+        _log.warning(
+            "SALUS_MAX_CONCURRENT_SIMULATIONS=%d is not a positive integer; falling back to %d.",
+            value,
+            _DEFAULT_MAX_CONCURRENT_SIMULATIONS,
+        )
+        return _DEFAULT_MAX_CONCURRENT_SIMULATIONS
+    return value
+
+
+_MAX_CONCURRENT_SIMULATIONS: int = _resolve_max_concurrent_simulations()
+
+# BoundedSemaphore so an over-release (e.g. duplicate finally) raises
+# ValueError instead of silently inflating the cap (D-500).
+_SIMULATE_SEMAPHORE: threading.BoundedSemaphore = threading.BoundedSemaphore(
+    _MAX_CONCURRENT_SIMULATIONS,
+)
+
+# Retry-After value advertised to clients hitting the concurrency cap (seconds).
+_SIMULATE_RETRY_AFTER_S: int = 5
+
+
+def _spawn_simulate_worker(
+    target: Callable[..., None],
+    args: tuple[Any, ...],
+) -> threading.Thread:
+    """Start *target* in a daemon thread that releases the semaphore on exit.
+
+    Callers MUST have already acquired ``_SIMULATE_SEMAPHORE`` (non-blocking)
+    before invoking this helper; the release in the wrapper closes the slot
+    even when the worker raises mid-pipeline.
+
+    ``args`` is intentionally heterogeneous (``ScenarioConfig`` vs
+    ``OptimiserRequest`` plus a queue), so its element type stays ``Any``.
+    """
+
+    def _release_on_exit() -> None:
+        try:
+            target(*args)
+        finally:
+            _SIMULATE_SEMAPHORE.release()
+
+    thread = threading.Thread(target=_release_on_exit, daemon=True)
+    try:
+        thread.start()
+    except BaseException:
+        # The worker never started, so its finally (which holds the release)
+        # never runs — release the caller-acquired slot here so it does not
+        # leak permanently and 503 every later request (D-588).
+        _SIMULATE_SEMAPHORE.release()
+        raise
+    return thread
+
 
 app = FastAPI(
     title="Salus Interface API",
@@ -1133,13 +1210,15 @@ async def simulate(config: ScenarioConfig) -> StreamingResponse:
         if resolved_bdy is not None:
             config.boundary_path = resolved_bdy
 
+    if not _SIMULATE_SEMAPHORE.acquire(blocking=False):
+        raise HTTPException(
+            status_code=503,
+            detail="Server at capacity, retry later.",
+            headers={"Retry-After": str(_SIMULATE_RETRY_AFTER_S)},
+        )
+
     q: _queue.Queue[dict[str, Any]] = _queue.Queue()
-    thread = threading.Thread(
-        target=_run_simulate_pipeline,
-        args=(config, q),
-        daemon=True,
-    )
-    thread.start()
+    _spawn_simulate_worker(_run_simulate_pipeline, (config, q))
     return StreamingResponse(_drain_queue(q), media_type="text/event-stream")
 
 
@@ -1158,13 +1237,15 @@ async def optimise(request: OptimiserRequest) -> StreamingResponse:
     if resolved_terrain is not None:
         request.terrain = str(resolved_terrain)
 
+    if not _SIMULATE_SEMAPHORE.acquire(blocking=False):
+        raise HTTPException(
+            status_code=503,
+            detail="Server at capacity, retry later.",
+            headers={"Retry-After": str(_SIMULATE_RETRY_AFTER_S)},
+        )
+
     q: _queue.Queue[dict[str, Any]] = _queue.Queue()
-    thread = threading.Thread(
-        target=_run_optimise_pipeline,
-        args=(request, q),
-        daemon=True,
-    )
-    thread.start()
+    _spawn_simulate_worker(_run_optimise_pipeline, (request, q))
     return StreamingResponse(_drain_queue(q), media_type="text/event-stream")
 
 
@@ -1508,6 +1589,12 @@ async def report(request: ReportRequest) -> Response:
     finally:
         if tmp_pdf is not None:
             tmp_pdf.unlink(missing_ok=True)
+
+    # I-16: audit-log any optional section that was omitted from the PDF.
+    # The binary response body cannot carry structured warnings, so the
+    # operator inspects the application log.
+    for failure in report_data.section_failures:
+        _log.warning("report request: section omitted — %s", failure)
 
     return Response(content=pdf_bytes, media_type="application/pdf")
 

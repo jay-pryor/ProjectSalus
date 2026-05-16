@@ -47,6 +47,40 @@ _COVERAGE_THRESHOLD_ADEQUATE: float = 60.0
 # Default templates directory (bundled with salus)
 _DEFAULT_TEMPLATE_DIR: Path = Path(__file__).parent / "templates"
 
+# Section criticality policy (I-16). REQUIRED sections must render successfully
+# or render_pdf raises ReportRenderError. OPTIONAL sections may fail; the
+# failure is recorded in ReportData.section_failures and the section is omitted
+# from the PDF.  Required map assets (composite_map for site_overview, gap_map
+# for gap_analysis) also raise on failure; per-layer maps and optional charts
+# (kill_chain, saturation) are audit-logged and skipped.
+_REQUIRED_SECTIONS: frozenset[str] = frozenset(
+    {
+        "cover",
+        "executive_summary",
+        "site_overview",
+        "coverage_analysis",
+        "gap_analysis",
+        "assumptions",
+        "appendix_sensors",
+    }
+)
+_OPTIONAL_SECTIONS: frozenset[str] = frozenset(
+    {
+        "threat_analysis",
+        "kill_chain",
+        "saturation",
+    }
+)
+
+
+class ReportRenderError(RuntimeError):
+    """Raised when a required PDF section, template, or map asset fails to render.
+
+    Optional-section failures do not raise — they are recorded in
+    :attr:`ReportData.section_failures` and surfaced to the caller as a
+    warning.  Only failures of REQUIRED sections / assets raise this error.
+    """
+
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -172,6 +206,14 @@ class ReportData:
     map_screenshot: str | None = None
     """Optional base64-encoded PNG map capture from the interface."""
 
+    section_failures: list[str] = field(default_factory=list)
+    """Audit log of optional sections / assets that failed to render and were
+    omitted from the PDF (I-16 section-criticality policy).  Each entry is a
+    `"<section_or_layer>: <reason>"` string.  Empty when the PDF rendered
+    cleanly.  Required-section failures never appear here — they raise
+    :class:`ReportRenderError` instead.  Callers should surface a non-empty
+    list to the operator as an audit-visible warning."""
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -186,9 +228,16 @@ def assemble_report_data(
 
     Renders coverage maps and charts to in-memory base64-encoded PNGs,
     generates the executive summary narrative, and builds the structured
-    assumptions section.  Rendering failures for individual maps are logged
-    as warnings and the corresponding field is set to None; they do not abort
-    the assembly.
+    assumptions section.
+
+    Failure policy (I-16 section-criticality):
+
+    * The composite coverage map and the gap map are required assets — a
+      rendering failure raises :class:`ReportRenderError`.
+    * Per-layer coverage maps and optional charts (kill-chain Gantt,
+      saturation threshold) are audit-logged: a rendering failure appends an
+      entry to :attr:`ReportData.section_failures` and the corresponding
+      field is left as ``None`` / omitted.  The PDF still renders.
 
     Args:
         scenario: Scenario configuration that was simulated.
@@ -196,6 +245,9 @@ def assemble_report_data(
 
     Returns:
         :class:`ReportData` ready to pass to :func:`render_pdf`.
+
+    Raises:
+        ReportRenderError: If the composite map or gap map fails to render.
     """
     from salus.report.maps import render_composite_coverage_map, render_gap_map
 
@@ -203,17 +255,19 @@ def assemble_report_data(
     scenario_name = Path(scenario.site_dem_path).stem
 
     sensor_positions = [(p.position_x, p.position_y) for p in scenario.sensor_placements]
+    section_failures: list[str] = []
 
-    # Composite coverage map
+    # Composite coverage map — REQUIRED (site_overview section).
     composite_map_b64 = _render_to_b64(
         render_composite_coverage_map,
         sim_results.site,
         sim_results.layer_coverages,
+        _asset_label="site_overview.composite_map",
         title="Composite Coverage",
         sensor_positions=sensor_positions,
     )
 
-    # Gap map — needs the gaps boolean array
+    # Gap map — REQUIRED (gap_analysis section).
     if sim_results.gaps is not None:
         gaps_arr = sim_results.gaps
     else:
@@ -229,24 +283,35 @@ def assemble_report_data(
         sensor_positions=sensor_positions,
     )
 
-    # Per-layer coverage maps
+    # Per-layer coverage maps — OPTIONAL assets within the required
+    # coverage_analysis section.  Individual layer failures are audit-logged
+    # and skipped; the surrounding section still renders.
     layer_maps_b64: dict[str, str] = {}
     for sensor_type, layer_arr in sim_results.layer_coverages.items():
-        b64 = _render_to_b64(
-            render_composite_coverage_map,
-            sim_results.site,
-            {sensor_type: layer_arr},
-            title=f"{sensor_type.value} Layer Coverage",
-            sensor_positions=sensor_positions,
-        )
-        if b64 is not None:
-            layer_maps_b64[sensor_type.value] = b64
+        try:
+            layer_b64 = _render_to_b64(
+                render_composite_coverage_map,
+                sim_results.site,
+                {sensor_type: layer_arr},
+                _asset_label=f"coverage_analysis.{sensor_type.value}",
+                title=f"{sensor_type.value} Layer Coverage",
+                sensor_positions=sensor_positions,
+            )
+        except ReportRenderError as exc:
+            section_failures.append(str(exc))
+            _log.warning(
+                "Per-layer map render failed for %s — section_failures recorded; "
+                "skipping this layer.",
+                sensor_type.value,
+            )
+            continue
+        layer_maps_b64[sensor_type.value] = layer_b64
 
-    # Kill-chain Gantt chart
-    kill_chain_chart_b64 = _render_kill_chain_chart_to_b64(sim_results)
+    # Kill-chain Gantt chart — OPTIONAL (data-gated).
+    kill_chain_chart_b64 = _render_kill_chain_chart_to_b64(sim_results, section_failures)
 
-    # Saturation threshold chart
-    saturation_chart_b64 = _render_saturation_chart_to_b64(sim_results)
+    # Saturation threshold chart — OPTIONAL (data-gated).
+    saturation_chart_b64 = _render_saturation_chart_to_b64(sim_results, section_failures)
 
     executive_summary = generate_executive_summary(
         sim_results.stats,
@@ -275,6 +340,7 @@ def assemble_report_data(
         kill_chain_results=sim_results.kill_chain_results,
         saturation_result=sim_results.saturation_result,
         kill_chain_config=sim_results.kill_chain_config,
+        section_failures=section_failures,
     )
 
 
@@ -293,7 +359,19 @@ def render_pdf(
 
     Sections are conditionally included: threat_analysis and kill_chain are
     only included when corridor or kill-chain results are present; saturation
-    is only included when a saturation result exists.
+    is only included when a saturation result exists.  Optional sections
+    whose chart asset already failed in :func:`assemble_report_data` (and
+    therefore have an entry in ``report_data.section_failures``) are dropped.
+
+    Failure policy (I-16 section-criticality):
+
+    * Required sections (``cover``, ``executive_summary``, ``site_overview``,
+      ``coverage_analysis``, ``gap_analysis``, ``assumptions``,
+      ``appendix_sensors``) raise :class:`ReportRenderError` on any Jinja
+      ``TemplateError`` or ``TemplateNotFound``.
+    * Optional sections (``threat_analysis``, ``kill_chain``, ``saturation``)
+      append a ``"<section>: <reason>"`` entry to
+      ``report_data.section_failures`` and are omitted from the PDF.
 
     Args:
         report_data: Assembled report data from :func:`assemble_report_data`.
@@ -308,6 +386,7 @@ def render_pdf(
     Raises:
         FileNotFoundError: If the template directory does not exist.
         OSError: If the output file cannot be written.
+        ReportRenderError: If a required section fails to render.
     """
     output_path = Path(output_path)
     tmpl_dir = Path(template_dir) if template_dir is not None else _DEFAULT_TEMPLATE_DIR
@@ -322,7 +401,10 @@ def render_pdf(
         autoescape=jinja2.select_autoescape(["html"]),
     )
 
-    # Build list of sections to render — optional sections only when data present
+    # Build list of sections to render — optional sections only when data
+    # is present AND the section has not already been marked failed in
+    # assemble_report_data (e.g. kill_chain dropped when its chart failed).
+    already_failed = {entry.split(":", 1)[0] for entry in report_data.section_failures}
     section_names = [
         "cover",
         "executive_summary",
@@ -330,11 +412,19 @@ def render_pdf(
         "coverage_analysis",
         "gap_analysis",
     ]
-    if report_data.corridor_results:
+    if report_data.corridor_results and "threat_analysis" not in already_failed:
         section_names.append("threat_analysis")
-    if report_data.kill_chain_results:
+    if (
+        report_data.kill_chain_results
+        and report_data.kill_chain_chart_b64 is not None
+        and "kill_chain" not in already_failed
+    ):
         section_names.append("kill_chain")
-    if report_data.saturation_result is not None:
+    if (
+        report_data.saturation_result is not None
+        and report_data.saturation_chart_b64 is not None
+        and "saturation" not in already_failed
+    ):
         section_names.append("saturation")
     section_names.extend(["assumptions", "appendix_sensors"])
 
@@ -343,11 +433,22 @@ def render_pdf(
         try:
             tmpl = env.get_template(f"{section}.html")
             content_parts.append(tmpl.render(report=report_data))
-        except jinja2.TemplateNotFound:
-            _log.warning("Template not found: %s.html — skipping section", section)
-        except jinja2.TemplateError as exc:
-            # Jinja2 template errors (syntax/undefined) are reported but non-fatal
-            _log.warning("Template error in %s.html: %s — skipping section", section, exc)
+        except (jinja2.TemplateNotFound, jinja2.TemplateError) as exc:
+            if section in _REQUIRED_SECTIONS:
+                raise ReportRenderError(
+                    f"Required section '{section}' failed to render: {exc}"
+                ) from exc
+            reason = (
+                "template not found"
+                if isinstance(exc, jinja2.TemplateNotFound)
+                else f"template error: {exc}"
+            )
+            report_data.section_failures.append(f"{section}: {reason}")
+            _log.warning(
+                "Optional section '%s' omitted from PDF (%s) — recorded in section_failures.",
+                section,
+                reason,
+            )
 
     base_tmpl = env.get_template("base.html")
     full_html = base_tmpl.render(
@@ -623,12 +724,18 @@ def _build_assumptions(sim_results: SimulationResults) -> dict[str, list[str]]:
 def _render_to_b64(
     render_func: Callable[..., Path],
     *args: Any,
+    _asset_label: str = "map",
     **kwargs: Any,
-) -> str | None:
+) -> str:
     """Call a render function with a temp file path; return base64-encoded PNG.
 
-    Any exception during rendering is logged as a warning and None is returned.
     The temporary file is always deleted regardless of success or failure.
+
+    Raises:
+        ReportRenderError: If the render function raises.  The original
+            exception is chained via ``from``.  Callers that want to treat
+            individual failures as non-fatal (e.g. per-layer maps) must catch
+            this explicitly.
     """
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
         tmp_path = Path(f.name)
@@ -637,8 +744,9 @@ def _render_to_b64(
         data = tmp_path.read_bytes()
         return base64.b64encode(data).decode()
     except Exception as exc:
-        _log.warning("Map render failed (%s): %s", getattr(render_func, "__name__", "?"), exc)
-        return None
+        raise ReportRenderError(
+            f"{_asset_label}: render failed ({getattr(render_func, '__name__', '?')}): {exc}"
+        ) from exc
     finally:
         tmp_path.unlink(missing_ok=True)
 
@@ -649,8 +757,14 @@ def _render_gap_map_to_b64(
     composite: npt.NDArray[np.bool_],
     gaps: npt.NDArray[np.bool_],
     **kwargs: Any,
-) -> str | None:
-    """Render the gap map to a base64-encoded PNG string."""
+) -> str:
+    """Render the gap map to a base64-encoded PNG string.
+
+    The gap map is required by the gap_analysis section.
+
+    Raises:
+        ReportRenderError: If gap map rendering fails.
+    """
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
         tmp_path = Path(f.name)
     try:
@@ -658,17 +772,22 @@ def _render_gap_map_to_b64(
         data = tmp_path.read_bytes()
         return base64.b64encode(data).decode()
     except Exception as exc:
-        _log.warning("Gap map render failed: %s", exc)
-        return None
+        raise ReportRenderError(f"gap_analysis.gap_map: render failed: {exc}") from exc
     finally:
         tmp_path.unlink(missing_ok=True)
 
 
-def _render_kill_chain_chart_to_b64(sim_results: SimulationResults) -> str | None:
+def _render_kill_chain_chart_to_b64(
+    sim_results: SimulationResults,
+    section_failures: list[str],
+) -> str | None:
     """Render the kill-chain Gantt chart to a base64-encoded PNG string.
 
-    Returns None when kill-chain results, config, or effectors are unavailable,
-    or when the chart rendering fails.
+    Returns None when kill-chain results, config, or effectors are unavailable
+    (the legitimate "no chart applicable" case).  When inputs ARE available
+    but rendering fails, appends a ``"kill_chain: <reason>"`` entry to
+    ``section_failures`` and returns None — the section is then dropped from
+    the PDF by :func:`render_pdf`.
     """
     from salus.report.charts import render_kill_chain_chart
 
@@ -704,16 +823,26 @@ def _render_kill_chain_chart_to_b64(sim_results: SimulationResults) -> str | Non
         data = tmp_path.read_bytes()
         return base64.b64encode(data).decode()
     except Exception as exc:
-        _log.warning("Kill-chain chart render failed: %s", exc)
+        section_failures.append(f"kill_chain: chart render failed: {exc}")
+        _log.warning(
+            "Kill-chain chart render failed (%s) — section omitted; recorded in section_failures.",
+            exc,
+        )
         return None
     finally:
         tmp_path.unlink(missing_ok=True)
 
 
-def _render_saturation_chart_to_b64(sim_results: SimulationResults) -> str | None:
+def _render_saturation_chart_to_b64(
+    sim_results: SimulationResults,
+    section_failures: list[str],
+) -> str | None:
     """Render the saturation threshold chart to a base64-encoded PNG string.
 
-    Returns None when saturation data is unavailable or rendering fails.
+    Returns None when saturation data is unavailable (the legitimate "no
+    chart applicable" case).  When data IS available but rendering fails,
+    appends a ``"saturation: <reason>"`` entry to ``section_failures`` and
+    returns None — the section is dropped from the PDF.
     """
     from salus.report.charts import render_saturation_threshold_chart
 
@@ -742,7 +871,11 @@ def _render_saturation_chart_to_b64(sim_results: SimulationResults) -> str | Non
         data = tmp_path.read_bytes()
         return base64.b64encode(data).decode()
     except Exception as exc:
-        _log.warning("Saturation chart render failed: %s", exc)
+        section_failures.append(f"saturation: chart render failed: {exc}")
+        _log.warning(
+            "Saturation chart render failed (%s) — section omitted; recorded in section_failures.",
+            exc,
+        )
         return None
     finally:
         tmp_path.unlink(missing_ok=True)

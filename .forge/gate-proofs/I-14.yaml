@@ -1,0 +1,42 @@
+task_id: I-14
+timestamp: 2026-05-16T00:00:00Z
+title: "Refuse non-localhost binds by default and bound /api/simulate + /api/optimise concurrency"
+
+quality_gates:
+  G1_lint: pass            # ruff check src/ tests/ — "All checks passed!"
+  G2_format: pass          # ruff format --check src/ tests/ — "85 files already formatted"
+  G3_import: pass          # ruff check --select I src/ — "All checks passed!"
+  G4_type: pass            # mypy src/salus/ — 37 errors, all pre-existing import-untyped (missing stubs for yaml/rasterio/shapely/mercantile/weasyprint/scipy); 0 introduced by I-14. Per CLAUDE.md G4 warnings are informational unless they indicate clear correctness errors.
+  G5_security: pass        # bandit -r src/ -ll -q — Total issues: Low 3 (pre-existing), Medium 0, High 0.
+  G6_unit_test: pass       # COVERAGE_FILE=.coverage.final pytest tests/ --cov=src/salus --cov-fail-under=80 -q — 1366 passed, 4 skipped, 0 failed (896.75 s). JS suite: node --test test-shell.js — 37 passed, 0 failed.
+  G7_coverage: pass        # Total coverage 83.01%, above the 80% threshold. interface_api/app.py 81%, cli.py exercised by new tests.
+  G8_secrets: pass         # detect-secrets scan src/ — 0 files with secrets.
+  coverage_pct: 83
+
+review:
+  l1_standards:
+    testing: pass          # new tests in tests/test_cli.py (loopback / wildcard / allow-public host handling) and tests/test_interface_api.py (503-at-capacity, slot-release-on-exception, env-var override); descriptive names, monkeypatch over MagicMock
+    error_handling: pass   # _spawn_simulate_worker releases the semaphore in the worker finally AND on a thread-start failure (D-588); non-blocking acquire raises HTTPException(503) rather than blocking; invalid env var falls back with a logged warning
+    logging: pass          # _emit_public_bind_warning writes a multi-line audit warning to stderr; _resolve_max_concurrent_simulations logs a warning on a bad SALUS_MAX_CONCURRENT_SIMULATIONS value; no print()
+    security: pass         # the task is a net security hardening — refuses unauthenticated non-loopback binds by default and caps concurrent compute to prevent trivial DoS
+    interface_modules: N/A # no .js / .html / manifest.json files changed
+  l2_agents:
+    silent_failure_hunter: {status: pass, findings: 1}      # D-588 — semaphore slot leak if thread.start() raises after acquire; fixed (release-on-failure guard)
+    spec_compliance: {status: pass, findings: 1}            # 9/9 acceptance criteria; AC9 (register status open->resolved) flagged and resolved before this gate-proof
+    type_design_analyzer: {status: pass, findings: 1}       # D-590 — _spawn_simulate_worker(target: Any) retyped to Callable[..., None]
+    regression_reviewer: {status: pass, findings: 0}        # default host (127.0.0.1) and loopback binds verified unchanged; existing simulate/optimise happy-path tests unaffected at the default cap of 2
+    module_architecture_reviewer: N/A                       # no JS/HTML/manifest files changed
+
+defect_ids:
+  - D-497   # O-7 — salus interface --host accepts non-loopback with no warning / no auth
+  - D-500   # O-10 — unbounded thread spawn per /api/simulate request (DoS)
+  - D-588   # L2 — semaphore slot leak on thread.start() failure
+  - D-590   # L2 — _spawn_simulate_worker target typed Any
+
+notes:
+  - Source — Triage bug-triage-2026-05-11 findings O-7 + O-10 (Group: security cluster, HIGH/MEDIUM).
+  - Policy — non-loopback binds require an explicit --allow-public flag (else exit 1 before uvicorn starts); with the flag a multi-line stderr warning enumerates the unauthenticated attack surface. /api/simulate and /api/optimise share a module-level threading.BoundedSemaphore (default 2, tunable via SALUS_MAX_CONCURRENT_SIMULATIONS); saturation -> HTTP 503 + Retry-After.
+  - Out of scope (per spec) — token/TLS authentication, rate limiting beyond the concurrency cap, applying the cap to terrain tile generation.
+  - Committed together with I-16 (commit 2) — both tasks modify cli.py and interface_api/app.py and the hunks interleave; isolating them into separate commits would require per-hunk staging. See ProjectPath.md I-14 / I-16.
+
+overall: pass

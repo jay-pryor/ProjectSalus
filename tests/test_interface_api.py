@@ -425,6 +425,30 @@ def test_report_returns_pdf_bytes(flat_dem_path: Path) -> None:
     )
 
 
+def test_report_required_section_failure_returns_500(
+    flat_dem_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D-589: a ReportRenderError from a required section yields HTTP 500.
+
+    I-16 changed render_pdf to raise ReportRenderError when a required-section
+    template or asset fails (previously it logged a warning and produced a
+    degraded 200 PDF).  The /api/report endpoint must surface that failure as
+    a 500 with the reason in the JSON body, not a clean-looking partial PDF.
+    """
+    from salus.report.pdf import ReportRenderError
+
+    def _raise_required(*_args: Any, **_kwargs: Any) -> None:
+        raise ReportRenderError("Required section 'cover' failed to render: boom")
+
+    monkeypatch.setattr("salus.interface_api.app.render_pdf", _raise_required)
+    payload = _minimal_report_request(flat_dem_path)
+    with TestClient(app) as client:
+        resp = client.post("/api/report", json=payload)
+    assert resp.status_code == 500, f"Expected 500, got {resp.status_code}: {resp.text[:200]}"
+    assert resp.headers["content-type"] == "application/json"
+    assert "cover" in resp.json()["error"]
+
+
 # ---------------------------------------------------------------------------
 # S14.12: /api/compare spatial diff endpoint
 # ---------------------------------------------------------------------------
@@ -999,3 +1023,131 @@ def test_generate_terrain_tile_returns_none_outside_extent(flat_dem_path: Path) 
     # does not overlap with EPSG:28354 Zone 54 (Australia 150°E area).
     data = _generate_terrain_tile(flat_dem_path, 1, 1, 1)
     assert data is None
+
+
+# ---------------------------------------------------------------------------
+# I-14 / D-500: bounded /api/simulate + /api/optimise concurrency
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def _simulate_semaphore_one(monkeypatch):
+    """Replace ``_SIMULATE_SEMAPHORE`` with a BoundedSemaphore(1) for the test.
+
+    Bounded semaphore so over-release surfaces as ValueError instead of
+    silently inflating the cap; the production module uses the same type.
+    """
+    import threading as _t
+
+    from salus.interface_api import app as _app
+
+    new_sem = _t.BoundedSemaphore(1)
+    monkeypatch.setattr(_app, "_SIMULATE_SEMAPHORE", new_sem)
+    yield new_sem
+
+
+def test_simulate_returns_503_when_at_capacity(
+    flat_dem_path: Path, _simulate_semaphore_one
+) -> None:
+    """POST /api/simulate returns 503 with Retry-After when the cap is hit."""
+    # Pre-acquire the only slot so the next request must be refused.
+    assert _simulate_semaphore_one.acquire(blocking=False) is True
+    try:
+        payload = _minimal_scenario_payload(flat_dem_path)
+        with TestClient(app) as client:
+            resp = client.post("/api/simulate", json=payload)
+        assert resp.status_code == 503
+        assert resp.headers.get("Retry-After") == "5"
+        body = resp.json()
+        assert "capacity" in body.get("detail", "").lower()
+    finally:
+        _simulate_semaphore_one.release()
+
+
+def test_optimise_returns_503_when_at_capacity(
+    flat_dem_path: Path, _simulate_semaphore_one
+) -> None:
+    """/api/optimise shares the simulate semaphore and is refused when saturated."""
+    assert _simulate_semaphore_one.acquire(blocking=False) is True
+    try:
+        payload = {
+            "terrain": str(flat_dem_path),
+            "sensor_library_filter": [],
+            "effector_library_filter": [],
+            "zones": {},
+            "constraints": {},
+        }
+        with TestClient(app) as client:
+            resp = client.post("/api/optimise", json=payload)
+        assert resp.status_code == 503
+        assert resp.headers.get("Retry-After") == "5"
+    finally:
+        _simulate_semaphore_one.release()
+
+
+def test_simulate_worker_releases_slot_on_exception(
+    flat_dem_path: Path, _simulate_semaphore_one
+) -> None:
+    """A worker that raises mid-pipeline must release its semaphore slot — no leak."""
+    from salus.interface_api import app as _app
+
+    # First request — point at a missing file so the worker thread raises
+    # inside _run_simulate_pipeline (load_dem will fail).  The path passes the
+    # allowlist check because the parent directory is registered.
+    missing = flat_dem_path.parent / "definitely_missing.tif"
+    payload_bad = {"site_dem_path": str(missing), "sensor_placements": []}
+    with TestClient(app) as client:
+        resp = client.post("/api/simulate", json=payload_bad)
+        assert resp.status_code == 200  # SSE always 200; failure is in the stream.
+        events = _parse_sse(resp.text)
+        assert any(e.get("type") == "error" for e in events), (
+            "Expected an error event from the failed worker"
+        )
+
+    # Wait briefly for the worker thread to release the slot.  Polling is
+    # cheap and avoids a flaky time.sleep — the release happens in the
+    # _spawn_simulate_worker finally block once the queue is drained.
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        if _app._SIMULATE_SEMAPHORE.acquire(blocking=False):
+            _app._SIMULATE_SEMAPHORE.release()
+            break
+        time.sleep(0.02)
+    else:
+        pytest.fail("Semaphore slot was not released after the worker errored — leak.")
+
+    # Second request — happy path; if the first request leaked the slot this
+    # would 503.  This is the I-14 acceptance criterion (6).
+    payload_ok = _minimal_scenario_payload(flat_dem_path)
+    with TestClient(app) as client:
+        resp_ok = client.post("/api/simulate", json=payload_ok)
+    assert resp_ok.status_code == 200, (
+        "Subsequent valid request must be accepted; semaphore leaked."
+    )
+
+
+def test_resolve_max_concurrent_simulations_env_var(monkeypatch) -> None:
+    """SALUS_MAX_CONCURRENT_SIMULATIONS overrides the cap; invalid values fall back."""
+    from salus.interface_api import app as _app
+
+    monkeypatch.setenv("SALUS_MAX_CONCURRENT_SIMULATIONS", "1")
+    assert _app._resolve_max_concurrent_simulations() == 1
+
+    monkeypatch.setenv("SALUS_MAX_CONCURRENT_SIMULATIONS", "4")
+    assert _app._resolve_max_concurrent_simulations() == 4
+
+    # Invalid: non-integer string.
+    monkeypatch.setenv("SALUS_MAX_CONCURRENT_SIMULATIONS", "abc")
+    assert _app._resolve_max_concurrent_simulations() == _app._DEFAULT_MAX_CONCURRENT_SIMULATIONS
+
+    # Invalid: zero.
+    monkeypatch.setenv("SALUS_MAX_CONCURRENT_SIMULATIONS", "0")
+    assert _app._resolve_max_concurrent_simulations() == _app._DEFAULT_MAX_CONCURRENT_SIMULATIONS
+
+    # Invalid: negative.
+    monkeypatch.setenv("SALUS_MAX_CONCURRENT_SIMULATIONS", "-3")
+    assert _app._resolve_max_concurrent_simulations() == _app._DEFAULT_MAX_CONCURRENT_SIMULATIONS
+
+    # Unset → default.
+    monkeypatch.delenv("SALUS_MAX_CONCURRENT_SIMULATIONS", raising=False)
+    assert _app._resolve_max_concurrent_simulations() == _app._DEFAULT_MAX_CONCURRENT_SIMULATIONS

@@ -2001,6 +2001,7 @@ def report(
     from salus.models.sensor import SensorType as _SensorType
     from salus.report.pdf import (
         ReportData,
+        ReportRenderError,
         SimulationResults,
         _build_assumptions,
         assemble_report_data,
@@ -2173,6 +2174,9 @@ def report(
         click.echo("Assembling report data…")
         try:
             report_data = assemble_report_data(sc, sim)
+        except ReportRenderError as exc:
+            click.echo(f"Error rendering PDF: {exc}", err=True)
+            sys.exit(1)
         except Exception as exc:
             click.echo(f"Error assembling report data: {exc}", err=True)
             sys.exit(1)
@@ -2183,9 +2187,17 @@ def report(
     except FileNotFoundError as exc:
         click.echo(f"Error: {exc}", err=True)
         sys.exit(1)
+    except ReportRenderError as exc:
+        click.echo(f"Error rendering PDF: {exc}", err=True)
+        sys.exit(1)
     except Exception as exc:
         click.echo(f"Error rendering PDF: {exc}", err=True)
         sys.exit(1)
+
+    if report_data.section_failures:
+        click.echo("Warning: PDF rendered with degraded sections:", err=True)
+        for entry in report_data.section_failures:
+            click.echo(f"  - {entry}", err=True)
 
     click.echo(f"\nReport written: {result_path}")
 
@@ -2379,6 +2391,59 @@ def viewer(
 # S14.2-5 — salus interface command
 # ---------------------------------------------------------------------------
 
+# Hostnames / addresses that bind only to the local machine (I-14 / D-497).
+# IPv4/IPv6 wildcards (0.0.0.0, ::) are NOT in this set even though uvicorn
+# binds the loopback interface as well — wildcards also accept connections
+# from any peer that can reach a non-loopback interface on the host.
+_LOOPBACK_HOSTS: frozenset[str] = frozenset({"127.0.0.1", "::1", "localhost"})
+
+
+def _is_loopback_host(host: str) -> bool:
+    """Return True if *host* binds only to the local machine.
+
+    Case-insensitive on hostnames; surrounding brackets on IPv6 literals
+    (``[::1]``) are tolerated for consistency with URL forms.
+    """
+    if not host:
+        return False
+    normalised = host.strip().lower()
+    if normalised.startswith("[") and normalised.endswith("]"):
+        normalised = normalised[1:-1]
+    return normalised in _LOOPBACK_HOSTS
+
+
+def _emit_public_bind_warning(host: str, port: int) -> None:
+    """Print a multi-line stderr warning before binding a non-localhost address.
+
+    Operators have requested --allow-public; this is the audit trail that they
+    were told what they are exposing. Keep the wording specific so the warning
+    cannot be confused with a generic "starting up" banner.
+    """
+    banner = "!" * 72
+    click.echo(banner, err=True)
+    click.echo(
+        f"WARNING: binding Salus interface API to {host}:{port} — publicly reachable.",
+        err=True,
+    )
+    click.echo(
+        "  - The API has no authentication. Every endpoint is open to any "
+        "peer that can reach this address.",
+        err=True,
+    )
+    click.echo(
+        "  - POST /api/terrain/load accepts uploads up to 500 MB.",
+        err=True,
+    )
+    click.echo(
+        "  - POST /api/simulate and /api/optimise trigger GB-scale compute and memory use.",
+        err=True,
+    )
+    click.echo(
+        "  - Only enable on a network you fully control (e.g. an isolated lab VLAN).",
+        err=True,
+    )
+    click.echo(banner, err=True)
+
 
 @main.command("interface")
 @click.option(
@@ -2402,6 +2467,17 @@ def viewer(
     help="Bind address for the backend API server.",
 )
 @click.option(
+    "--allow-public",
+    "allow_public",
+    is_flag=True,
+    default=False,
+    help=(
+        "Permit binding to a non-localhost address. The interface API has no "
+        "authentication; setting this flag exposes the unauthenticated "
+        "endpoints to every peer that can reach the bind address."
+    ),
+)
+@click.option(
     "--no-browser",
     "no_browser",
     is_flag=True,
@@ -2412,6 +2488,7 @@ def interface(
     scenario: str | None,
     port: int,
     host: str,
+    allow_public: bool,
     no_browser: bool,
 ) -> None:
     """Start the Salus interactive interface.
@@ -2423,6 +2500,19 @@ def interface(
 
         salus interface --scenario site.yaml --port 5000
     """
+    if not _is_loopback_host(host):
+        if not allow_public:
+            click.echo(
+                f"Error: --host {host!r} is not a loopback address and "
+                "the Salus interface API has no authentication. "
+                "Pass --allow-public to bind a non-localhost address "
+                "(read the warning printed in that mode before exposing "
+                "the service).",
+                err=True,
+            )
+            sys.exit(1)
+        _emit_public_bind_warning(host, port)
+
     try:
         import uvicorn
 

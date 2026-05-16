@@ -21,6 +21,7 @@ from salus.models.sensor import SensorType
 from salus.models.site import SiteModel
 from salus.report.pdf import (
     ReportData,
+    ReportRenderError,
     SimulationResults,
     assemble_report_data,
     generate_executive_summary,
@@ -386,6 +387,243 @@ class TestRenderPdf:
         out = tmp_path / "r.pdf"
         result = render_pdf(report_data, out)
         assert result.is_absolute()
+
+
+# ---------------------------------------------------------------------------
+# Tests: I-16 section-criticality policy (D-496 + D-502)
+# ---------------------------------------------------------------------------
+
+
+class TestSectionCriticality:
+    """Verify the I-16 raise-vs-record-and-omit failure policy.
+
+    Required sections (cover, executive_summary, site_overview,
+    coverage_analysis, gap_analysis, assumptions, appendix_sensors) raise
+    ReportRenderError on template or asset failure.  Optional sections
+    (threat_analysis, kill_chain, saturation) append to section_failures
+    and are omitted from the PDF.
+    """
+
+    def _base_sim(self, flat_dem_path) -> tuple[ScenarioConfig, SimulationResults]:
+        site = _make_site()
+        sc = _make_scenario(flat_dem_path)
+        composite = np.zeros((20, 20), dtype=bool)
+        sim = SimulationResults(
+            site=site,
+            scenario=sc,
+            composite=composite,
+            layer_coverages={SensorType.RF: composite},
+            stats=_make_stats(60.0),
+            sensor_defs=[],
+        )
+        return sc, sim
+
+    def test_section_failures_empty_on_clean_render(self, flat_dem_path):
+        sc, sim = self._base_sim(flat_dem_path)
+        result = assemble_report_data(sc, sim)
+        assert result.section_failures == []
+
+    def test_required_composite_map_failure_raises(self, flat_dem_path, monkeypatch):
+        sc, sim = self._base_sim(flat_dem_path)
+
+        def _boom(*_args, **_kwargs):
+            raise RuntimeError("composite map render exploded")
+
+        monkeypatch.setattr("salus.report.maps.render_composite_coverage_map", _boom)
+        with pytest.raises(ReportRenderError, match="composite_map"):
+            assemble_report_data(sc, sim)
+
+    def test_required_gap_map_failure_raises(self, flat_dem_path, monkeypatch):
+        sc, sim = self._base_sim(flat_dem_path)
+
+        def _boom(*_args, **_kwargs):
+            raise RuntimeError("gap map render exploded")
+
+        monkeypatch.setattr("salus.report.maps.render_gap_map", _boom)
+        with pytest.raises(ReportRenderError, match="gap_analysis.gap_map"):
+            assemble_report_data(sc, sim)
+
+    def test_optional_kill_chain_chart_failure_records(self, flat_dem_path, monkeypatch):
+        """Kill-chain inputs present but chart render fails — record + omit."""
+        from salus.models.scenario import KillChainConfig
+        from salus.models.sensor import EffectorDefinition
+
+        site = _make_site()
+        sc = _make_scenario(flat_dem_path)
+        composite = np.zeros((20, 20), dtype=bool)
+        kcr = _make_kill_chain_result(feasible=True, margin=8.0)
+        effector = EffectorDefinition(
+            name="TestEffector",
+            type="Kinetic",
+            max_range_m=1000.0,
+            engagement_arc_deg=120.0,
+            reaction_time_s=5.0,
+            defeat_probability=0.85,
+            defeat_mechanism="kinetic",
+        )
+        sim = SimulationResults(
+            site=site,
+            scenario=sc,
+            composite=composite,
+            layer_coverages={SensorType.RF: composite},
+            stats=_make_stats(60.0),
+            sensor_defs=[],
+            effector_defs=[effector],
+            corridor_results=[object()],  # truthy; not opened by chart helper
+            kill_chain_results=[kcr],
+            kill_chain_config=KillChainConfig(
+                track_time_s=2.0,
+                identify_time_s=3.0,
+                decide_time_s=2.0,
+                assess_time_s=2.0,
+            ),
+        )
+
+        def _boom(*_args, **_kwargs):
+            raise RuntimeError("chart broke")
+
+        monkeypatch.setattr("salus.report.charts.render_kill_chain_chart", _boom)
+        result = assemble_report_data(sc, sim)
+        assert result.kill_chain_chart_b64 is None
+        assert any(entry.startswith("kill_chain:") for entry in result.section_failures)
+
+    def test_optional_saturation_chart_failure_records(self, flat_dem_path, monkeypatch):
+        site = _make_site()
+        sc = _make_scenario(flat_dem_path)
+        composite = np.zeros((20, 20), dtype=bool)
+        sat = SaturationResult(
+            simultaneous_engagement_capacity=2,
+            saturation_threshold_n=3,
+            unengaged_count_at_threshold=1,
+            per_effector_utilisation={},
+        )
+        sim = SimulationResults(
+            site=site,
+            scenario=sc,
+            composite=composite,
+            layer_coverages={SensorType.RF: composite},
+            stats=_make_stats(60.0),
+            sensor_defs=[],
+            saturation_result=sat,
+            saturation_threshold_data={1: 0, 2: 0, 3: 1, 4: 2},
+        )
+
+        def _boom(*_args, **_kwargs):
+            raise RuntimeError("sat chart broke")
+
+        monkeypatch.setattr("salus.report.charts.render_saturation_threshold_chart", _boom)
+        result = assemble_report_data(sc, sim)
+        assert result.saturation_chart_b64 is None
+        assert any(entry.startswith("saturation:") for entry in result.section_failures)
+
+    def test_per_layer_failure_records_and_continues(self, flat_dem_path, monkeypatch):
+        """One layer map fails — section_failures records it, other layers still render."""
+        site = _make_site()
+        sc = _make_scenario(flat_dem_path)
+        composite = np.zeros((20, 20), dtype=bool)
+        sim = SimulationResults(
+            site=site,
+            scenario=sc,
+            composite=composite,
+            layer_coverages={
+                SensorType.RF: composite,
+                SensorType.Radar: composite,
+            },
+            stats=_make_stats(60.0),
+            sensor_defs=[],
+        )
+
+        from salus.report import maps as _maps
+
+        real_render = _maps.render_composite_coverage_map
+        call_count = {"n": 0}
+
+        def _selective_boom(site_arg, layer_coverages, *args, **kwargs):
+            # First call is the composite map (multi-layer) — let it succeed.
+            # Second call is per-layer for RF — fail it.
+            # Third call is per-layer for RADAR — let it succeed.
+            call_count["n"] += 1
+            if call_count["n"] == 2:
+                raise RuntimeError("RF layer render exploded")
+            return real_render(site_arg, layer_coverages, *args, **kwargs)
+
+        monkeypatch.setattr(_maps, "render_composite_coverage_map", _selective_boom)
+        result = assemble_report_data(sc, sim)
+        # RF failed, RADAR survived
+        assert SensorType.RF.value not in result.layer_maps_b64
+        assert SensorType.Radar.value in result.layer_maps_b64
+        assert any(
+            entry.startswith(f"coverage_analysis.{SensorType.RF.value}:")
+            for entry in result.section_failures
+        )
+
+    def test_required_template_error_raises(self, flat_dem_path, tmp_path):
+        """Syntax error in a REQUIRED template aborts render_pdf with ReportRenderError."""
+        import shutil
+
+        from salus.report.pdf import _DEFAULT_TEMPLATE_DIR
+
+        bad_dir = tmp_path / "bad_templates"
+        shutil.copytree(_DEFAULT_TEMPLATE_DIR, bad_dir)
+        # cover.html is REQUIRED — break it with a Jinja syntax error
+        (bad_dir / "cover.html").write_text("{% if foo %}{# unclosed")
+
+        sc, sim = self._base_sim(flat_dem_path)
+        report_data = assemble_report_data(sc, sim)
+        with pytest.raises(ReportRenderError, match="cover"):
+            render_pdf(report_data, tmp_path / "out.pdf", template_dir=bad_dir)
+
+    def test_optional_template_not_found_records(self, flat_dem_path, tmp_path):
+        """Missing OPTIONAL template — record in section_failures and continue."""
+        import shutil
+
+        from salus.models.scenario import KillChainConfig
+        from salus.models.sensor import EffectorDefinition
+        from salus.report.pdf import _DEFAULT_TEMPLATE_DIR
+
+        partial_dir = tmp_path / "partial_templates"
+        shutil.copytree(_DEFAULT_TEMPLATE_DIR, partial_dir)
+        # Remove the kill_chain template (OPTIONAL)
+        (partial_dir / "kill_chain.html").unlink()
+
+        # Build a sim with kill_chain data so the section would be included
+        site = _make_site()
+        sc = _make_scenario(flat_dem_path)
+        composite = np.zeros((20, 20), dtype=bool)
+        kcr = _make_kill_chain_result(feasible=True, margin=8.0)
+        effector = EffectorDefinition(
+            name="TestEffector",
+            type="Kinetic",
+            max_range_m=1000.0,
+            engagement_arc_deg=120.0,
+            reaction_time_s=5.0,
+            defeat_probability=0.85,
+            defeat_mechanism="kinetic",
+        )
+        sim = SimulationResults(
+            site=site,
+            scenario=sc,
+            composite=composite,
+            layer_coverages={SensorType.RF: composite},
+            stats=_make_stats(60.0),
+            sensor_defs=[],
+            effector_defs=[effector],
+            corridor_results=[object()],
+            kill_chain_results=[kcr],
+            kill_chain_config=KillChainConfig(
+                track_time_s=2.0,
+                identify_time_s=3.0,
+                decide_time_s=2.0,
+                assess_time_s=2.0,
+            ),
+        )
+        report_data = assemble_report_data(sc, sim)
+        out = tmp_path / "partial_report.pdf"
+        result_path = render_pdf(report_data, out, template_dir=partial_dir)
+        # PDF still produced
+        assert result_path.exists()
+        # And the failure was recorded
+        assert any(entry.startswith("kill_chain:") for entry in report_data.section_failures)
 
 
 # ---------------------------------------------------------------------------

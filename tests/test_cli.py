@@ -1068,3 +1068,137 @@ class TestSimulateCommandS66Adversarial:
         )
         assert result.exit_code == 0, result.output
         assert "waypoints" in result.output
+
+
+# ---------------------------------------------------------------------------
+# I-14 / D-497: salus interface --allow-public guard
+# ---------------------------------------------------------------------------
+
+
+class TestInterfaceHostGuard:
+    """The ``salus interface`` command must refuse non-loopback binds unless
+    --allow-public is set, and must print a multi-line warning when it is."""
+
+    def test_default_host_starts_uvicorn(self, monkeypatch):
+        """Default --host (127.0.0.1) must invoke uvicorn.run without warnings."""
+        recorded: dict[str, object] = {}
+
+        def fake_run(app, **kwargs):
+            recorded["host"] = kwargs.get("host")
+            recorded["port"] = kwargs.get("port")
+
+        import uvicorn
+
+        monkeypatch.setattr(uvicorn, "run", fake_run)
+        runner = CliRunner()
+        result = runner.invoke(main, ["interface", "--no-browser"])
+        assert result.exit_code == 0, result.output
+        assert recorded["host"] == "127.0.0.1"
+        # No public-bind warning banner (click 8.2+: stderr is in result.output).
+        assert "no authentication" not in result.output
+
+    def test_loopback_v6_starts_uvicorn(self, monkeypatch):
+        """--host ::1 is treated as loopback and starts without --allow-public."""
+        recorded: dict[str, object] = {}
+
+        def fake_run(app, **kwargs):
+            recorded["host"] = kwargs.get("host")
+
+        import uvicorn
+
+        monkeypatch.setattr(uvicorn, "run", fake_run)
+        runner = CliRunner()
+        result = runner.invoke(main, ["interface", "--no-browser", "--host", "::1"])
+        assert result.exit_code == 0, result.output
+        assert recorded["host"] == "::1"
+
+    def test_localhost_alias_starts_uvicorn(self, monkeypatch):
+        """--host localhost is treated as loopback and starts without --allow-public."""
+        recorded: dict[str, object] = {}
+
+        def fake_run(app, **kwargs):
+            recorded["host"] = kwargs.get("host")
+
+        import uvicorn
+
+        monkeypatch.setattr(uvicorn, "run", fake_run)
+        runner = CliRunner()
+        result = runner.invoke(main, ["interface", "--no-browser", "--host", "localhost"])
+        assert result.exit_code == 0, result.output
+        assert recorded["host"] == "localhost"
+
+    def test_wildcard_host_without_allow_public_refused(self, monkeypatch):
+        """--host 0.0.0.0 without --allow-public must exit non-zero before uvicorn."""
+        called = {"ran": False}
+
+        def fake_run(app, **kwargs):
+            called["ran"] = True
+
+        import uvicorn
+
+        monkeypatch.setattr(uvicorn, "run", fake_run)
+        runner = CliRunner()
+        result = runner.invoke(main, ["interface", "--no-browser", "--host", "0.0.0.0"])
+        assert result.exit_code != 0
+        assert called["ran"] is False, "uvicorn must not start without --allow-public"
+        assert "--allow-public" in result.output
+
+    def test_external_address_without_allow_public_refused(self, monkeypatch):
+        """A public-looking IP without --allow-public must be refused."""
+        called = {"ran": False}
+
+        def fake_run(app, **kwargs):
+            called["ran"] = True
+
+        import uvicorn
+
+        monkeypatch.setattr(uvicorn, "run", fake_run)
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            ["interface", "--no-browser", "--host", "192.168.1.10"],
+        )
+        assert result.exit_code != 0
+        assert called["ran"] is False
+        assert "--allow-public" in result.output
+
+    def test_allow_public_emits_warning_and_starts(self, monkeypatch):
+        """With --allow-public, a non-loopback bind starts but emits the warning block."""
+        recorded: dict[str, object] = {}
+
+        def fake_run(app, **kwargs):
+            recorded["host"] = kwargs.get("host")
+            recorded["port"] = kwargs.get("port")
+
+        import uvicorn
+
+        monkeypatch.setattr(uvicorn, "run", fake_run)
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "interface",
+                "--no-browser",
+                "--host",
+                "192.168.1.10",
+                "--port",
+                "5000",
+                "--allow-public",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert recorded["host"] == "192.168.1.10"
+        assert recorded["port"] == 5000
+        # I-14 acceptance criterion (2) — specific phrases that prove the
+        # warning was emitted (so reordering / paraphrasing the banner is a
+        # visible regression).
+        assert "no authentication" in result.output
+        assert "500 MB" in result.output
+        assert "GB-scale" in result.output
+
+    def test_help_lists_allow_public(self):
+        """--help for the interface command must document the new flag."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["interface", "--help"])
+        assert result.exit_code == 0
+        assert "--allow-public" in result.output
