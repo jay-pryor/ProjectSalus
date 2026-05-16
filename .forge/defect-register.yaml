@@ -3200,654 +3200,654 @@ defects:
     resolution: "Decision documented in sanitise.py comment: sensor_type and azimuth_coverage_deg are model-level properties (publicly knowable from the sensor model spec), not deployment-level. bearing_deg is the tactically sensitive field and remains stripped."
     status: resolved
     commit: bb90cf1
-- id: D-291
-  severity: high
-  task: I-5
-  found_by: silent_failure_hunter
-  file: src/salus/viewer/static/app.js
-  line: 958
-  description: "map.dragPan.disable() in _addRotateHandle is not re-enabled if browser loses focus mid-drag (Alt+Tab, context menu, etc.). The mouseup event fires on document but window blur/contextmenu events are not handled, so dragPan stays disabled permanently after focus loss."
-  resolution: "Added window 'blur' and document 'contextmenu' listeners (both once:true) that call onUp, guaranteeing dragPan.enable() fires on focus loss or right-click interrupt."
-  status: resolved
-  commit: 4f966f5
+  - id: D-291
+    severity: high
+    task: I-5
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/static/app.js
+    line: 958
+    description: "map.dragPan.disable() in _addRotateHandle is not re-enabled if browser loses focus mid-drag (Alt+Tab, context menu, etc.). The mouseup event fires on document but window blur/contextmenu events are not handled, so dragPan stays disabled permanently after focus loss."
+    resolution: "Added window 'blur' and document 'contextmenu' listeners (both once:true) that call onUp, guaranteeing dragPan.enable() fires on focus loss or right-click interrupt."
+    status: resolved
+    commit: 4f966f5
 
-- id: D-292
-  severity: medium
-  task: I-5
-  found_by: silent_failure_hunter
-  file: src/salus/viewer/static/app.js
-  line: 1018
-  description: "document.getElementById('map') in initLibraryPanel returns null if element is absent. The null result is passed directly to dragover/drop addEventListener calls without a null guard, causing a TypeError at runtime."
-  resolution: "Added 'if (!mapEl) return;' guard immediately after getElementById call."
-  status: resolved
-  commit: 4f966f5
+  - id: D-292
+    severity: medium
+    task: I-5
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/static/app.js
+    line: 1018
+    description: "document.getElementById('map') in initLibraryPanel returns null if element is absent. The null result is passed directly to dragover/drop addEventListener calls without a null guard, causing a TypeError at runtime."
+    resolution: "Added 'if (!mapEl) return;' guard immediately after getElementById call."
+    status: resolved
+    commit: 4f966f5
 
-- id: D-293
-  severity: medium
-  task: I-5
-  found_by: silent_failure_hunter
-  file: src/salus/viewer/export.py
-  line: 755
-  description: "except Exception in _load_sensor_library is too broad. Catches programming errors (AttributeError, TypeError) masking real bugs. Should be narrowed to yaml.YAMLError, OSError, UnicodeDecodeError."
-  resolution: "Changed catch clause to 'except (yaml.YAMLError, OSError, UnicodeDecodeError)'."
-  status: resolved
-  commit: 4f966f5
+  - id: D-293
+    severity: medium
+    task: I-5
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/export.py
+    line: 755
+    description: "except Exception in _load_sensor_library is too broad. Catches programming errors (AttributeError, TypeError) masking real bugs. Should be narrowed to yaml.YAMLError, OSError, UnicodeDecodeError."
+    resolution: "Changed catch clause to 'except (yaml.YAMLError, OSError, UnicodeDecodeError)'."
+    status: resolved
+    commit: 4f966f5
 
-- id: D-294
-  severity: medium
-  task: I-5
-  found_by: silent_failure_hunter
-  file: src/salus/viewer/static/app.js
-  line: 1133
-  description: "Malformed library YAML items (missing name or type fields) silently render as a grey '?' badge with no console warning, making it impossible to diagnose corrupt or incomplete library entries during development."
-  resolution: "Added console.warn at start of _makeLibraryEntry when item.name or item.type is missing."
-  status: resolved
-  commit: 4f966f5
+  - id: D-294
+    severity: medium
+    task: I-5
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/static/app.js
+    line: 1133
+    description: "Malformed library YAML items (missing name or type fields) silently render as a grey '?' badge with no console warning, making it impossible to diagnose corrupt or incomplete library entries during development."
+    resolution: "Added console.warn at start of _makeLibraryEntry when item.name or item.type is missing."
+    status: resolved
+    commit: 4f966f5
 
-- id: D-295
-  severity: medium
-  task: I-5
-  found_by: spec_compliance
-  file: src/salus/viewer/static/app.js
-  line: 1010
-  description: "Criterion 2 (scroll position preserved on panel open/close) not met. Panel uses display:none toggle which resets scrollTop to 0 each time it is re-opened. No save/restore logic present."
-  resolution: "Extracted openPanel/closePanel helpers. closePanel saves panelBody.scrollTop; openPanel restores it before removing 'hidden' class."
-  status: resolved
-  commit: 4f966f5
+  - id: D-295
+    severity: medium
+    task: I-5
+    found_by: spec_compliance
+    file: src/salus/viewer/static/app.js
+    line: 1010
+    description: "Criterion 2 (scroll position preserved on panel open/close) not met. Panel uses display:none toggle which resets scrollTop to 0 each time it is re-opened. No save/restore logic present."
+    resolution: "Extracted openPanel/closePanel helpers. closePanel saves panelBody.scrollTop; openPanel restores it before removing 'hidden' class."
+    status: resolved
+    commit: 4f966f5
 
-- id: D-296
-  severity: low
-  task: I-5
-  found_by: silent_failure_hunter
-  file: src/salus/viewer/export.py
-  line: 764
-  description: "str(entry.get('type', 'Unknown')) returns the string 'None' when YAML has 'type: null'. Should use 'entry.get(\"type\") or \"Unknown\"' to coerce None to 'Unknown'."
-  resolution: "Changed to 'str(entry.get(\"type\") or \"Unknown\")' so type:null maps to 'Unknown' not 'None'."
-  status: resolved
-  commit: 4f966f5
+  - id: D-296
+    severity: low
+    task: I-5
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/export.py
+    line: 764
+    description: "str(entry.get('type', 'Unknown')) returns the string 'None' when YAML has 'type: null'. Should use 'entry.get(\"type\") or \"Unknown\"' to coerce None to 'Unknown'."
+    resolution: "Changed to 'str(entry.get(\"type\") or \"Unknown\")' so type:null maps to 'Unknown' not 'None'."
+    status: resolved
+    commit: 4f966f5
 
-- id: D-297
-  severity: low
-  task: I-5
-  found_by: silent_failure_hunter
-  file: src/salus/viewer/static/app.js
-  line: 907
-  description: "Division by Math.cos(lat * Math.PI / 180) in bearing-line coordinate calculations produces Infinity at lat=±90. Cosmetic defect only as no real deployment site is at a geographic pole."
-  resolution: "Accepted as won't-fix for now — no real deployment site exists at lat=±90. Documented as known limitation."
-  status: resolved
-  commit: 4f966f5
+  - id: D-297
+    severity: low
+    task: I-5
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/static/app.js
+    line: 907
+    description: "Division by Math.cos(lat * Math.PI / 180) in bearing-line coordinate calculations produces Infinity at lat=±90. Cosmetic defect only as no real deployment site is at a geographic pole."
+    resolution: "Accepted as won't-fix for now — no real deployment site exists at lat=±90. Documented as known limitation."
+    status: resolved
+    commit: 4f966f5
 
-- id: D-298
-  severity: high
-  task: 14.1
-  found_by: silent_failure_hunter
-  file: src/salus/viewer/interface/mode-manager.js
-  line: 80
-  description: "activateModule() is async but button click handlers call it fire-and-forget (no await, no .catch()). Any loadModule() rejection or mod.init() throw is silently dropped. activeModuleId is updated before the await, so state appears to advance even if the module never mounts."
-  resolution: "All click handler call sites now chain .catch() with console.error logging. activateModule itself has a try/catch around the async loadModule/init block."
-  status: resolved
-  commit: 5743ffc
+  - id: D-298
+    severity: high
+    task: 14.1
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/mode-manager.js
+    line: 80
+    description: "activateModule() is async but button click handlers call it fire-and-forget (no await, no .catch()). Any loadModule() rejection or mod.init() throw is silently dropped. activeModuleId is updated before the await, so state appears to advance even if the module never mounts."
+    resolution: "All click handler call sites now chain .catch() with console.error logging. activateModule itself has a try/catch around the async loadModule/init block."
+    status: resolved
+    commit: 5743ffc
 
-- id: D-299
-  severity: high
-  task: 14.1
-  found_by: silent_failure_hunter
-  file: src/salus/viewer/interface/mode-manager.js
-  line: 84
-  description: "mod.init(entry.api) is called without verifying mod is non-null and mod.init is a function. If dynamic import resolves without an init export, TypeError is silently dropped (see D-298)."
-  resolution: "Added guard: if (!mod || typeof mod.init !== 'function') throw descriptive Error before calling init."
-  status: resolved
-  commit: 5743ffc
+  - id: D-299
+    severity: high
+    task: 14.1
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/mode-manager.js
+    line: 84
+    description: "mod.init(entry.api) is called without verifying mod is non-null and mod.init is a function. If dynamic import resolves without an init export, TypeError is silently dropped (see D-298)."
+    resolution: "Added guard: if (!mod || typeof mod.init !== 'function') throw descriptive Error before calling init."
+    status: resolved
+    commit: 5743ffc
 
-- id: D-300
-  severity: high
-  task: 14.1
-  found_by: silent_failure_hunter
-  file: src/salus/viewer/interface/mode-manager.js
-  line: 61
-  description: "current.runUnmount() is called without try/catch. An exception from runUnmount would propagate and partially abort activateModule mid-flight — activeModuleId not yet updated at that point."
-  resolution: "Wrapped current.runUnmount() in try/catch that logs the error and continues activation."
-  status: resolved
-  commit: 5743ffc
+  - id: D-300
+    severity: high
+    task: 14.1
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/mode-manager.js
+    line: 61
+    description: "current.runUnmount() is called without try/catch. An exception from runUnmount would propagate and partially abort activateModule mid-flight — activeModuleId not yet updated at that point."
+    resolution: "Wrapped current.runUnmount() in try/catch that logs the error and continues activation."
+    status: resolved
+    commit: 5743ffc
 
-- id: D-301
-  severity: high
-  task: 14.1
-  found_by: spec_compliance
-  file: src/salus/viewer/interface/mode-manager.js
-  line: 22
-  description: "createModeManager signature mismatch: spec requires (container, state, bus, moduleRegistry); implementation has (navContainer, panelSlot, state, moduleRegistry, _doc) — bus is absent. Mode manager cannot emit/subscribe shell-level lifecycle events."
-  resolution: "Added bus as 4th parameter (navContainer, panelSlot, state, bus, moduleRegistry, _doc). Updated shell.js call site. All tests updated."
-  status: resolved
-  commit: 5743ffc
+  - id: D-301
+    severity: high
+    task: 14.1
+    found_by: spec_compliance
+    file: src/salus/viewer/interface/mode-manager.js
+    line: 22
+    description: "createModeManager signature mismatch: spec requires (container, state, bus, moduleRegistry); implementation has (navContainer, panelSlot, state, moduleRegistry, _doc) — bus is absent. Mode manager cannot emit/subscribe shell-level lifecycle events."
+    resolution: "Added bus as 4th parameter (navContainer, panelSlot, state, bus, moduleRegistry, _doc). Updated shell.js call site. All tests updated."
+    status: resolved
+    commit: 5743ffc
 
-- id: D-302
-  severity: high
-  task: 14.1
-  found_by: spec_compliance
-  file: src/salus/viewer/interface/mode-manager.js
-  line: 97
-  description: "Icon rendering from manifest.icon is not implemented. Nav buttons show label text only; manifest.icon field is never read."
-  resolution: "Added icon rendering: when manifest.icon is set, button contains a <span class=nav-icon> with the icon value and a <span> with the label text."
-  status: resolved
-  commit: 5743ffc
+  - id: D-302
+    severity: high
+    task: 14.1
+    found_by: spec_compliance
+    file: src/salus/viewer/interface/mode-manager.js
+    line: 97
+    description: "Icon rendering from manifest.icon is not implemented. Nav buttons show label text only; manifest.icon field is never read."
+    resolution: "Added icon rendering: when manifest.icon is set, button contains a <span class=nav-icon> with the icon value and a <span> with the label text."
+    status: resolved
+    commit: 5743ffc
 
-- id: D-303
-  severity: medium
-  task: 14.1
-  found_by: silent_failure_hunter
-  file: src/salus/viewer/interface/mode-manager.js
-  line: 80
-  description: "initialised.add(moduleId) called BEFORE await entry.loadModule(). If loadModule rejects or init throws, the module ID stays in the Set and can never be re-activated in the session — permanently silently broken."
-  resolution: "Moved initialised.add(moduleId) to after mod.init() returns successfully (inside the try block, after init call). Failed loads are not added to the Set so retries work."
-  status: resolved
-  commit: 5743ffc
+  - id: D-303
+    severity: medium
+    task: 14.1
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/mode-manager.js
+    line: 80
+    description: "initialised.add(moduleId) called BEFORE await entry.loadModule(). If loadModule rejects or init throws, the module ID stays in the Set and can never be re-activated in the session — permanently silently broken."
+    resolution: "Moved initialised.add(moduleId) to after mod.init() returns successfully (inside the try block, after init call). Failed loads are not added to the Set so retries work."
+    status: resolved
+    commit: 5743ffc
 
-- id: D-304
-  severity: medium
-  task: 14.1
-  found_by: silent_failure_hunter
-  file: src/salus/viewer/interface/mode-manager.js
-  line: 123
-  description: "Back button click handler calls activateModule(prev) without .catch(). Same silent-drop path as D-298 for backward navigation."
-  resolution: "Added .catch(err => console.error('[mode-manager] Back navigation error:', err)) to activateModule call in Back button handler."
-  status: resolved
-  commit: 5743ffc
+  - id: D-304
+    severity: medium
+    task: 14.1
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/mode-manager.js
+    line: 123
+    description: "Back button click handler calls activateModule(prev) without .catch(). Same silent-drop path as D-298 for backward navigation."
+    resolution: "Added .catch(err => console.error('[mode-manager] Back navigation error:', err)) to activateModule call in Back button handler."
+    status: resolved
+    commit: 5743ffc
 
-- id: D-305
-  severity: medium
-  task: 14.1
-  found_by: silent_failure_hunter
-  file: src/salus/viewer/interface/registry.js
-  line: 247
-  description: "resp.json() result not validated as a non-null, non-array object before pushing to rawManifests. A manifest.json file containing valid JSON but wrong type (array, string, null) produces misleading validation errors instead of a clear type error."
-  resolution: "Added guard after resp.json(): skip with clear warning if manifest is null, array, or non-object type."
-  status: resolved
-  commit: 5743ffc
+  - id: D-305
+    severity: medium
+    task: 14.1
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/registry.js
+    line: 247
+    description: "resp.json() result not validated as a non-null, non-array object before pushing to rawManifests. A manifest.json file containing valid JSON but wrong type (array, string, null) produces misleading validation errors instead of a clear type error."
+    resolution: "Added guard after resp.json(): skip with clear warning if manifest is null, array, or non-object type."
+    status: resolved
+    commit: 5743ffc
 
-- id: D-306
-  severity: medium
-  task: 14.1
-  found_by: silent_failure_hunter
-  file: src/salus/viewer/interface/registry.js
-  line: 327
-  description: "panel.mount(element) has no guard on the element argument. api.panel.mount(null) throws an unhandled TypeError that propagates silently (given D-298)."
-  resolution: "Added guard: throws TypeError with clear message if element is null, undefined, or not a DOM node (nodeType check)."
-  status: resolved
-  commit: 5743ffc
+  - id: D-306
+    severity: medium
+    task: 14.1
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/registry.js
+    line: 327
+    description: "panel.mount(element) has no guard on the element argument. api.panel.mount(null) throws an unhandled TypeError that propagates silently (given D-298)."
+    resolution: "Added guard: throws TypeError with clear message if element is null, undefined, or not a DOM node (nodeType check)."
+    status: resolved
+    commit: 5743ffc
 
-- id: D-307
-  severity: medium
-  task: 14.1
-  found_by: module_architecture_reviewer
-  file: src/salus/viewer/interface/shell.js
-  line: 106
-  description: "window._salusShell exposes raw state (setState/getState with no contract checks) and raw bus (emit any event) on the global. Any module can call window._salusShell.state.setState(key, value) to bypass all contract enforcement."
-  resolution: "Replaced raw state/bus exposure with narrow handle: only emitScenario(), onScenario(), and activateModule() are exposed — no direct state or bus access."
-  status: resolved
-  commit: 5743ffc
+  - id: D-307
+    severity: medium
+    task: 14.1
+    found_by: module_architecture_reviewer
+    file: src/salus/viewer/interface/shell.js
+    line: 106
+    description: "window._salusShell exposes raw state (setState/getState with no contract checks) and raw bus (emit any event) on the global. Any module can call window._salusShell.state.setState(key, value) to bypass all contract enforcement."
+    resolution: "Replaced raw state/bus exposure with narrow handle: only emitScenario(), onScenario(), and activateModule() are exposed — no direct state or bus access."
+    status: resolved
+    commit: 5743ffc
 
-- id: D-308
-  severity: high
-  task: S14.2
-  found_by: silent_failure_hunter
-  file: src/salus/interface_api/app.py
-  line: 97
-  description: "_get_sensor_defs() swallows load_sensors() exception and returns [], causing all sensor placements to be silently skipped and a 0% complete event emitted with no error indication."
-  resolution: "Removed _sensor_cache=[] from except block; now returns [] uncached so next request retries. Added effector_defs assignment and empty-library warning in simulate pipeline."
-  status: resolved
-  commit: "004e888"
+  - id: D-308
+    severity: high
+    task: S14.2
+    found_by: silent_failure_hunter
+    file: src/salus/interface_api/app.py
+    line: 97
+    description: "_get_sensor_defs() swallows load_sensors() exception and returns [], causing all sensor placements to be silently skipped and a 0% complete event emitted with no error indication."
+    resolution: "Removed _sensor_cache=[] from except block; now returns [] uncached so next request retries. Added effector_defs assignment and empty-library warning in simulate pipeline."
+    status: resolved
+    commit: "004e888"
 
-- id: D-309
-  severity: high
-  task: S14.2
-  found_by: silent_failure_hunter
-  file: src/salus/interface_api/app.py
-  line: 97
-  description: "On load failure, _sensor_cache and _effector_cache are set to [] — permanently caching the error state for the process lifetime so subsequent requests never retry the real directory."
-  resolution: "Cache assignment moved to after successful load only. On exception, return [] without caching so transient errors are retried on next request."
-  status: resolved
-  commit: "004e888"
+  - id: D-309
+    severity: high
+    task: S14.2
+    found_by: silent_failure_hunter
+    file: src/salus/interface_api/app.py
+    line: 97
+    description: "On load failure, _sensor_cache and _effector_cache are set to [] — permanently caching the error state for the process lifetime so subsequent requests never retry the real directory."
+    resolution: "Cache assignment moved to after successful load only. On exception, return [] without caching so transient errors are retried on next request."
+    status: resolved
+    commit: "004e888"
 
-- id: D-310
-  severity: high
-  task: S14.2
-  found_by: silent_failure_hunter
-  file: src/salus/interface_api/app.py
-  line: 160
-  description: "_drain_queue blocks forever if the worker thread exits without pushing a terminal event (e.g. killed by BaseException), holding the HTTP connection open indefinitely."
-  resolution: "Added _queue_get_with_timeout() helper using q.get(timeout=_QUEUE_TIMEOUT_S); on queue.Empty emits an error SSE event and terminates the generator."
-  status: resolved
-  commit: "004e888"
+  - id: D-310
+    severity: high
+    task: S14.2
+    found_by: silent_failure_hunter
+    file: src/salus/interface_api/app.py
+    line: 160
+    description: "_drain_queue blocks forever if the worker thread exits without pushing a terminal event (e.g. killed by BaseException), holding the HTTP connection open indefinitely."
+    resolution: "Added _queue_get_with_timeout() helper using q.get(timeout=_QUEUE_TIMEOUT_S); on queue.Empty emits an error SSE event and terminates the generator."
+    status: resolved
+    commit: "004e888"
 
-- id: D-311
-  severity: medium
-  task: S14.2
-  found_by: silent_failure_hunter
-  file: src/salus/interface_api/app.py
-  line: 192
-  description: "_get_effector_defs() return value discarded in _run_simulate_pipeline — missing assignment prevents observability when effector library is empty."
-  resolution: "Added effector_defs = _get_effector_defs() with explicit warning log when list is empty."
-  status: resolved
-  commit: "004e888"
+  - id: D-311
+    severity: medium
+    task: S14.2
+    found_by: silent_failure_hunter
+    file: src/salus/interface_api/app.py
+    line: 192
+    description: "_get_effector_defs() return value discarded in _run_simulate_pipeline — missing assignment prevents observability when effector library is empty."
+    resolution: "Added effector_defs = _get_effector_defs() with explicit warning log when list is empty."
+    status: resolved
+    commit: "004e888"
 
-- id: D-312
-  severity: medium
-  task: S14.2
-  found_by: silent_failure_hunter
-  file: src/salus/interface_api/app.py
-  line: 245
-  description: "Inline tempfile block for gap map can raise NameError in finally clause if NamedTemporaryFile constructor itself raises, masking the original OSError."
-  resolution: "Replaced inline tempfile block with _render_to_b64_api() call for gap map (same helper already used for other maps). _render_to_b64_api initialises tmp_path=None before the try block."
-  status: resolved
-  commit: "004e888"
+  - id: D-312
+    severity: medium
+    task: S14.2
+    found_by: silent_failure_hunter
+    file: src/salus/interface_api/app.py
+    line: 245
+    description: "Inline tempfile block for gap map can raise NameError in finally clause if NamedTemporaryFile constructor itself raises, masking the original OSError."
+    resolution: "Replaced inline tempfile block with _render_to_b64_api() call for gap map (same helper already used for other maps). _render_to_b64_api initialises tmp_path=None before the try block."
+    status: resolved
+    commit: "004e888"
 
-- id: D-313
-  severity: high
-  task: S14.2
-  found_by: spec_compliance
-  file: src/salus/interface_api/app.py
-  line: 104
-  description: "OptimiserRequest uses field names (site_dem_path, sensors_to_place, etc.) that do not match spec-defined names (zones, constraints, sensor_library_filter, effector_library_filter, terrain)."
-  resolution: "Redesigned OptimiserRequest with spec-defined field names: terrain, sensor_library_filter, effector_library_filter, zones, constraints (nested OptimiserConstraints model). Updated _run_optimise_pipeline and tests accordingly."
-  status: resolved
-  commit: "004e888"
+  - id: D-313
+    severity: high
+    task: S14.2
+    found_by: spec_compliance
+    file: src/salus/interface_api/app.py
+    line: 104
+    description: "OptimiserRequest uses field names (site_dem_path, sensors_to_place, etc.) that do not match spec-defined names (zones, constraints, sensor_library_filter, effector_library_filter, terrain)."
+    resolution: "Redesigned OptimiserRequest with spec-defined field names: terrain, sensor_library_filter, effector_library_filter, zones, constraints (nested OptimiserConstraints model). Updated _run_optimise_pipeline and tests accordingly."
+    status: resolved
+    commit: "004e888"
 
-- id: D-314
-  severity: high
-  task: S14.2
-  found_by: spec_compliance
-  file: src/salus/interface_api/app.py
-  line: 134
-  description: "ReportRequest uses field name 'scenario' where spec requires 'report_config'."
-  resolution: "Renamed 'scenario' field to 'report_config' in ReportRequest. Updated /api/report endpoint and tests to use new field name."
-  status: resolved
-  commit: "004e888"
+  - id: D-314
+    severity: high
+    task: S14.2
+    found_by: spec_compliance
+    file: src/salus/interface_api/app.py
+    line: 134
+    description: "ReportRequest uses field name 'scenario' where spec requires 'report_config'."
+    resolution: "Renamed 'scenario' field to 'report_config' in ReportRequest. Updated /api/report endpoint and tests to use new field name."
+    status: resolved
+    commit: "004e888"
 
-- id: D-315
-  severity: medium
-  task: S14.4
-  found_by: module_architecture_reviewer
-  file: src/salus/viewer/interface/modules/library-browser/index.js
-  line: 107
-  description: "document.addEventListener('keydown', ...) attaches listener to global document, violating module isolation (MUST rule 2). Intercepts keystrokes regardless of active module; conflicts with any other module that also handles Escape on document."
-  resolution: "Changed document.addEventListener/removeEventListener('keydown') to api.map.getCanvas().addEventListener/removeEventListener — scopes Escape listener to map canvas, preserving module isolation."
-  status: resolved
-  commit: "68e8798"
+  - id: D-315
+    severity: medium
+    task: S14.4
+    found_by: module_architecture_reviewer
+    file: src/salus/viewer/interface/modules/library-browser/index.js
+    line: 107
+    description: "document.addEventListener('keydown', ...) attaches listener to global document, violating module isolation (MUST rule 2). Intercepts keystrokes regardless of active module; conflicts with any other module that also handles Escape on document."
+    resolution: "Changed document.addEventListener/removeEventListener('keydown') to api.map.getCanvas().addEventListener/removeEventListener — scopes Escape listener to map canvas, preserving module isolation."
+    status: resolved
+    commit: "68e8798"
 
-- id: D-316
-  severity: high
-  task: S14.4
-  found_by: silent_failure_hunter
-  file: src/salus/viewer/interface/modules/library-browser/index.js
-  line: 310
-  description: "e.dataTransfer not null-checked in dragstart handler. draggingDef is assigned before accessing dataTransfer, leaving module in half-initialised drag state if dataTransfer is absent; subsequent drop silently places sensor using stale draggingDef."
-  resolution: "Added `if (!e.dataTransfer) { draggingDef = null; return; }` guard at top of dragstart handler to prevent half-initialised drag state."
-  status: resolved
-  commit: "68e8798"
+  - id: D-316
+    severity: high
+    task: S14.4
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/library-browser/index.js
+    line: 310
+    description: "e.dataTransfer not null-checked in dragstart handler. draggingDef is assigned before accessing dataTransfer, leaving module in half-initialised drag state if dataTransfer is absent; subsequent drop silently places sensor using stale draggingDef."
+    resolution: "Added `if (!e.dataTransfer) { draggingDef = null; return; }` guard at top of dragstart handler to prevent half-initialised drag state."
+    status: resolved
+    commit: "68e8798"
 
-- id: D-317
-  severity: high
-  task: S14.4
-  found_by: silent_failure_hunter
-  file: src/salus/viewer/interface/modules/library-browser/index.js
-  line: 254
-  description: "api.map.unproject() return value not null-checked in _onMapClick (click-to-place). If unproject returns undefined the placement event is silently swallowed."
-  resolution: "Added null-check on api.map.unproject() return value in _onMapClick; returns early if null to prevent swallowed placement."
-  status: resolved
-  commit: "68e8798"
+  - id: D-317
+    severity: high
+    task: S14.4
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/library-browser/index.js
+    line: 254
+    description: "api.map.unproject() return value not null-checked in _onMapClick (click-to-place). If unproject returns undefined the placement event is silently swallowed."
+    resolution: "Added null-check on api.map.unproject() return value in _onMapClick; returns early if null to prevent swallowed placement."
+    status: resolved
+    commit: "68e8798"
 
-- id: D-318
-  severity: high
-  task: S14.4
-  found_by: silent_failure_hunter
-  file: src/salus/viewer/interface/modules/library-browser/index.js
-  line: 287
-  description: "api.map.unproject() return value not null-checked in _onDragOver. Ghost marker silently freezes at last position if unproject returns undefined."
-  resolution: "Added null-check on api.map.unproject() return value in _onDragOver; returns early if null rather than freezing ghost."
-  status: resolved
-  commit: "68e8798"
+  - id: D-318
+    severity: high
+    task: S14.4
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/library-browser/index.js
+    line: 287
+    description: "api.map.unproject() return value not null-checked in _onDragOver. Ghost marker silently freezes at last position if unproject returns undefined."
+    resolution: "Added null-check on api.map.unproject() return value in _onDragOver; returns early if null rather than freezing ghost."
+    status: resolved
+    commit: "68e8798"
 
-- id: D-319
-  severity: high
-  task: S14.4
-  found_by: silent_failure_hunter
-  file: src/salus/viewer/interface/modules/library-browser/index.js
-  line: 297
-  description: "api.map.unproject() return value not null-checked in _onDrop. If unproject returns undefined, placement:pending is emitted with lat/lng = undefined, silently injecting malformed placement coordinates into downstream simulation."
-  resolution: "Added null-check on api.map.unproject() return value in _onDrop; returns early if null to prevent emitting placement:pending with undefined coordinates."
-  status: resolved
-  commit: "68e8798"
+  - id: D-319
+    severity: high
+    task: S14.4
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/library-browser/index.js
+    line: 297
+    description: "api.map.unproject() return value not null-checked in _onDrop. If unproject returns undefined, placement:pending is emitted with lat/lng = undefined, silently injecting malformed placement coordinates into downstream simulation."
+    resolution: "Added null-check on api.map.unproject() return value in _onDrop; returns early if null to prevent emitting placement:pending with undefined coordinates."
+    status: resolved
+    commit: "68e8798"
 
-- id: D-320
-  severity: medium
-  task: S14.4
-  found_by: silent_failure_hunter
-  file: src/salus/viewer/interface/modules/library-browser/index.js
-  line: 140
-  description: "_buildGroupedEntries null guard does not cover case where libraryDict is an Array or non-object scalar. Malformed API response silently produces empty panel with no warning."
-  resolution: "Added Array.isArray and typeof check in _buildGroupedEntries before Object.entries() call; logs console.warn and returns empty on unexpected format."
-  status: resolved
-  commit: "68e8798"
+  - id: D-320
+    severity: medium
+    task: S14.4
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/library-browser/index.js
+    line: 140
+    description: "_buildGroupedEntries null guard does not cover case where libraryDict is an Array or non-object scalar. Malformed API response silently produces empty panel with no warning."
+    resolution: "Added Array.isArray and typeof check in _buildGroupedEntries before Object.entries() call; logs console.warn and returns empty on unexpected format."
+    status: resolved
+    commit: "68e8798"
 
-- id: D-321
-  severity: medium
-  task: S14.4
-  found_by: silent_failure_hunter
-  file: src/salus/viewer/interface/modules/library-browser/index.js
-  line: 361
-  description: "api.state.get() called for sibling key inside watch() callback. Under async state (multi-user), the get() may return stale sibling value when both libraries are updated in rapid succession, causing panel to render mismatched data silently."
-  resolution: "Replaced cross-key get() calls in watch() callbacks with local mirror variables (latestSensors, latestEffectors) updated by each respective watcher."
-  status: resolved
-  commit: "68e8798"
+  - id: D-321
+    severity: medium
+    task: S14.4
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/library-browser/index.js
+    line: 361
+    description: "api.state.get() called for sibling key inside watch() callback. Under async state (multi-user), the get() may return stale sibling value when both libraries are updated in rapid succession, causing panel to render mismatched data silently."
+    resolution: "Replaced cross-key get() calls in watch() callbacks with local mirror variables (latestSensors, latestEffectors) updated by each respective watcher."
+    status: resolved
+    commit: "68e8798"
 
-- id: D-322
-  severity: low
-  task: S14.4
-  found_by: silent_failure_hunter
-  file: src/salus/viewer/interface/modules/library-browser/index.js
-  line: 109
-  description: "detail.innerHTML built via template literals embedding format(def[key]) values without HTML escaping. The 'type' field in particular uses raw string from API payload; if it contains < or >, this is a stored XSS vector."
-  resolution: "Added _esc() HTML-escape helper; applied to user-sourced string values (type field) passed into innerHTML template literals via SPEC_DISPLAY_FIELDS format function."
-  status: resolved
-  commit: "68e8798"
+  - id: D-322
+    severity: low
+    task: S14.4
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/library-browser/index.js
+    line: 109
+    description: "detail.innerHTML built via template literals embedding format(def[key]) values without HTML escaping. The 'type' field in particular uses raw string from API payload; if it contains < or >, this is a stored XSS vector."
+    resolution: "Added _esc() HTML-escape helper; applied to user-sourced string values (type field) passed into innerHTML template literals via SPEC_DISPLAY_FIELDS format function."
+    status: resolved
+    commit: "68e8798"
 
-- id: D-323
-  severity: high
-  task: S14.3
-  found_by: silent_failure_hunter
-  file: src/salus/interface_api/app.py
-  line: 612
-  description: "resolution_m computed as float(abs(src.transform.a)) which is in degrees-per-pixel for geographic-CRS DEMs (e.g. EPSG:4326). _compute_zoom_levels uses this as metres, producing z_ideal≈30 which clamps to max_zoom=13 regardless of actual resolution. Wrong tile pyramid density silently generated for geographic CRS inputs."
-  resolution: "Added src.crs.is_geographic check; multiplies raw_pixel_size by 111_320.0 m/degree for geographic CRS, passes metres to _compute_zoom_levels."
-  status: resolved
-  commit: "b6fe2e3"
+  - id: D-323
+    severity: high
+    task: S14.3
+    found_by: silent_failure_hunter
+    file: src/salus/interface_api/app.py
+    line: 612
+    description: "resolution_m computed as float(abs(src.transform.a)) which is in degrees-per-pixel for geographic-CRS DEMs (e.g. EPSG:4326). _compute_zoom_levels uses this as metres, producing z_ideal≈30 which clamps to max_zoom=13 regardless of actual resolution. Wrong tile pyramid density silently generated for geographic CRS inputs."
+    resolution: "Added src.crs.is_geographic check; multiplies raw_pixel_size by 111_320.0 m/degree for geographic CRS, passes metres to _compute_zoom_levels."
+    status: resolved
+    commit: "b6fe2e3"
 
-- id: D-324
-  severity: high
-  task: S14.3
-  found_by: silent_failure_hunter
-  file: src/salus/interface_api/app.py
-  line: 690
-  description: "Terrarium blue channel uses np.round() (banker's rounding) instead of floor-based encoding. np.round(0.5*256) = 128 due to round-half-to-even, but standard Terrarium encoding requires floor(h*256)%256. Systematic 1/256 m encoding error for subset of elevations."
-  resolution: "Replaced np.round with floor-based encoding: r=h_floor//256, g=h_floor%256, b=floor(h*256)%256; all consistent with Terrarium reference."
-  status: resolved
-  commit: "b6fe2e3"
+  - id: D-324
+    severity: high
+    task: S14.3
+    found_by: silent_failure_hunter
+    file: src/salus/interface_api/app.py
+    line: 690
+    description: "Terrarium blue channel uses np.round() (banker's rounding) instead of floor-based encoding. np.round(0.5*256) = 128 due to round-half-to-even, but standard Terrarium encoding requires floor(h*256)%256. Systematic 1/256 m encoding error for subset of elevations."
+    resolution: "Replaced np.round with floor-based encoding: r=h_floor//256, g=h_floor%256, b=floor(h*256)%256; all consistent with Terrarium reference."
+    status: resolved
+    commit: "b6fe2e3"
 
-- id: D-325
-  severity: medium
-  task: S14.3
-  found_by: silent_failure_hunter
-  file: src/salus/interface_api/app.py
-  line: 626
-  description: "except Exception: pass silently swallows src.crs.to_epsg() failures with no log message. Transient or unexpected errors are invisible; crs_epsg silently returns None making diagnosis impossible."
-  resolution: "Added _log.debug('DEM CRS has no EPSG code (%s): %s', dem_path, _epsg_exc) in except block."
-  status: resolved
-  commit: "b6fe2e3"
+  - id: D-325
+    severity: medium
+    task: S14.3
+    found_by: silent_failure_hunter
+    file: src/salus/interface_api/app.py
+    line: 626
+    description: "except Exception: pass silently swallows src.crs.to_epsg() failures with no log message. Transient or unexpected errors are invisible; crs_epsg silently returns None making diagnosis impossible."
+    resolution: "Added _log.debug('DEM CRS has no EPSG code (%s): %s', dem_path, _epsg_exc) in except block."
+    status: resolved
+    commit: "b6fe2e3"
 
-- id: D-326
-  severity: medium
-  task: S14.3
-  found_by: silent_failure_hunter
-  file: src/salus/interface_api/app.py
-  line: 674
-  description: "_generate_terrain_tile catches all reproject exceptions at DEBUG level and returns None. If all tiles fail (e.g. CRS incompatibility), _run_tile_generation sets done=True with no error — SSE stream emits {type:complete} while zero tiles written. Browser sees success, tile server returns 404 for every request."
-  resolution: "Added written counter to _run_tile_generation; if written==0 and total_tiles>0 at completion, logs WARNING and sets session error instead of done=True."
-  status: resolved
-  commit: "b6fe2e3"
+  - id: D-326
+    severity: medium
+    task: S14.3
+    found_by: silent_failure_hunter
+    file: src/salus/interface_api/app.py
+    line: 674
+    description: "_generate_terrain_tile catches all reproject exceptions at DEBUG level and returns None. If all tiles fail (e.g. CRS incompatibility), _run_tile_generation sets done=True with no error — SSE stream emits {type:complete} while zero tiles written. Browser sees success, tile server returns 404 for every request."
+    resolution: "Added written counter to _run_tile_generation; if written==0 and total_tiles>0 at completion, logs WARNING and sets session error instead of done=True."
+    status: resolved
+    commit: "b6fe2e3"
 
-- id: D-327
-  severity: medium
-  task: S14.3
-  found_by: silent_failure_hunter
-  file: src/salus/interface_api/app.py
-  line: 901
-  description: "terrain_load reads entire uploaded DEM into memory via await dem_file.read() with no file size guard. Arbitrarily large upload buffers entire file in memory before write_bytes is called, risking OOM on large DEMs."
-  resolution: "Added _MAX_DEM_UPLOAD_BYTES = 500*1024*1024 constant; raises HTTPException(413) if len(dem_contents) exceeds limit; same guard for DSM."
-  status: resolved
-  commit: "b6fe2e3"
+  - id: D-327
+    severity: medium
+    task: S14.3
+    found_by: silent_failure_hunter
+    file: src/salus/interface_api/app.py
+    line: 901
+    description: "terrain_load reads entire uploaded DEM into memory via await dem_file.read() with no file size guard. Arbitrarily large upload buffers entire file in memory before write_bytes is called, risking OOM on large DEMs."
+    resolution: "Added _MAX_DEM_UPLOAD_BYTES = 500*1024*1024 constant; raises HTTPException(413) if len(dem_contents) exceeds limit; same guard for DSM."
+    status: resolved
+    commit: "b6fe2e3"
 
-- id: D-328
-  severity: medium
-  task: S14.3
-  found_by: silent_failure_hunter
-  file: src/salus/interface_api/app.py
-  line: 990
-  description: "terrain_tile_progress SSE endpoint emits infinite {type:progress, pct:0} stream if polled before /api/terrain/load is called (no session active). No timeout or idle guard; connection never terminates."
-  resolution: "Added no-session guard at top of _generate(): if dem_path is None, yields {type:error} and returns immediately."
-  status: resolved
-  commit: "b6fe2e3"
+  - id: D-328
+    severity: medium
+    task: S14.3
+    found_by: silent_failure_hunter
+    file: src/salus/interface_api/app.py
+    line: 990
+    description: "terrain_tile_progress SSE endpoint emits infinite {type:progress, pct:0} stream if polled before /api/terrain/load is called (no session active). No timeout or idle guard; connection never terminates."
+    resolution: "Added no-session guard at top of _generate(): if dem_path is None, yields {type:error} and returns immediately."
+    status: resolved
+    commit: "b6fe2e3"
 
-- id: D-329
-  severity: medium
-  task: S14.3
-  found_by: module_architecture_reviewer
-  file: src/salus/viewer/interface/modules/terrain-loader/index.js
-  line: 4
-  description: "API_BASE assigned at module-evaluation time by reading window.location outside init(api). Violates Invariant 1 (module isolation) — window.* access outside init() call stack. Couples module to browser environment before API injection."
-  resolution: "Removed module-level API_BASE constant; moved window.location.origin resolution inside init(api) as local apiBase; threaded through _loadTerrain, _pollTileProgress, _applyMapLayers parameters."
-  status: resolved
-  commit: "b6fe2e3"
+  - id: D-329
+    severity: medium
+    task: S14.3
+    found_by: module_architecture_reviewer
+    file: src/salus/viewer/interface/modules/terrain-loader/index.js
+    line: 4
+    description: "API_BASE assigned at module-evaluation time by reading window.location outside init(api). Violates Invariant 1 (module isolation) — window.* access outside init() call stack. Couples module to browser environment before API injection."
+    resolution: "Removed module-level API_BASE constant; moved window.location.origin resolution inside init(api) as local apiBase; threaded through _loadTerrain, _pollTileProgress, _applyMapLayers parameters."
+    status: resolved
+    commit: "b6fe2e3"
 
-- id: D-330
-  severity: medium
-  task: S14.3
-  found_by: module_architecture_reviewer
-  file: src/salus/viewer/interface/modules/terrain-loader/manifest.json
-  line: 1
-  description: "manifest.json declares reads:[] but module calls api.state.get('terrain') at mount time and api.state.watch('terrain',...). The 'terrain' key must appear in reads[] per state contract invariant."
-  resolution: "Changed reads:[] to reads:[\"terrain\"] in manifest.json."
-  status: resolved
-  commit: "b6fe2e3"
+  - id: D-330
+    severity: medium
+    task: S14.3
+    found_by: module_architecture_reviewer
+    file: src/salus/viewer/interface/modules/terrain-loader/manifest.json
+    line: 1
+    description: "manifest.json declares reads:[] but module calls api.state.get('terrain') at mount time and api.state.watch('terrain',...). The 'terrain' key must appear in reads[] per state contract invariant."
+    resolution: "Changed reads:[] to reads:[\"terrain\"] in manifest.json."
+    status: resolved
+    commit: "b6fe2e3"
 
-- id: D-331
-  severity: medium
-  task: S14.3
-  found_by: regression_reviewer
-  file: src/salus/viewer/interface/map-proxy.js
-  line: 34
-  description: "ALLOWED_MAP_METHODS still has 16 entries and omits setTerrainSource. Proxy created with allowTerrainSource:true exposes 17 methods; constant is no longer an accurate description of the proxy surface. Module-level docblock also claims setTerrain absent from proxy unconditionally."
-  resolution: "Added TERRAIN_LOADER_EXTRA_METHODS export; updated docblock to document the architectural exception; ALLOWED_MAP_METHODS remains the base set."
-  status: resolved
-  commit: "b6fe2e3"
+  - id: D-331
+    severity: medium
+    task: S14.3
+    found_by: regression_reviewer
+    file: src/salus/viewer/interface/map-proxy.js
+    line: 34
+    description: "ALLOWED_MAP_METHODS still has 16 entries and omits setTerrainSource. Proxy created with allowTerrainSource:true exposes 17 methods; constant is no longer an accurate description of the proxy surface. Module-level docblock also claims setTerrain absent from proxy unconditionally."
+    resolution: "Added TERRAIN_LOADER_EXTRA_METHODS export; updated docblock to document the architectural exception; ALLOWED_MAP_METHODS remains the base set."
+    status: resolved
+    commit: "b6fe2e3"
 
-- id: D-332
-  severity: medium
-  task: S14.3
-  found_by: regression_reviewer
-  file: src/salus/viewer/interface/tests/test-map-proxy.js
-  line: 52
-  description: "No tests for createMapProxy with options.allowTerrainSource=true path. setTerrainSource delegation, raw-instance encapsulation, and freeze behavior for the 17-method proxy are all untested."
-  resolution: "Added 7 new tests covering: TERRAIN_LOADER_EXTRA_METHODS content, proxy without option has no setTerrainSource, proxy with option exposes it, setTerrainSource(id) delegates to setTerrain({source:id}), setTerrainSource(null) delegates to setTerrain(null), raw instance not exposed, frozen proxy with 17 methods."
-  status: resolved
-  commit: "b6fe2e3"
+  - id: D-332
+    severity: medium
+    task: S14.3
+    found_by: regression_reviewer
+    file: src/salus/viewer/interface/tests/test-map-proxy.js
+    line: 52
+    description: "No tests for createMapProxy with options.allowTerrainSource=true path. setTerrainSource delegation, raw-instance encapsulation, and freeze behavior for the 17-method proxy are all untested."
+    resolution: "Added 7 new tests covering: TERRAIN_LOADER_EXTRA_METHODS content, proxy without option has no setTerrainSource, proxy with option exposes it, setTerrainSource(id) delegates to setTerrain({source:id}), setTerrainSource(null) delegates to setTerrain(null), raw instance not exposed, frozen proxy with 17 methods."
+    status: resolved
+    commit: "b6fe2e3"
 
-- id: D-333
-  severity: medium
-  task: S14.6
-  found_by: silent_failure_hunter
-  file: src/salus/viewer/interface/modules/budget-tracker/index.js
-  line: 38
-  description: "cost_aud coerced with ?? 0 instead of Number() || 0 in _buildLookupMap and _calcBreakdown. String values like '1500' pass the ?? guard and produce NaN in arithmetic, silently corrupting totalCost, the progress bar width, and the cost label."
-  resolution: "Changed cost_aud: item.cost_aud ?? 0 to cost_aud: Number(item.cost_aud) || 0 in both _buildLookupMap and _calcBreakdown fallback"
-  status: resolved
-  commit: "7e21e51"
+  - id: D-333
+    severity: medium
+    task: S14.6
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/budget-tracker/index.js
+    line: 38
+    description: "cost_aud coerced with ?? 0 instead of Number() || 0 in _buildLookupMap and _calcBreakdown. String values like '1500' pass the ?? guard and produce NaN in arithmetic, silently corrupting totalCost, the progress bar width, and the cost label."
+    resolution: "Changed cost_aud: item.cost_aud ?? 0 to cost_aud: Number(item.cost_aud) || 0 in both _buildLookupMap and _calcBreakdown fallback"
+    status: resolved
+    commit: "7e21e51"
 
-- id: D-334
-  severity: medium
-  task: S14.6
-  found_by: silent_failure_hunter
-  file: src/salus/viewer/interface/modules/budget-tracker/index.js
-  line: 391
-  description: "Budget input coercion uses Number(...) || 0 which collapses NaN but not Infinity. Number('1e9999') === Infinity passes the guard, causing the progress bar to silently show 0% and the cost label to display '$Infinity'."
-  resolution: "Added isFinite() guard: parsed = Number(budgetInput.value) || 0; budget = isFinite(parsed) ? parsed : 0"
-  status: resolved
-  commit: "7e21e51"
+  - id: D-334
+    severity: medium
+    task: S14.6
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/budget-tracker/index.js
+    line: 391
+    description: "Budget input coercion uses Number(...) || 0 which collapses NaN but not Infinity. Number('1e9999') === Infinity passes the guard, causing the progress bar to silently show 0% and the cost label to display '$Infinity'."
+    resolution: "Added isFinite() guard: parsed = Number(budgetInput.value) || 0; budget = isFinite(parsed) ? parsed : 0"
+    status: resolved
+    commit: "7e21e51"
 
-- id: D-335
-  severity: medium
-  task: S14.6
-  found_by: silent_failure_hunter
-  file: src/salus/viewer/interface/modules/budget-tracker/index.js
-  line: 455
-  description: "onUnmount iterates unsubs with forEach(u => u()) without checking typeof u === 'function'. If any watch()/on() returns null or undefined, u() throws TypeError mid-loop, leaving remaining subscriptions un-cleaned and leaking silently."
-  resolution: "Changed to unsubs.forEach(u => { if (typeof u === 'function') u(); })"
-  status: resolved
-  commit: "7e21e51"
+  - id: D-335
+    severity: medium
+    task: S14.6
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/budget-tracker/index.js
+    line: 455
+    description: "onUnmount iterates unsubs with forEach(u => u()) without checking typeof u === 'function'. If any watch()/on() returns null or undefined, u() throws TypeError mid-loop, leaving remaining subscriptions un-cleaned and leaking silently."
+    resolution: "Changed to unsubs.forEach(u => { if (typeof u === 'function') u(); })"
+    status: resolved
+    commit: "7e21e51"
 
-- id: D-336
-  severity: low
-  task: S14.6
-  found_by: silent_failure_hunter
-  file: src/salus/viewer/interface/modules/budget-tracker/index.js
-  line: 38
-  description: "In _buildLookupMap, inner loop uses (items ?? []) guard but not Array.isArray check. A non-null non-array library category value (e.g. a number or nested object) is not iterable, causing for...of to throw TypeError that propagates out of _render() uncaught."
-  resolution: "Changed (items ?? []) to (Array.isArray(items) ? items : []) in inner loop"
-  status: resolved
-  commit: "7e21e51"
+  - id: D-336
+    severity: low
+    task: S14.6
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/budget-tracker/index.js
+    line: 38
+    description: "In _buildLookupMap, inner loop uses (items ?? []) guard but not Array.isArray check. A non-null non-array library category value (e.g. a number or nested object) is not iterable, causing for...of to throw TypeError that propagates out of _render() uncaught."
+    resolution: "Changed (items ?? []) to (Array.isArray(items) ? items : []) in inner loop"
+    status: resolved
+    commit: "7e21e51"
 
-- id: D-337
-  severity: low
-  task: S14.6
-  found_by: module_architecture_reviewer
-  file: src/salus/viewer/interface/modules/budget-tracker/index.js
-  line: 379
-  description: "CSV download creates a detached <a> element via document.createElement('a') and calls .click() on it without appending it to the module's own panel element. This is a document.* operation outside the module's panel DOM scope, technically violating the isolation invariant."
-  resolution: "Added panel.appendChild(a) before a.click() and panel.removeChild(a) after, keeping the element within the module's own DOM scope"
-  status: resolved
-  commit: "7e21e51"
+  - id: D-337
+    severity: low
+    task: S14.6
+    found_by: module_architecture_reviewer
+    file: src/salus/viewer/interface/modules/budget-tracker/index.js
+    line: 379
+    description: "CSV download creates a detached <a> element via document.createElement('a') and calls .click() on it without appending it to the module's own panel element. This is a document.* operation outside the module's panel DOM scope, technically violating the isolation invariant."
+    resolution: "Added panel.appendChild(a) before a.click() and panel.removeChild(a) after, keeping the element within the module's own DOM scope"
+    status: resolved
+    commit: "7e21e51"
 
-- id: D-338
-  severity: high
-  task: S14.7
-  found_by: silent_failure_hunter
-  file: src/salus/viewer/interface/modules/threat-corridor-editor/index.js
-  line: ~420
-  description: "In _onHandleMouseDown, properties.index from queryRenderedFeatures is used directly as array index without validation. A NaN, negative, or out-of-bounds value propagates silently into waypoints splice/access, corrupting route state."
-  resolution: "Validated rawIdx with Number.isInteger and bounds check before assigning to dragIdx in _onHandleMouseDown"
-  status: resolved
-  commit: "020f3a5"
+  - id: D-338
+    severity: high
+    task: S14.7
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/threat-corridor-editor/index.js
+    line: ~420
+    description: "In _onHandleMouseDown, properties.index from queryRenderedFeatures is used directly as array index without validation. A NaN, negative, or out-of-bounds value propagates silently into waypoints splice/access, corrupting route state."
+    resolution: "Validated rawIdx with Number.isInteger and bounds check before assigning to dragIdx in _onHandleMouseDown"
+    status: resolved
+    commit: "020f3a5"
 
-- id: D-339
-  severity: high
-  task: S14.7
-  found_by: silent_failure_hunter
-  file: src/salus/viewer/interface/modules/threat-corridor-editor/index.js
-  line: ~460
-  description: "In _onHandleContextMenu, properties.index from queryRenderedFeatures is used directly as array index without validation. A NaN or out-of-bounds value silently corrupts or crashes route editing."
-  resolution: "Validated rawIdx with Number.isInteger and bounds check before calling splice in _onHandleContextMenu"
-  status: resolved
-  commit: "020f3a5"
+  - id: D-339
+    severity: high
+    task: S14.7
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/threat-corridor-editor/index.js
+    line: ~460
+    description: "In _onHandleContextMenu, properties.index from queryRenderedFeatures is used directly as array index without validation. A NaN or out-of-bounds value silently corrupts or crashes route editing."
+    resolution: "Validated rawIdx with Number.isInteger and bounds check before calling splice in _onHandleContextMenu"
+    status: resolved
+    commit: "020f3a5"
 
-- id: D-340
-  severity: high
-  task: S14.7
-  found_by: silent_failure_hunter
-  file: src/salus/viewer/interface/modules/zone-editor/index.js
-  line: ~430
-  description: "In _onHandleMouseDown, properties.index from queryRenderedFeatures is used as array index without validation. NaN or out-of-bounds index silently corrupts zone vertex arrays during drag editing."
-  resolution: "Validated rawIdx with Number.isInteger and bounds check before assigning to dragIdx in ZE _onHandleMouseDown"
-  status: resolved
-  commit: "020f3a5"
+  - id: D-340
+    severity: high
+    task: S14.7
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/zone-editor/index.js
+    line: ~430
+    description: "In _onHandleMouseDown, properties.index from queryRenderedFeatures is used as array index without validation. NaN or out-of-bounds index silently corrupts zone vertex arrays during drag editing."
+    resolution: "Validated rawIdx with Number.isInteger and bounds check before assigning to dragIdx in ZE _onHandleMouseDown"
+    status: resolved
+    commit: "020f3a5"
 
-- id: D-341
-  severity: high
-  task: S14.7
-  found_by: silent_failure_hunter
-  file: src/salus/viewer/interface/modules/zone-editor/index.js
-  line: ~470
-  description: "In _onMidpointMouseDown, properties.after_index from queryRenderedFeatures is used for splice without validation. A NaN or out-of-bounds value causes splice to behave unpredictably, silently inserting at wrong positions or corrupting the vertex array."
-  resolution: "Validated rawAfterIdx with Number.isInteger and bounds check before splice/access in _onMidpointMouseDown"
-  status: resolved
-  commit: "020f3a5"
+  - id: D-341
+    severity: high
+    task: S14.7
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/zone-editor/index.js
+    line: ~470
+    description: "In _onMidpointMouseDown, properties.after_index from queryRenderedFeatures is used for splice without validation. A NaN or out-of-bounds value causes splice to behave unpredictably, silently inserting at wrong positions or corrupting the vertex array."
+    resolution: "Validated rawAfterIdx with Number.isInteger and bounds check before splice/access in _onMidpointMouseDown"
+    status: resolved
+    commit: "020f3a5"
 
-- id: D-342
-  severity: medium
-  task: S14.7
-  found_by: silent_failure_hunter
-  file: src/salus/viewer/interface/modules/threat-corridor-editor/index.js
-  line: ~270
-  description: "In _onDrawDblClick, the browser fires click then dblclick in sequence, so the final dblclick is preceded by a click that already appended a duplicate tail waypoint. Missing workingWaypoints.pop() before calling _stopDraw() causes the last waypoint to appear twice in the saved route."
-  resolution: "Added workingWaypoints.pop() at top of _onDrawDblClick before minimum length check; updated tests to use 3-click pattern"
-  status: resolved
-  commit: "020f3a5"
+  - id: D-342
+    severity: medium
+    task: S14.7
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/threat-corridor-editor/index.js
+    line: ~270
+    description: "In _onDrawDblClick, the browser fires click then dblclick in sequence, so the final dblclick is preceded by a click that already appended a duplicate tail waypoint. Missing workingWaypoints.pop() before calling _stopDraw() causes the last waypoint to appear twice in the saved route."
+    resolution: "Added workingWaypoints.pop() at top of _onDrawDblClick before minimum length check; updated tests to use 3-click pattern"
+    status: resolved
+    commit: "020f3a5"
 
-- id: D-343
-  severity: medium
-  task: S14.7
-  found_by: silent_failure_hunter
-  file: src/salus/viewer/interface/modules/zone-editor/index.js
-  line: ~270
-  description: "In _onDrawDblClick, same dblclick/click race: the preceding click already appended a duplicate tail vertex. Missing workingVertices.pop() before calling _stopDraw() causes the last polygon vertex to appear twice in the saved zone."
-  resolution: "Added workingVertices.pop() at top of _onDrawDblClick before minimum length check; updated _drawTriangle test helper to 4-click pattern"
-  status: resolved
-  commit: "020f3a5"
+  - id: D-343
+    severity: medium
+    task: S14.7
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/zone-editor/index.js
+    line: ~270
+    description: "In _onDrawDblClick, same dblclick/click race: the preceding click already appended a duplicate tail vertex. Missing workingVertices.pop() before calling _stopDraw() causes the last polygon vertex to appear twice in the saved zone."
+    resolution: "Added workingVertices.pop() at top of _onDrawDblClick before minimum length check; updated _drawTriangle test helper to 4-click pattern"
+    status: resolved
+    commit: "020f3a5"
 
-- id: D-344
-  severity: medium
-  task: S14.7
-  found_by: silent_failure_hunter
-  file: src/salus/viewer/interface/modules/threat-corridor-editor/index.js
-  line: ~150
-  description: "onMount querySelector calls for drawBtn, confirmBtn, cancelBtn, pointBtn, and doneEditBtn are not null-guarded before addEventListener. If the HTML template is modified to remove any element, the module throws TypeError silently instead of reporting a clear initialisation error."
-  resolution: "Wrapped drawBtn.addEventListener and pointBtn.addEventListener in null guards; added null guards to drawBtn.textContent accesses in _startDrawMode/_stopDrawMode; wrapped confirmBtn/cancelBtn.addEventListener in null guards"
-  status: resolved
-  commit: "020f3a5"
+  - id: D-344
+    severity: medium
+    task: S14.7
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/threat-corridor-editor/index.js
+    line: ~150
+    description: "onMount querySelector calls for drawBtn, confirmBtn, cancelBtn, pointBtn, and doneEditBtn are not null-guarded before addEventListener. If the HTML template is modified to remove any element, the module throws TypeError silently instead of reporting a clear initialisation error."
+    resolution: "Wrapped drawBtn.addEventListener and pointBtn.addEventListener in null guards; added null guards to drawBtn.textContent accesses in _startDrawMode/_stopDrawMode; wrapped confirmBtn/cancelBtn.addEventListener in null guards"
+    status: resolved
+    commit: "020f3a5"
 
-- id: D-345
-  severity: medium
-  task: S14.7
-  found_by: silent_failure_hunter
-  file: src/salus/viewer/interface/modules/zone-editor/index.js
-  line: ~150
-  description: "onMount querySelector calls for drawBtn, confirmBtn, cancelBtn, and doneEditBtn are not null-guarded before addEventListener. Missing elements would cause silent TypeError during module initialisation."
-  resolution: "Wrapped drawBtn.addEventListener in null guard; added null guards to drawBtn.textContent accesses in ZE _startDrawMode/_stopDrawMode"
-  status: resolved
-  commit: "020f3a5"
+  - id: D-345
+    severity: medium
+    task: S14.7
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/zone-editor/index.js
+    line: ~150
+    description: "onMount querySelector calls for drawBtn, confirmBtn, cancelBtn, and doneEditBtn are not null-guarded before addEventListener. Missing elements would cause silent TypeError during module initialisation."
+    resolution: "Wrapped drawBtn.addEventListener in null guard; added null guards to drawBtn.textContent accesses in ZE _startDrawMode/_stopDrawMode"
+    status: resolved
+    commit: "020f3a5"
 
-- id: D-346
-  severity: medium
-  task: S14.7
-  found_by: spec_compliance
-  file: src/salus/viewer/interface/modules/threat-corridor-editor/index.js
-  line: ~300
-  description: "S14.7-2 requires clicking an existing corridor route to enter edit mode. The implementation registers click on 'routes-line' inside _enterEditMode but not as a global handler for initiating edit mode from the default state. Map-level routes-line click handler to enter edit mode is missing."
-  resolution: "Added persistent _onRouteLineClick handler registered via api.map.on('click', 'threat-corridor-editor:routes-line', _onRouteLineClick) at init; handler calls _enterEditMode when module is idle. Added corresponding api.map.off in onUnmount."
-  status: resolved
-  commit: "020f3a5"
+  - id: D-346
+    severity: medium
+    task: S14.7
+    found_by: spec_compliance
+    file: src/salus/viewer/interface/modules/threat-corridor-editor/index.js
+    line: ~300
+    description: "S14.7-2 requires clicking an existing corridor route to enter edit mode. The implementation registers click on 'routes-line' inside _enterEditMode but not as a global handler for initiating edit mode from the default state. Map-level routes-line click handler to enter edit mode is missing."
+    resolution: "Added persistent _onRouteLineClick handler registered via api.map.on('click', 'threat-corridor-editor:routes-line', _onRouteLineClick) at init; handler calls _enterEditMode when module is idle. Added corresponding api.map.off in onUnmount."
+    status: resolved
+    commit: "020f3a5"
 
-- id: D-347
-  severity: low
-  task: S14.7
-  found_by: silent_failure_hunter
-  file: src/salus/viewer/interface/modules/threat-corridor-editor/index.js
-  line: ~500
-  description: "In _exitEditMode, if editCleanup is null but editingId is non-null (zombie state from partial initialisation failure), the function skips cleanup and returns without clearing editingId. The module remains stuck in a partial edit state."
-  resolution: "Added else branch to _exitEditMode: if editCleanup is null, directly reset editingId=null and editingWaypoints=[]"
-  status: resolved
-  commit: "020f3a5"
+  - id: D-347
+    severity: low
+    task: S14.7
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/threat-corridor-editor/index.js
+    line: ~500
+    description: "In _exitEditMode, if editCleanup is null but editingId is non-null (zombie state from partial initialisation failure), the function skips cleanup and returns without clearing editingId. The module remains stuck in a partial edit state."
+    resolution: "Added else branch to _exitEditMode: if editCleanup is null, directly reset editingId=null and editingWaypoints=[]"
+    status: resolved
+    commit: "020f3a5"
 
-- id: D-348
-  severity: low
-  task: S14.7
-  found_by: silent_failure_hunter
-  file: src/salus/viewer/interface/modules/zone-editor/index.js
-  line: ~500
-  description: "In _exitEditMode, same zombie state risk: if editCleanup is null but editingId is non-null, the function silently skips cleanup without resetting editingId, leaving the module in an inconsistent state."
-  resolution: "Added else branch to ZE _exitEditMode: if editCleanup is null, directly reset editingId=null and editingCoords=[]"
-  status: resolved
-  commit: "020f3a5"
+  - id: D-348
+    severity: low
+    task: S14.7
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/zone-editor/index.js
+    line: ~500
+    description: "In _exitEditMode, same zombie state risk: if editCleanup is null but editingId is non-null, the function silently skips cleanup without resetting editingId, leaving the module in an inconsistent state."
+    resolution: "Added else branch to ZE _exitEditMode: if editCleanup is null, directly reset editingId=null and editingCoords=[]"
+    status: resolved
+    commit: "020f3a5"
 
-- id: D-349
-  severity: low
-  task: S14.7
-  found_by: spec_compliance
-  file: src/salus/viewer/interface/tests/test-threat-corridor-editor.js
-  line: N/A
-  description: "S14.7-5 spec warning: no test verifies that working-source data is cleared when the module is unmounted. The onUnmount test only checks layer/source removal, not that intermediate draw state is flushed before removal."
-  resolution: "Added test '(S14.7-5) onUnmount clears working-source data' verifying source is removed on unmount; also added '(S14.7-2) clicking a route line in idle mode enters edit mode' covering D-346"
-  status: resolved
-  commit: "020f3a5"
+  - id: D-349
+    severity: low
+    task: S14.7
+    found_by: spec_compliance
+    file: src/salus/viewer/interface/tests/test-threat-corridor-editor.js
+    line: N/A
+    description: "S14.7-5 spec warning: no test verifies that working-source data is cleared when the module is unmounted. The onUnmount test only checks layer/source removal, not that intermediate draw state is flushed before removal."
+    resolution: "Added test '(S14.7-5) onUnmount clears working-source data' verifying source is removed on unmount; also added '(S14.7-2) clicking a route line in idle mode enters edit mode' covering D-346"
+    status: resolved
+    commit: "020f3a5"
 
   - id: D-350
     severity: high
@@ -5440,7 +5440,7 @@ defects:
     description: "Module panels and map layers never re-mount on second activation — init() runs once per session (initialised.add(moduleId) guard). Re-activating any module after first deactivation leaves panel empty and map layers gone. Affects 13 modules."
     resolution: "Removed the initialised Set guard in mode-manager.js. mod.init(api) now runs on every activation. Modules' onUnmount blocks fully tear down what init creates (map sources/layers, watch/bus subscriptions, panel DOM), so re-init is idempotent. Browser ES module cache makes repeat loadModule() calls cheap. Added regression tests in test-mode-manager.js verifying init re-runs on navigation back and that each cycle runs onUnmount once."
     status: resolved
-    commit: ""
+    commit: "8f5a7c1"
 
 
   - id: D-493
@@ -5453,6 +5453,1150 @@ defects:
     description: "optimiser:apply event silently dropped — placement-editor is not active when optimiser emits the event, its bus subscription already torn down. Modal closes, ghost markers vanish, user believes Apply succeeded but placements state is unchanged."
     resolution: "mode-manager.js now subscribes to a _HANDOFF_EVENT_TARGETS map ({'optimiser:apply': 'placement-editor'}) on the raw shell bus. When the event fires with the target inactive, the router activates the target (whose init registers its scoped subscription) and re-emits so the handler fires. Per-event _pendingHandoff Set guards against re-entry (router's own re-emit) and rapid duplicates (double-clicks). Activation failure causes re-emit to be skipped with a warning instead of dropping the payload onto a dead target."
     status: resolved
+    commit: "8f5a7c1"
+
+
+  - id: D-494
+    severity: high
+    task: triage-2026-05-11
+    triage_ref: O-3
+    found_by: bug_triage_2026_05_11
+    file: src/salus/engine/viewshed.py
+    line: 219
+    description: "compute_viewshed_through_canopy: transmission initialised to zeros; perimeter cells not hit by integer-rounded ray paths silently stay 0.0 (fully blocked), distinct from terrain-blocked. Coverage layers shrink at perimeter without warning."
+    resolution: "I-17: compute_viewshed_through_canopy now initialises transmission = binary.astype(float32) so visible cells start at 1.0; a ray_touched mask applies max-over-rays results only to ray-hit cells, so visible cells missed by integer-rounded rays retain 1.0 instead of silently dropping to fully-blocked."
+    status: "resolved"
+    commit: ""
+
+
+  - id: D-495
+    severity: high
+    task: triage-2026-05-11
+    triage_ref: O-4
+    found_by: bug_triage_2026_05_11
+    file: src/salus/engine/viewshed.py
+    line: 250
+    description: "compute_viewshed_through_canopy: t_ray not reset when ray hits terrain-blocked cell (continue skips without resetting). A second visible cell beyond the occluder receives transmission contaminated by canopy along an irrelevant geometric path."
+    resolution: "I-17: ray walk now stops (break) at the first non-visible cell; ray_path holds only pre-occluder cells and each target's attenuation accumulator is computed fresh from ray_path[:k+1], so a cell beyond an occluder never inherits canopy attenuation from the far side."
+    status: "resolved"
+    commit: ""
+
+
+  - id: D-496
+    severity: high
+    task: triage-2026-05-11
+    triage_ref: O-5
+    found_by: bug_triage_2026_05_11
+    file: src/salus/report/pdf.py
+    line: 639
+    description: "PDF report renders blank sections silently — _render_to_b64 and three helper functions wrap rendering in except Exception -> log warning -> return None. PDF renders with missing images/sections and returns Path, giving no programmatic signal of failure."
+    resolution: "I-16: introduced ReportRenderError + section-criticality policy. _render_to_b64 and _render_gap_map_to_b64 now raise on failure (composite + gap maps are REQUIRED). Per-layer maps and optional charts (kill_chain, saturation) append to ReportData.section_failures and are omitted from the PDF. CLI emits stderr warning, API logs each entry."
+    status: resolved
+    commit: I-16
+
+
+  - id: D-497
+    severity: high
+    task: triage-2026-05-11
+    triage_ref: O-7
+    found_by: bug_triage_2026_05_11
+    file: src/salus/cli.py
+    line: 2398
+    description: "salus interface --host accepts 0.0.0.0 with no warning; API has no authentication. app.py declares localhost-only contract but CLI allows any bind address. POST /api/terrain/load accepts 500 MB uploads and POST /api/simulate triggers GB-scale work — all unauthenticated from any peer."
+    resolution: "I-14: salus interface now refuses any non-loopback --host unless --allow-public is passed (exits non-zero with a stderr error before uvicorn starts); with --allow-public a multi-line warning block lists the unauthenticated attack surface. Loopback binds (127.0.0.1, ::1, localhost) and the default are unchanged."
+    status: "resolved"
+    commit: ""
+
+
+  - id: D-498
+    severity: high
+    task: I-15
+    triage_ref: O-8
+    found_by: bug_triage_2026_05_11
+    file: src/salus/viewer/sanitise.py
+    line: 69
+    description: "Sanitiser does not redact sensor_library / effector_library in packaged viewer export. _range_band and _RANGE_BANDS exist but no caller invokes the helper; sanitise_for_export does not touch embedded sensor_library / effector_library payloads (including max_range_m, vendor fields). A REDACTED viewer ships the full proprietary sensor DB."
+    resolution: "Moved sensor/effector library loading into export_viewer_data() so libraries are part of ViewerData (single trust boundary). Added _PUBLIC_SENSOR_FIELDS / _PUBLIC_EFFECTOR_FIELDS whitelists and a _redact_library helper in sanitise.py. sanitise_for_export() now at REDACTED level whitelists fields, renames entries to '{type}-{i}', and bands max_range_m via _range_band; at FULL level it clears both libraries to {}. package_viewer() reads libraries from ViewerData instead of reloading from disk so the redaction cannot be bypassed."
+    status: resolved
+    commit: ""
+
+
+  - id: D-499
+    severity: high
+    task: I-15
+    triage_ref: O-9
+    found_by: bug_triage_2026_05_11
+    file: src/salus/viewer/interface/shell.js
+    line: 162
+    description: "validateScenarioPayload only checks key names — values written to state without escaping. Load Scenario validates that JSON keys are a subset of SCENARIO_KEYS then writes every value into state. A crafted .salus.json with HTML/JS payload in sensor name fields reaches downstream renderers."
+    resolution: "Rewrote validateScenarioPayload in shell.js as a deep-recursive structural validator. Top-level must be a plain Object; every nested value must be plain JSON (null/boolean/finite-number/string/array/plain object). __proto__, constructor, and prototype keys are rejected at any depth; max depth is 32; strings are capped at 100_000 chars; strings containing HTML-tag openers (<[!?/A-Za-z]) or 'javascript:' URIs (whitespace-tolerant, case-insensitive) are rejected. applyScenarioPayload is unchanged and still trusts the validator."
+    status: resolved
+    commit: ""
+
+
+  - id: D-500
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: O-10
+    found_by: bug_triage_2026_05_11
+    file: src/salus/interface_api/app.py
+    line: 64
+    description: "Unbounded thread spawn per /api/simulate request — trivial DoS. Each simulate request spawns Thread(daemon=True) with no pool/semaphore. Ten concurrent valid requests OOM-kill the process; combined with D-497 (--host 0.0.0.0) reachable from any peer."
+    resolution: "I-14: /api/simulate and /api/optimise share a module-level threading.BoundedSemaphore (default 2, tunable via SALUS_MAX_CONCURRENT_SIMULATIONS); a non-blocking acquire returns HTTP 503 with Retry-After when saturated, and the worker wrapper releases the slot in finally."
+    status: "resolved"
+    commit: ""
+
+
+  - id: D-501
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: O-11
+    found_by: bug_triage_2026_05_11
+    file: src/salus/viewer/interface/state.js
+    line: 121
+    description: "state.js synchronous re-entrancy unguarded — set() synchronously calls _notify; a watcher can set() again; nested calls run depth-first with no detection. Two modules listening to each other's keys can hang the tab silently."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-502
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: O-12
+    found_by: bug_triage_2026_05_11
+    file: src/salus/report/pdf.py
+    line: 347
+    description: "PDF template syntax errors silently drop entire sections — TemplateError caught with warning log and section dropped. PDF still renders missing kill_chain / saturation / threat_analysis sections; caller has no programmatic signal."
+    resolution: "I-16: render_pdf template loop now applies section criticality. TemplateError/TemplateNotFound for any REQUIRED section (cover, executive_summary, site_overview, coverage_analysis, gap_analysis, assumptions, appendix_sensors) raises ReportRenderError. For OPTIONAL sections (threat_analysis, kill_chain, saturation) the failure is appended to ReportData.section_failures and the section is omitted; caller surfaces the audit log."
+    status: resolved
+    commit: I-16
+
+
+  - id: D-503
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: O-13
+    found_by: bug_triage_2026_05_11
+    file: src/salus/viewer/interface/modules/placement-editor/index.js
+    line: 735
+    description: "placement-editor modal double-applies when used with Optimiser's Apply — placement-editor's optimiser:complete listener spawns its own modal with its own Apply button. Both can fire in one session and double-merge placements."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-504
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: O-14
+    found_by: bug_triage_2026_05_11
+    file: src/salus/ingest/scenario.py
+    line: 111
+    description: "Untrusted scenario YAML can resolve paths outside scenario directory — _PATH_FIELDS still resolves ../../../etc/passwd and returns the resolved path. The interface_api path validation adds containment but the standalone CLI does not."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-505
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: O-15
+    found_by: bug_triage_2026_05_11
+    file: src/salus/engine/viewshed.py
+    line: 269
+    description: "compute_viewshed_through_canopy: observer cell forced to transmission=1.0 unconditionally even when observer is under canopy. If canopy_height_m[obs_row, obs_col] > observer_height the sensor is physically buried but the transmission map says self-cell unobscured."
+    resolution: "I-17: observer cell transmission is no longer forced to 1.0 — when observer_height < canopy_height_m[obs] it is penetration ** ((chm-h)/ref), reflecting the canopy depth above a buried sensor; above-canopy / no-canopy observers stay at 1.0."
+    status: "resolved"
+    commit: ""
+
+
+  - id: D-506
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: O-16
+    found_by: bug_triage_2026_05_11
+    file: src/salus/engine/viewshed.py
+    line: 233
+    description: "Canopy attenuation conflates 2D cell traversal with 3D LOS path — t_ray *= penetration**(ch/10.0) for every visible canopy cell regardless of where the 3D LOS ray passes vertically through the cell. A ray skimming the canopy top vs trunk-piercing get identical penalty; undocumented if deliberate."
+    resolution: "I-17: attenuation now uses a 3D LOS check — the interpolated line-of-sight elevation is compared against dem[j]+canopy_height_m[j] at each intermediate cell; a ray skimming above the canopy receives no penalty, only rays dipping into the canopy column are attenuated."
+    status: "resolved"
+    commit: ""
+
+
+  - id: D-507
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-1
+    found_by: bug_triage_2026_05_11
+    file: src/salus/engine/viewshed.py
+    line: 344
+    description: "int() coordinate conversion in _xy_to_rc / _row_col (also trajectory.py:587-593) — half-cell west/south of origin silently maps to (0,0) and passes the bounds guard. Replace with math.floor()."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-508
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-2
+    found_by: bug_triage_2026_05_11
+    file: src/salus/engine/saturation.py
+    line: 312
+    description: "Regression from D-187 resolution: code now raises ValueError but the documented resolution requires 'log warning + return zero-capacity SaturationResult'. Restore the resolved behaviour."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-509
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-3
+    found_by: bug_triage_2026_05_11
+    file: src/salus/engine/saturation.py
+    line: 67
+    description: "_sample_dem_elevation silently returns 0.0 for nodata DEM cells instead of raising ValueError or returning NaN. Raises or returns NaN so callers cannot distinguish nodata from sea-level elevation."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-510
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-4
+    found_by: bug_triage_2026_05_11
+    file: src/salus/engine/rf_propagation.py
+    line: 425
+    description: "Missing math.isfinite(sensor_agl) guard before computing sensor_abs_h — no parity with dispatcher.py:85 / placement.py:344-354 which add this guard."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-511
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-5
+    found_by: bug_triage_2026_05_11
+    file: src/salus/engine/coverage.py
+    line: 144
+    description: "compute_layer_coverage: after shape check, does not warn when cov is floating and contains non-finite cells. NaN silently buckets as uncovered with no diagnostic."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-512
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-6
+    found_by: bug_triage_2026_05_11
+    file: src/salus/engine/comparison.py
+    line: 192
+    description: "compare_configs uses nan_to_num + warning on NaN composite instead of raising — inconsistent with build_gap_analysis policy which raises. Silent substitution hides corrupted comparison results."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-513
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-7
+    found_by: bug_triage_2026_05_11
+    file: src/salus/engine/path_planner.py
+    line: 341
+    description: "Fallback trajectory uses lowest altitude band with no way to pass asset_z_agl explicitly; accept explicit asset_z_agl and pass to _cell_centroid for correctness."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-514
+    severity: low
+    task: triage-2026-05-11
+    triage_ref: S-8
+    found_by: bug_triage_2026_05_11
+    file: src/salus/engine/kill_chain.py
+    line: 71
+    description: "first_det_range is None (never detected) indistinguishable from 0.0 (detected at impact). Split log message and add detected_at_impact field to distinguish the two cases."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-515
+    severity: low
+    task: triage-2026-05-11
+    triage_ref: S-9
+    found_by: bug_triage_2026_05_11
+    file: src/salus/engine/kill_chain.py
+    line: 89
+    description: "Asymmetric >= vs > for engagement_feasible and second_engagement_possible comparisons — should use a single consistent comparison operator."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-516
+    severity: low
+    task: triage-2026-05-11
+    triage_ref: S-10
+    found_by: bug_triage_2026_05_11
+    file: src/salus/engine/acoustic.py
+    line: 87
+    description: "No warning when effective_range collapses to <= 0 due to extreme ambient_noise_db — silent zero-range sensor appears valid."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-517
+    severity: low
+    task: triage-2026-05-11
+    triage_ref: S-11
+    found_by: bug_triage_2026_05_11
+    file: src/salus/engine/placement.py
+    line: 156
+    description: "Upper edge cells never sampled in generate_candidate_positions because of step_m/2 offset start — use cell-centred sampling to cover full extent."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-518
+    severity: low
+    task: triage-2026-05-11
+    triage_ref: S-12
+    found_by: bug_triage_2026_05_11
+    file: src/salus/engine/kill_chain.py
+    line: 177
+    description: "_required_time = required_time alias creates a maintenance trap — remove the alias."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-519
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-13
+    found_by: bug_triage_2026_05_11
+    file: src/salus/models/scenario.py
+    line: 106
+    description: "data.pop('trajectory', None) silently discards non-None trajectory values from YAML. Warn when a non-None value is silently dropped."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-520
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-14
+    found_by: bug_triage_2026_05_11
+    file: src/salus/ingest/boundaries.py
+    line: 282
+    description: "_collect_polygons does not count features skipped for null geometry. Warn if > 50% of features are dropped to surface corrupt boundary files."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-521
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-15
+    found_by: bug_triage_2026_05_11
+    file: src/salus/ingest/boundaries.py
+    line: 20
+    description: "load_boundary return type declares Polygon but _reproject_geometry can yield MultiPolygon. Either widen the type and update callers, or re-extract largest polygon after reproject."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-522
+    severity: low
+    task: triage-2026-05-11
+    triage_ref: S-16
+    found_by: bug_triage_2026_05_11
+    file: src/salus/models/scenario.py
+    line: 199
+    description: "No warning when protected_point is (0.0, 0.0) — a common YAML default sentinel that indicates a misconfigured scenario rather than a real point."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-523
+    severity: low
+    task: triage-2026-05-11
+    triage_ref: S-17
+    found_by: bug_triage_2026_05_11
+    file: src/salus/models/saturation.py
+    line: 104
+    description: "SaturationScenario.targets: no warning on duplicate approach_vector entries which are likely a YAML copy-paste typo."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-524
+    severity: low
+    task: triage-2026-05-11
+    triage_ref: S-18
+    found_by: bug_triage_2026_05_11
+    file: src/salus/models/threat.py
+    line: 96
+    description: "DroneTrajectory validator: no warning on consecutive waypoints with zero spatial distance — indicates a malformed trajectory."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-525
+    severity: low
+    task: triage-2026-05-11
+    triage_ref: S-19
+    found_by: bug_triage_2026_05_11
+    file: src/salus/models/site.py
+    line: 42
+    description: "_validate_resolution does not reject subnormal resolutions (< 1e-6) which cause downstream division and coordinate errors."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-526
+    severity: low
+    task: triage-2026-05-11
+    triage_ref: S-20
+    found_by: bug_triage_2026_05_11
+    file: src/salus/models/site.py
+    line: 118
+    description: "extent model_validator does not ensure cols * resolution is finite — subnormal resolution can produce infinite extents."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-527
+    severity: low
+    task: triage-2026-05-11
+    triage_ref: S-21
+    found_by: bug_triage_2026_05_11
+    file: src/salus/ingest/sensors.py
+    line: 20
+    description: "_load_yaml_records return type declared list[dict[str, Any]] but YAML load yields dict[Any, Any] — the cast is silently lying. Narrow after load with explicit key validation."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-528
+    severity: low
+    task: triage-2026-05-11
+    triage_ref: S-22
+    found_by: bug_triage_2026_05_11
+    file: src/salus/ingest/boundaries.py
+    line: 144
+    description: "Whitespace-only zone names produce confusing downstream error chain. Strip and re-check before passing to Zone() constructor."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-529
+    severity: high
+    task: triage-2026-05-11
+    triage_ref: S-23
+    found_by: bug_triage_2026_05_11
+    file: src/salus/engine/path_planner.py
+    line: 111
+    description: "effective_bands = _DEFAULT_ALTITUDE_BANDS_M shares module-level list by reference. Callers can mutate the default for the rest of the process. Wrap in list(...) copy."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-530
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-24
+    found_by: bug_triage_2026_05_11
+    file: src/salus/interface_api/app.py
+    line: 356
+    description: "_get_sensor_defs / _get_effector_defs return type list[X] but cache annotation includes None; assert non-None or return _sensor_cache or [] to avoid None propagation."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-531
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-25
+    found_by: bug_triage_2026_05_11
+    file: src/salus/report/maps.py
+    line: 48
+    description: "render_coverage_map / _hillshade use bare np.ndarray then ~coverage; annotate npt.NDArray[np.bool_] and add explicit dtype guard to catch wrong-dtype arrays early."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-532
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-26
+    found_by: bug_triage_2026_05_11
+    file: src/salus/viewer/export.py
+    line: 99
+    description: "ViewerData.sensor_placements annotated as Any — a type lie. Every downstream caller assumes a dict. Annotate dict[str, Any]."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-533
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-27
+    found_by: bug_triage_2026_05_11
+    file: src/salus/engine/threat_corridor.py
+    line: 186
+    description: "find_worst_corridors: widen protected_point to tuple[float, float] | None to match the dead None guard, or drop the guard if protected_point is always provided."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-534
+    severity: low
+    task: triage-2026-05-11
+    triage_ref: S-28
+    found_by: bug_triage_2026_05_11
+    file: src/salus/engine/coverage.py
+    line: 330
+    description: "compute_coverage_stats zones parameter typed as bare list — annotate as list[Zone]."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-535
+    severity: low
+    task: triage-2026-05-11
+    triage_ref: S-29
+    found_by: bug_triage_2026_05_11
+    file: src/salus/models/site.py
+    line: 23
+    description: "DEM/DSM/canopy_height_m stored as bare np.ndarray without dtype-kind validation. Add np.issubdtype(v.dtype, np.floating) check in model validator."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-536
+    severity: low
+    task: triage-2026-05-11
+    triage_ref: S-30
+    found_by: bug_triage_2026_05_11
+    file: src/salus/interface_api/app.py
+    line: 450
+    description: "_parse_ui_zones return type list[Any] — annotate as list[Zone]."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-537
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-31
+    found_by: bug_triage_2026_05_11
+    file: src/salus/report/charts.py
+    line: 170
+    description: "render_kill_chain_chart: non-finite margin causes bare continue with no visual indicator. Draw a red error indicator instead of silently skipping the bar."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-538
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-32
+    found_by: bug_triage_2026_05_11
+    file: src/salus/report/charts.py
+    line: 480
+    description: "Firing/reload loop in charts.py: subnormal reaction_time_s could cause t + reaction_s == t infinite loop. Cap iteration count as a guard."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-539
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-33
+    found_by: bug_triage_2026_05_11
+    file: src/salus/report/maps.py
+    line: 1487
+    description: "NaN cells in cost_2d render as transparent in cost_rgba build — empty detection density patch. Apply np.clip + NaN guard to make missing data visible rather than transparent."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-540
+    severity: low
+    task: triage-2026-05-11
+    triage_ref: S-34
+    found_by: bug_triage_2026_05_11
+    file: src/salus/report/maps.py
+    line: 201
+    description: "Multiple except Exception: warnings.warn blocks for legend/scalebar/colorbar across maps.py — add _log.warning in parallel so non-interactive runs see the diagnostics."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-541
+    severity: low
+    task: triage-2026-05-11
+    triage_ref: S-35
+    found_by: bug_triage_2026_05_11
+    file: src/salus/report/charts.py
+    line: 381
+    description: "unengaged > 0 colour map: NaN cells silently coloured green ('engaged'). Filter or warn on non-integer values."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-542
+    severity: low
+    task: triage-2026-05-11
+    triage_ref: S-36
+    found_by: bug_triage_2026_05_11
+    file: src/salus/report/maps.py
+    line: 1287
+    description: "Degenerate detection-time normalisation when all values are identical renders all-red lines indistinguishably from real high-threat. Warn when normalisation range is zero."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-543
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-37
+    found_by: bug_triage_2026_05_11
+    file: src/salus/viewer/export.py
+    line: 198
+    description: "gaps_arr = ~sim_results.composite fallback ignores boundary — call compute_gaps(composite, full_bitmask) for consistency with the PDF path."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-544
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-38
+    found_by: bug_triage_2026_05_11
+    file: src/salus/viewer/export.py
+    line: 431
+    description: "fill_value in export.py not validated as finite and reasonable — extreme fill values corrupt tile data without warning."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-545
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-39
+    found_by: bug_triage_2026_05_11
+    file: src/salus/viewer/export.py
+    line: 462
+    description: "finally block silently substitutes fill_value for NaN edge artefacts without logging. Log when NaN-fix count > 0 so tile artefact rate is visible."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-546
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-40
+    found_by: bug_triage_2026_05_11
+    file: src/salus/viewer/export.py
+    line: 476
+    description: "_encode_terrarium np.clip to [0, 65535.999] silently flattens out-of-range elevations. Warn when np.any((elevation < -32768) | (elevation > 32767)) to surface extreme terrain data."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-547
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-41
+    found_by: bug_triage_2026_05_11
+    file: src/salus/viewer/export.py
+    line: 828
+    description: "_load_sensor_library: missing type: key silently bucketed into 'Unknown' sensor type — warn so misconfigured sensor YAML is surfaced."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-548
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-42
+    found_by: bug_triage_2026_05_11
+    file: src/salus/viewer/sanitise.py
+    line: 171
+    description: "_round_coords_recursive passes non-list scalars through unmodified without warning on unexpected leaf shape."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-549
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-43
+    found_by: bug_triage_2026_05_11
+    file: src/salus/viewer/sanitise.py
+    line: 205
+    description: "_redact_stats crashes whole sanitiser when per_layer_coverage_pct is not a dict — add isinstance guard to prevent sanitiser failure from blocking viewer export."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-550
+    severity: low
+    task: triage-2026-05-11
+    triage_ref: S-44
+    found_by: bug_triage_2026_05_11
+    file: src/salus/viewer/sanitise.py
+    line: 94
+    description: "tuple() of rounded bounds_wgs84 does not guarantee 4-element arity — should validate length before constructing."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-551
+    severity: low
+    task: triage-2026-05-11
+    triage_ref: S-45
+    found_by: bug_triage_2026_05_11
+    file: src/salus/viewer/sanitise.py
+    line: 147
+    description: "_range_band: NaN value silently falls through to return 'long'. (Note: function currently unreferenced — verify before fixing; see D-498.)"
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-552
+    severity: low
+    task: triage-2026-05-11
+    triage_ref: S-46
+    found_by: bug_triage_2026_05_11
+    file: src/salus/viewer/export.py
+    line: 551
+    description: "_degrees_per_metre: custom-CRS misclassified as geographic causes 111000x simplification error. Add defensive validation. (Verify function is not dead code before fixing.)"
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-553
+    severity: low
+    task: triage-2026-05-11
+    triage_ref: S-47
+    found_by: bug_triage_2026_05_11
+    file: src/salus/viewer/export.py
+    line: 618
+    description: "_compute_corridor_path_wgs84: add math.isfinite guard around transformer.transform output for parity with _build_sensor_geojson."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-554
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-48
+    found_by: bug_triage_2026_05_11
+    file: src/salus/interface_api/app.py
+    line: 497
+    description: "_parse_entry broad except Exception swallows zone-parse failures silently — return per-zone failure list to caller instead."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-555
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-49
+    found_by: bug_triage_2026_05_11
+    file: src/salus/interface_api/app.py
+    line: 690
+    description: "SSE error event packs only str(exc) — uninterpretable for client. Include exception type and short traceback in the SSE error payload."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-556
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-50
+    found_by: bug_triage_2026_05_11
+    file: src/salus/interface_api/app.py
+    line: 963
+    description: "Per-tile reproject failure logged at DEBUG only — elevate to WARNING or count and warn if > threshold so map tile misregistration is visible."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-557
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-51
+    found_by: bug_triage_2026_05_11
+    file: src/salus/interface_api/app.py
+    line: 1395
+    description: "Unknown sensor-type key silently dropped from per-layer stats — surface skipped key count to caller to detect misconfigured sensor YAML."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-558
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-52
+    found_by: bug_triage_2026_05_11
+    file: src/salus/interface_api/app.py
+    line: 1410
+    description: "_num: when every candidate key is non-numeric, silently returns default 0.0 causing '0% coverage'. Track whether any key parsed; warn if none did."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-559
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-53
+    found_by: bug_triage_2026_05_11
+    file: src/salus/cli.py
+    line: 1700
+    description: "Comparison DEM/composite shape-mismatch warning goes to _log.warning only — also echo to stderr with click.echo(err=True) so CLI users see it."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-560
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-54
+    found_by: bug_triage_2026_05_11
+    file: src/salus/cli.py
+    line: 2442
+    description: "salus interface --scenario swallows pre-load exception and exits 0 with corrupt scenario. Make scenario-load failure fatal (non-zero exit) when --scenario was explicitly provided."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-561
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-55
+    found_by: bug_triage_2026_05_11
+    file: src/salus/interface_api/app.py
+    line: 244
+    description: "OptimiserRequest.terrain empty string passes Pydantic and resolves to CWD which may pass the allowlist guard — add field_validator rejecting empty string."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-562
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-56
+    found_by: bug_triage_2026_05_11
+    file: src/salus/interface_api/app.py
+    line: 1730
+    description: "GET /api/terrain/sessions/latest returns absolute dem_path / dsm_path in response payload — drop these fields to avoid leaking server filesystem layout to clients."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-563
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-57
+    found_by: bug_triage_2026_05_11
+    file: src/salus/interface_api/app.py
+    line: 1283
+    description: "HTTPException(detail=str(exc)) leaks raw exception strings (rasterio/shapely internal paths) to client — return generic detail and keep verbose message in server log."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-564
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-58
+    found_by: bug_triage_2026_05_11
+    file: src/salus/interface_api/app.py
+    line: 1530
+    description: "terrain_load size guard reads entire upload into memory before checking size — stream with chunked read and threshold-check inline to avoid OOM on large uploads."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-565
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-59
+    found_by: bug_triage_2026_05_11
+    file: src/salus/cli.py
+    line: 1895
+    description: "_gen_executive_summary bare except Exception: return '' with no log — add _log.warning so silent summary-generation failures are visible in logs."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-566
+    severity: low
+    task: triage-2026-05-11
+    triage_ref: S-60
+    found_by: bug_triage_2026_05_11
+    file: src/salus/interface_api/app.py
+    line: 62
+    description: "Sensor/effector cache retries on every request after a persistent YAML load failure — rate-limit the warning or short-cache the failure to avoid log spam."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-567
+    severity: low
+    task: triage-2026-05-11
+    triage_ref: S-61
+    found_by: bug_triage_2026_05_11
+    file: src/salus/interface_api/app.py
+    line: 914
+    description: "DEM EPSG lookup failure logged at DEBUG only — elevate so map misregistration cause is visible to operators."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-568
+    severity: low
+    task: triage-2026-05-11
+    triage_ref: S-62
+    found_by: bug_triage_2026_05_11
+    file: src/salus/interface_api/app.py
+    line: 1854
+    description: "StaticFiles mount exposes tests/, package.json, deploy-minimal.sh — restrict to client-facing files only."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-569
+    severity: low
+    task: triage-2026-05-11
+    triage_ref: S-63
+    found_by: bug_triage_2026_05_11
+    file: src/salus/interface_api/app.py
+    line: 1485
+    description: "tmp_pdf.unlink permission error masks the original render exception — wrap unlink in its own try block."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-570
+    severity: low
+    task: triage-2026-05-11
+    triage_ref: S-64
+    found_by: bug_triage_2026_05_11
+    file: src/salus/cli.py
+    line: 1898
+    description: "_read_b64: missing file and OSError are indistinguishable — log warning on OSError to help diagnose broken report asset paths."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-571
+    severity: low
+    task: triage-2026-05-11
+    triage_ref: S-65
+    found_by: bug_triage_2026_05_11
+    file: src/salus/cli.py
+    line: 2459
+    description: "Interface pre-load failure uses click.echo to stdout without err=True and without _log — fix to stderr and add log entry."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-572
+    severity: low
+    task: triage-2026-05-11
+    triage_ref: S-66
+    found_by: bug_triage_2026_05_11
+    file: src/salus/cli.py
+    line: 2469
+    description: "webbrowser.open return value ignored — echo fallback URL to stderr when it returns False so user knows browser did not open."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-573
+    severity: high
+    task: triage-2026-05-11
+    triage_ref: S-67
+    found_by: bug_triage_2026_05_11
+    file: src/salus/viewer/interface/modules/zone-editor/index.js
+    line: 862
+    description: "Watch 'if (!val) return;' leaves stale zones drawn after loading a scenario without a zones: field. Replace with const safe = val ?? { priority: [], exclusion: [] } and run rebuild unconditionally."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-574
+    severity: high
+    task: triage-2026-05-11
+    triage_ref: S-68
+    found_by: bug_triage_2026_05_11
+    file: src/salus/viewer/interface/modules/threat-corridor-editor/index.js
+    line: 817
+    description: "Same stale-state pattern as D-573 — watch 'if (!val) return;' leaves stale threat corridors drawn. Replace with safe default and run rebuild unconditionally."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-575
+    severity: high
+    task: triage-2026-05-11
+    triage_ref: S-69
+    found_by: bug_triage_2026_05_11
+    file: src/salus/viewer/interface/map-proxy.js
+    line: 138
+    description: "setLayoutProperty / setPaintProperty skip assertPrefix check — the documented module-isolation invariant is unenforced for these map proxy calls, allowing cross-module layer leakage."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-576
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-70
+    found_by: bug_triage_2026_05_11
+    file: src/salus/viewer/interface/modules/simulation-runner/index.js
+    line: 558
+    description: "Mid-flight abort suppresses both simulation:complete and simulation:failed events — emit simulation:failed with {error:'aborted'} or define simulation:cancelled so other modules can clean up."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-577
+    severity: medium
+    task: triage-2026-05-11
+    triage_ref: S-71
+    found_by: bug_triage_2026_05_11
+    file: src/salus/viewer/interface/modules/placement-editor/index.js
+    line: 534
+    description: "selectedIndex updated after api.state.set('placements', ...) — render uses stale index. Update selectedIndex before calling state.set to prevent one-frame stale render."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-578
+    severity: low
+    task: triage-2026-05-11
+    triage_ref: S-72
+    found_by: bug_triage_2026_05_11
+    file: src/salus/viewer/interface/modules/saturation-analyser/index.js
+    line: 453
+    description: "Slider snaps back to 1 on every simulation:complete — only reset when threshold/capacity actually changes to avoid disrupting user-adjusted slider values."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-579
+    severity: low
+    task: triage-2026-05-11
+    triage_ref: S-73
+    found_by: bug_triage_2026_05_11
+    file: src/salus/viewer/interface/modules/coverage-viewer/index.js
+    line: 740
+    description: "simulation:complete bus handler is redundant with state watch in coverage-viewer — remove or accept event payload instead of dual-updating."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-580
+    severity: low
+    task: triage-2026-05-11
+    triage_ref: S-74
+    found_by: bug_triage_2026_05_11
+    file: src/salus/viewer/interface/shell.js
+    line: 362
+    description: "library-load-error fires when SALUS_DATA fallback delivered an empty library by design — check whether fetch actually failed before treating as an error."
+    resolution: ""
+    status: open
+    commit: ""
+
+
+  - id: D-581
+    severity: low
+    task: triage-2026-05-11
+    triage_ref: S-75
+    found_by: bug_triage_2026_05_11
+    file: src/salus/viewer/interface/shell.js
+    line: 134
+    description: "Blob URL leaked in saveScenario if a.click() throws — wrap in try/finally and revoke unconditionally."
+    resolution: ""
+    status: open
     commit: ""
 
 
@@ -5465,7 +6609,7 @@ defects:
     description: "Handoff routing race: two optimiser:apply emissions within the same tick (e.g. user double-clicks Apply) could schedule interleaved activate-then-reemit sequences. The original payload-identity WeakSet guard only de-duped within a single re-emit chain, not across distinct user actions with different payload objects. Discovered during L2 review of the D-493 fix."
     resolution: "Replaced WeakSet of payload references with a per-event _pendingHandoff Set. The guard fires whenever a route for the event is in flight, regardless of payload identity, so re-entry (router re-emit) AND rapid duplicate user clicks both collapse to a single activation. Wrapped activate/emit in try/finally so the in-flight token is always released. Added regression test 'rapid duplicate optimiser:apply emits collapse to one activation'."
     status: resolved
-    commit: ""
+    commit: "8f5a7c1"
 
 
   - id: D-583
@@ -5477,7 +6621,7 @@ defects:
     description: "Handoff router re-emitted the handoff event unconditionally after await activateModule, but activateModule catches and logs init errors internally. If init failed, the target had no live scoped subscription, so the re-emit silently dropped the payload — defeating the D-493 fix. Discovered during L2 review."
     resolution: "activateModule now returns Promise<boolean> (true on success, false on caught error). _routeHandoff checks the result; on false it logs a warning ('[mode-manager] handoff dropped: target failed to initialise') and skips the re-emit so the failure is observable rather than silent."
     status: resolved
-    commit: ""
+    commit: "8f5a7c1"
 
 
   - id: D-584
@@ -5489,7 +6633,7 @@ defects:
     description: "Back-button handler set activeModuleId = null before calling activateModule(prev). Because activateModule's unmount block is keyed off activeModuleId !== null, this meant the outgoing module never had runUnmount called when the user navigated via Back — leaking map sources, layers, and bus subscriptions. Pre-existing bug, but the D-492 fix (init runs every activation) made the resulting state divergence more visible and dangerous."
     resolution: "Back-button handler now looks up the current registry entry and calls current.runUnmount() (with try/catch) BEFORE clearing activeModuleId. Back navigation does not push the current module onto navHistory (it is moving backwards through the stack, not extending it)."
     status: resolved
-    commit: ""
+    commit: "8f5a7c1"
 
 
   - id: D-585
@@ -5501,4 +6645,71 @@ defects:
     description: "activateModule sets activeModuleId and state.ui.active_module_id BEFORE calling mod.init(api). If init throws (caught at the bottom of activateModule), the UI advertises a module that has no panel, no map layers, and no live subscriptions — user sees a blank panel with no error surfaced. Pre-existing behaviour, made more reachable by the D-492 fix (init runs every activation rather than once). Deferred from this commit — proposed fix is to roll back activeModuleId on init failure and emit a shell:error event."
     resolution: ""
     status: open
+    commit: ""
+
+
+  - id: D-586
+    severity: high
+    task: I-17
+    found_by: silent_failure_hunter
+    file: src/salus/engine/viewshed.py
+    line: 249
+    description: "compute_viewshed_through_canopy: obs_z = float(dem[obs_row, obs_col]) + observer_height. DEM nodata cells are np.nan (terrain.py). If the observer cell is nodata, obs_z is NaN, every los_slope and los_z is NaN, the canopy guard 'los_z < canopy_top_j' is always False, and the entire 3D LOS attenuation pass is silently disabled — every visible cell returns transmission 1.0 with no error or warning."
+    resolution: "Not reachable as described — compute_viewshed (called first inside compute_viewshed_through_canopy) already raises ValueError for a nodata observer DEM cell, so obs_z can never be NaN. The silent-failure-hunter finding over-stated reachability. A clarifying comment was added at the obs_z computation documenting the invariant; no behavioural change."
+    status: "resolved"
+    commit: ""
+
+  - id: D-587
+    severity: high
+    task: I-17
+    found_by: silent_failure_hunter
+    file: src/salus/engine/viewshed.py
+    line: 297
+    description: "compute_viewshed_through_canopy: target_z = float(surface[rk, ck]) reads site.surface_array() (DSM/DEM), whose nodata cells are np.nan. A NaN target_z makes los_slope NaN so the canopy elevation guard never fires and that target's canopy attenuation is silently skipped — the cell reports 1.0 (fully visible) instead of an attenuated value."
+    resolution: "I-17: a nodata (NaN) target surface elevation is now detected via a los_defined flag; when the LOS geometry is undefined the target falls back to conservative 2D accumulation (every canopy cell on the path penalised, no elevation gate) instead of silently leaving the cell unattenuated at 1.0."
+    status: "resolved"
+    commit: ""
+
+  - id: D-588
+    severity: medium
+    task: I-14
+    found_by: silent_failure_hunter
+    file: src/salus/interface_api/app.py
+    line: 244
+    description: "_spawn_simulate_worker: the caller acquires _SIMULATE_SEMAPHORE (non-blocking) and the release lives in the worker thread wrapper's finally. If threading.Thread.start() raises (e.g. RuntimeError 'can't start new thread' under resource exhaustion) the thread never runs, the finally never executes, and the acquired slot leaks permanently. After _MAX_CONCURRENT_SIMULATIONS such failures /api/simulate and /api/optimise return 503 forever."
+    resolution: "I-14: _spawn_simulate_worker now wraps thread.start() in try/except BaseException — if the thread fails to start the caller-acquired semaphore slot is released before re-raising, so a start failure cannot permanently leak a slot."
+    status: "resolved"
+    commit: ""
+
+  - id: D-589
+    severity: medium
+    task: I-16
+    found_by: regression_reviewer
+    file: src/salus/interface_api/app.py
+    line: 1568
+    description: "I-16 behaviour change: render_pdf now raises ReportRenderError when a REQUIRED section template fails. The /api/report endpoint previously returned a degraded 200 PDF for a broken/missing required template; it now returns HTTP 500 (caught by the handler's except Exception). The change is intended and handled safely, but no test in tests/test_interface_api.py exercises the required-template-failure path, so the new API behaviour is unverified."
+    resolution: "I-16: added tests/test_interface_api.py::test_report_required_section_failure_returns_500 — monkeypatches render_pdf to raise ReportRenderError and asserts /api/report returns HTTP 500 with the reason in the JSON body, locking in the intended (spec-compliant) behaviour change."
+    status: "resolved"
+    commit: ""
+
+  - id: D-590
+    severity: low
+    task: I-14
+    found_by: type_design_analyzer
+    file: src/salus/interface_api/app.py
+    line: 244
+    description: "_spawn_simulate_worker(target: Any, ...) — Any defeats type checking; both call sites pass concretely (...)->None pipeline functions. mypy cannot verify target is callable or returns None. Should be typed Callable[..., None]."
+    resolution: "I-14: _spawn_simulate_worker target parameter retyped from Any to Callable[..., None] (imported from collections.abc); args stays tuple[Any, ...] as the element types are intentionally heterogeneous (documented in the docstring)."
+    status: "resolved"
+    commit: ""
+
+  - id: D-591
+    severity: low
+    task: I-17
+    found_by: type_design_analyzer
+    file: src/salus/models/site.py
+    line: 126
+    description: "SiteModel.surface_array() is annotated -> np.ndarray (unparameterised). It is now a load-bearing input to the rewritten compute_viewshed_through_canopy LOS path, which consumes it as a float array; viewshed.py annotates every other array surface with npt.NDArray[...]. Should be npt.NDArray[np.float64] for interface consistency."
+    resolution: "Accepted without code change: SiteModel.dem/dsm are themselves declared bare np.ndarray, so tightening only surface_array()'s return annotation to npt.NDArray[np.float64] would misrepresent the field types and create a mypy return-type mismatch. A consistent fix belongs to a SiteModel-wide type pass and is out of scope for I-17."
+    status: "accepted_documented"
     commit: ""

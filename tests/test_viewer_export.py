@@ -266,6 +266,24 @@ class TestExportViewerData:
         result = export_viewer_data(sim)
         assert len(result.terrain_tiles) > 0
 
+    def test_libraries_loaded_from_disk(self, flat_dem_path):
+        """`export_viewer_data` populates sensor_library/effector_library from
+        the bundled YAML data dir so the sanitiser controls a single trust
+        boundary (D-498).
+        """
+        from salus.ingest.terrain import load_dem
+
+        site = load_dem(flat_dem_path)
+        sim = _make_sim_results(site)
+        result = export_viewer_data(sim)
+        # The bundled data/sensors directory has at least one YAML — the load
+        # must produce a non-empty dict here so package_viewer can embed it
+        # without re-reading the filesystem.
+        assert isinstance(result.sensor_library, dict)
+        assert len(result.sensor_library) > 0
+        assert isinstance(result.effector_library, dict)
+        assert len(result.effector_library) > 0
+
     def test_terrain_tiles_are_valid_base64(self, flat_dem_path):
         from salus.ingest.terrain import load_dem
 
@@ -386,6 +404,16 @@ class TestPackageViewer:
             },
             terrain_min_zoom=12,
             terrain_max_zoom=12,
+            # Libraries flow through ViewerData (D-498). Tests that assert
+            # embedding must populate them here — package_viewer no longer
+            # loads from disk.
+            sensor_library={
+                "Radar": [{"name": "Test Radar", "type": "Radar", "max_range_m": 1500.0}],
+                "EO_IR": [{"name": "Test EO", "type": "EO_IR", "max_range_m": 800.0}],
+            },
+            effector_library={
+                "Jammer": [{"name": "Test Jammer", "type": "Jammer", "max_range_m": 600.0}],
+            },
         )
 
     def test_creates_output_directory(self, tmp_path):
@@ -523,6 +551,58 @@ class TestPackageViewer:
                 assert item.get("type") == type_key, (
                     f"Item type mismatch: {item.get('type')!r} != {type_key!r}"
                 )
+
+    def test_redacted_viewer_does_not_leak_library_secrets(self, tmp_path):
+        """End-to-end: a REDACTED packaged viewer has no proprietary content (D-498)."""
+        import json
+
+        from salus.viewer.sanitise import SanitiseConfig, SanitiseLevel, sanitise_for_export
+
+        vd = self._make_minimal_viewer_data()
+        # Inject content that would be unsafe to leak if it survived sanitisation.
+        vd.sensor_library["Radar"][0]["name"] = "Echodyne EchoGuard"
+        vd.sensor_library["Radar"][0]["cost_aud"] = 50000.0
+        vd.sensor_library["EO_IR"][0]["name"] = "Anduril WISP"
+        vd.effector_library["Jammer"][0]["name"] = "DroneShield DroneCannon"
+        vd.effector_library["Jammer"][0]["cost_aud"] = 30000.0
+
+        redacted = sanitise_for_export(vd, SanitiseConfig(level=SanitiseLevel.REDACTED))
+        out = tmp_path / "viewer_out"
+        package_viewer(redacted, out)
+
+        content = (out / "viewer_data.js").read_text()
+        # No vendor names in the packaged viewer.
+        assert "Echodyne EchoGuard" not in content
+        assert "Anduril WISP" not in content
+        assert "DroneShield DroneCannon" not in content
+        # No exact range values surfaced — and no cost numbers.
+        json_str = content.removeprefix("window.SALUS_DATA=").rstrip(";\n")
+        data = json.loads(json_str)
+        for entries in data["sensor_library"].values():
+            for entry in entries:
+                assert "max_range_m" not in entry
+                assert "cost_aud" not in entry
+        for entries in data["effector_library"].values():
+            for entry in entries:
+                assert "max_range_m" not in entry
+                assert "cost_aud" not in entry
+
+    def test_full_sanitised_viewer_omits_libraries(self, tmp_path):
+        """A FULL-sanitised packaged viewer carries no library content at all."""
+        import json
+
+        from salus.viewer.sanitise import SanitiseConfig, SanitiseLevel, sanitise_for_export
+
+        vd = self._make_minimal_viewer_data()
+        full = sanitise_for_export(vd, SanitiseConfig(level=SanitiseLevel.FULL))
+        out = tmp_path / "viewer_out"
+        package_viewer(full, out)
+
+        content = (out / "viewer_data.js").read_text()
+        json_str = content.removeprefix("window.SALUS_DATA=").rstrip(";\n")
+        data = json.loads(json_str)
+        assert data["sensor_library"] == {}
+        assert data["effector_library"] == {}
 
 
 # ---------------------------------------------------------------------------
@@ -789,6 +869,160 @@ class TestSanitiseForExport:
         result = sanitise_for_export(vd, SanitiseConfig(level=SanitiseLevel.FULL))
         assert result.stats["total_coverage_pct"] == 47.5
         assert result.stats["gap_area_m2"] == 100.0
+
+    # ---------------------------------------------------------------------
+    # D-498 / I-15: library redaction at each sanitise level
+    # ---------------------------------------------------------------------
+
+    def _make_viewer_data_with_libraries(self) -> ViewerData:
+        """A ViewerData with realistic sensor/effector library entries."""
+        vd = self._make_viewer_data_with_sensors()
+        vd.sensor_library = {
+            "EO_IR": [
+                {
+                    "name": "Anduril WISP",
+                    "type": "EO_IR",
+                    "max_range_m": 5000.0,
+                    "min_range_m": 0.0,
+                    "azimuth_coverage_deg": 360.0,
+                    "elevation_coverage_deg": 125.0,
+                    "elevation_boresight_deg": 0.0,
+                    "frequency_bands": [],
+                    "requires_los": True,
+                    "mounting_height_m": 5.0,
+                    "vegetation_penetration": 0.0,
+                    "cost_aud": None,
+                },
+            ],
+            "Radar": [
+                {
+                    "name": "Echodyne EchoGuard",
+                    "type": "Radar",
+                    "max_range_m": 1000.0,
+                    "azimuth_coverage_deg": 120.0,
+                    "elevation_coverage_deg": 80.0,
+                    "frequency_bands": ["K-band"],
+                    "requires_los": True,
+                    "cost_aud": 50000.0,
+                },
+            ],
+        }
+        vd.effector_library = {
+            "Jammer": [
+                {
+                    "name": "DroneShield DroneCannon",
+                    "type": "Jammer",
+                    "max_range_m": 2500.0,
+                    "azimuth_coverage_deg": 90.0,
+                    "requires_los": False,
+                    "cost_aud": 30000.0,
+                    "notes": "directional RF jammer",
+                },
+            ],
+        }
+        return vd
+
+    def test_minimal_preserves_libraries(self):
+        vd = self._make_viewer_data_with_libraries()
+        result = sanitise_for_export(vd, SanitiseConfig(level=SanitiseLevel.MINIMAL))
+        # MINIMAL must leave libraries unchanged so the analysis environment
+        # can use the full DB while still rounding coordinates.
+        assert result.sensor_library["EO_IR"][0]["name"] == "Anduril WISP"
+        assert result.sensor_library["EO_IR"][0]["max_range_m"] == 5000.0
+        assert result.effector_library["Jammer"][0]["cost_aud"] == 30000.0
+
+    def test_redacted_strips_vendor_name_from_sensor_library(self):
+        vd = self._make_viewer_data_with_libraries()
+        result = sanitise_for_export(vd, SanitiseConfig(level=SanitiseLevel.REDACTED))
+        entry = result.sensor_library["EO_IR"][0]
+        assert entry["name"] != "Anduril WISP"
+        assert entry["name"] == "EO_IR-1"
+
+    def test_redacted_strips_max_range_from_sensor_library(self):
+        vd = self._make_viewer_data_with_libraries()
+        result = sanitise_for_export(vd, SanitiseConfig(level=SanitiseLevel.REDACTED))
+        entry = result.sensor_library["EO_IR"][0]
+        assert "max_range_m" not in entry
+        # 5000 m exact range -> "long" band.
+        assert entry["range_band"] == "long"
+
+    def test_redacted_bands_radar_range(self):
+        vd = self._make_viewer_data_with_libraries()
+        result = sanitise_for_export(vd, SanitiseConfig(level=SanitiseLevel.REDACTED))
+        # Echodyne range 1000 m falls in the "medium" band (500-2000 m).
+        assert result.sensor_library["Radar"][0]["range_band"] == "medium"
+
+    def test_redacted_strips_proprietary_fields(self):
+        vd = self._make_viewer_data_with_libraries()
+        result = sanitise_for_export(vd, SanitiseConfig(level=SanitiseLevel.REDACTED))
+        eo_ir = result.sensor_library["EO_IR"][0]
+        for forbidden in (
+            "min_range_m",
+            "elevation_boresight_deg",
+            "frequency_bands",
+            "mounting_height_m",
+            "vegetation_penetration",
+            "cost_aud",
+        ):
+            assert forbidden not in eo_ir, f"{forbidden} leaked into redacted entry"
+
+    def test_redacted_retains_whitelist_fields(self):
+        vd = self._make_viewer_data_with_libraries()
+        result = sanitise_for_export(vd, SanitiseConfig(level=SanitiseLevel.REDACTED))
+        eo_ir = result.sensor_library["EO_IR"][0]
+        assert eo_ir["type"] == "EO_IR"
+        assert eo_ir["azimuth_coverage_deg"] == pytest.approx(360.0)
+        assert eo_ir["elevation_coverage_deg"] == pytest.approx(125.0)
+        assert eo_ir["requires_los"] is True
+
+    def test_redacted_strips_effector_proprietary_fields(self):
+        vd = self._make_viewer_data_with_libraries()
+        result = sanitise_for_export(vd, SanitiseConfig(level=SanitiseLevel.REDACTED))
+        jammer = result.effector_library["Jammer"][0]
+        assert jammer["name"] == "Jammer-1"
+        assert "cost_aud" not in jammer
+        assert "notes" not in jammer
+        assert "max_range_m" not in jammer
+        assert jammer["range_band"] == "long"  # 2500 m > 2000 m -> long
+        assert jammer["type"] == "Jammer"
+
+    def test_full_clears_libraries(self):
+        vd = self._make_viewer_data_with_libraries()
+        result = sanitise_for_export(vd, SanitiseConfig(level=SanitiseLevel.FULL))
+        assert result.sensor_library == {}
+        assert result.effector_library == {}
+
+    def test_redacted_does_not_mutate_original_library(self):
+        vd = self._make_viewer_data_with_libraries()
+        original_name = vd.sensor_library["EO_IR"][0]["name"]
+        original_range = vd.sensor_library["EO_IR"][0]["max_range_m"]
+        sanitise_for_export(vd, SanitiseConfig(level=SanitiseLevel.REDACTED))
+        # Original must be untouched — the sanitiser deep-copies before
+        # redacting so the analysis-environment copy of the library survives.
+        assert vd.sensor_library["EO_IR"][0]["name"] == original_name
+        assert vd.sensor_library["EO_IR"][0]["max_range_m"] == original_range
+
+    def test_redacted_handles_entry_with_no_max_range(self):
+        vd = self._make_viewer_data_with_libraries()
+        # Strip max_range_m to simulate a malformed/sparse YAML entry.
+        del vd.sensor_library["EO_IR"][0]["max_range_m"]
+        result = sanitise_for_export(vd, SanitiseConfig(level=SanitiseLevel.REDACTED))
+        # The sanitiser must not blow up; range_band falls back to "unknown".
+        assert result.sensor_library["EO_IR"][0]["range_band"] == "unknown"
+
+    def test_redacted_handles_entry_with_nan_max_range(self):
+        vd = self._make_viewer_data_with_libraries()
+        vd.sensor_library["EO_IR"][0]["max_range_m"] = float("nan")
+        result = sanitise_for_export(vd, SanitiseConfig(level=SanitiseLevel.REDACTED))
+        # NaN must not silently produce "long" — caller guards _range_band.
+        assert result.sensor_library["EO_IR"][0]["range_band"] == "unknown"
+
+    def test_redacted_handles_entry_with_bool_max_range(self):
+        vd = self._make_viewer_data_with_libraries()
+        # bool is technically int — must not be banded as a numeric range.
+        vd.sensor_library["EO_IR"][0]["max_range_m"] = True
+        result = sanitise_for_export(vd, SanitiseConfig(level=SanitiseLevel.REDACTED))
+        assert result.sensor_library["EO_IR"][0]["range_band"] == "unknown"
 
 
 # ---------------------------------------------------------------------------

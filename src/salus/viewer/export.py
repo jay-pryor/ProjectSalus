@@ -17,7 +17,7 @@ import logging
 import math
 import shutil
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -119,6 +119,16 @@ class ViewerData:
 
     terrain_max_zoom: int
     """Highest zoom level at which terrain tiles are available."""
+
+    sensor_library: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    """Sensor library entries grouped by type, loaded from ``data/sensors/*.yaml``.
+
+    Placed on :class:`ViewerData` (rather than reloaded inside :func:`package_viewer`)
+    so the sanitiser can redact the proprietary fields before delivery — see D-498.
+    """
+
+    effector_library: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    """Effector library entries grouped by type, loaded from ``data/effectors/*.yaml``."""
 
     sanitised: bool = False
     """True after :func:`~salus.viewer.sanitise.sanitise_for_export` has been applied."""
@@ -319,6 +329,13 @@ def export_viewer_data(
         )
         _log.info("Generated %d terrain tiles", len(terrain_tiles))
 
+    # Sensor / effector libraries — loaded here so they become part of the
+    # ViewerData trust boundary that :func:`sanitise_for_export` controls.
+    # Previously, package_viewer reloaded these from disk after sanitisation,
+    # which silently bypassed the redaction path (D-498).
+    sensor_library = _load_sensor_library(_DATA_DIR / "sensors")
+    effector_library = _load_sensor_library(_DATA_DIR / "effectors")
+
     return ViewerData(
         scenario_name=scenario_name,
         generated_at=generated_at,
@@ -333,6 +350,8 @@ def export_viewer_data(
         terrain_tiles=terrain_tiles,
         terrain_min_zoom=_TERRAIN_MIN_ZOOM,
         terrain_max_zoom=_TERRAIN_MAX_ZOOM,
+        sensor_library=sensor_library,
+        effector_library=effector_library,
     )
 
 
@@ -366,13 +385,16 @@ def package_viewer(
     #    tile count is available for the viewer_data.js payload.
     terrain_tile_count = _write_terrain_tile_files(viewer_data, output_dir)
 
-    # 2. Load sensor/effector library YAMLs so the interactive panel is populated.
-    sensor_library = _load_sensor_library(_DATA_DIR / "sensors")
-    effector_library = _load_sensor_library(_DATA_DIR / "effectors")
+    # 2. Pull the (possibly sanitised) library off ViewerData. Reading from
+    #    disk here would silently bypass any redaction the sanitiser applied
+    #    (D-498).
+    sensor_library = viewer_data.sensor_library
+    effector_library = viewer_data.effector_library
     _log.info(
-        "Library loaded: %d sensor types, %d effector types",
+        "Library: %d sensor types, %d effector types (sanitised=%s)",
         len(sensor_library),
         len(effector_library),
+        viewer_data.sanitised,
     )
 
     # 3. Write embedded data JS (GeoJSON, stats, library — tile count for JS guard)

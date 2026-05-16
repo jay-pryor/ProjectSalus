@@ -2,8 +2,12 @@
 
 Ad-hoc bug sweep across the repo (six parallel review agents: two silent-failure hunters,
 module-architecture reviewer, two general-purpose logic/security hunters, type-design
-analyzer). Findings here are NOT yet in `.forge/defect-register.yaml` — they need to be
-folded into the formal Forge workflow (logged before fixing, gate-proof on fix).
+analyzer).
+
+**Status (2026-05-13):** All findings logged to `.forge/defect-register.yaml`.
+- O-6 resolved as D-482/D-483 (I-13, commit 3485433).
+- O-1..O-5, O-7..O-16 logged as D-492..D-506 (status: open).
+- S-1..S-75 logged as D-507..D-581 (status: open).
 
 Triage routes each finding to **Opus** (complex reasoning, architectural decisions,
 algorithmic semantics, security policy) or **Sonnet** (well-scoped mechanical fixes

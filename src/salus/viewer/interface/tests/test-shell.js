@@ -211,6 +211,165 @@ test('validateScenarioPayload(): rejects ui key (not in SCENARIO_KEYS)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// D-499 / I-15: deep structural validation against XSS and prototype pollution
+// ---------------------------------------------------------------------------
+
+test('validateScenarioPayload(): rejects __proto__ key at top level', () => {
+  // JSON.parse('{"__proto__":{}}') puts __proto__ as an own key on the parsed
+  // object — must be rejected before any downstream merge/assign operation.
+  const parsed = JSON.parse('{"__proto__":{"polluted":true}}');
+  assert.equal(validateScenarioPayload(parsed), false);
+});
+
+test('validateScenarioPayload(): rejects __proto__ key nested inside a value', () => {
+  const parsed = JSON.parse('{"placements":[{"__proto__":{"polluted":true}}]}');
+  assert.equal(validateScenarioPayload(parsed), false);
+});
+
+test('validateScenarioPayload(): rejects constructor key at any depth', () => {
+  const parsed = JSON.parse('{"placements":[{"constructor":{"prototype":{}}}]}');
+  assert.equal(validateScenarioPayload(parsed), false);
+});
+
+test('validateScenarioPayload(): rejects prototype key at any depth', () => {
+  const parsed = JSON.parse('{"constraints":{"prototype":{}}}');
+  assert.equal(validateScenarioPayload(parsed), false);
+});
+
+test('validateScenarioPayload(): rejects string containing an HTML tag opener', () => {
+  assert.equal(
+    validateScenarioPayload({
+      placements: [{ sensor_name: '<script>alert(1)</script>' }],
+    }),
+    false,
+  );
+});
+
+test('validateScenarioPayload(): rejects string containing an img onerror payload', () => {
+  assert.equal(
+    validateScenarioPayload({
+      placements: [{ note: '<img src=x onerror=alert(1)>' }],
+    }),
+    false,
+  );
+});
+
+test('validateScenarioPayload(): rejects javascript: URI in a string value', () => {
+  assert.equal(
+    validateScenarioPayload({
+      placements: [{ url: 'javascript:alert(1)' }],
+    }),
+    false,
+  );
+});
+
+test('validateScenarioPayload(): rejects javascript: URI with whitespace', () => {
+  // The matcher must tolerate whitespace before the colon, e.g.
+  // "javascript :" or "JAVASCRIPT  :" — both bypass naive substring checks.
+  assert.equal(
+    validateScenarioPayload({
+      placements: [{ url: 'JAVASCRIPT  :alert(1)' }],
+    }),
+    false,
+  );
+});
+
+test('validateScenarioPayload(): rejects string exceeding max length', () => {
+  const huge = 'a'.repeat(100_001);
+  assert.equal(
+    validateScenarioPayload({ placements: [{ note: huge }] }),
+    false,
+  );
+});
+
+test('validateScenarioPayload(): rejects object nested beyond max depth', () => {
+  // Build a chain of 40 nested {a:{...}} objects under a known key.
+  let nested = { leaf: 1 };
+  for (let i = 0; i < 40; i += 1) {
+    nested = { a: nested };
+  }
+  assert.equal(
+    validateScenarioPayload({ constraints: nested }),
+    false,
+  );
+});
+
+test('validateScenarioPayload(): accepts nested object within depth limit', () => {
+  // 5 levels of nesting — well under the cap.
+  const nested = { a: { b: { c: { d: { e: 'safe' } } } } };
+  assert.equal(
+    validateScenarioPayload({ constraints: nested }),
+    true,
+  );
+});
+
+test('validateScenarioPayload(): rejects NaN number value', () => {
+  // NaN cannot survive JSON.parse, but defence-in-depth: synthetic input
+  // produced by buggy downstream code must not pass.
+  assert.equal(
+    validateScenarioPayload({ placements: [{ lat: NaN }] }),
+    false,
+  );
+});
+
+test('validateScenarioPayload(): rejects Infinity number value', () => {
+  assert.equal(
+    validateScenarioPayload({ placements: [{ lat: Infinity }] }),
+    false,
+  );
+});
+
+test('validateScenarioPayload(): accepts realistic scenario payload unchanged', () => {
+  // Realistic save-file shape — must still be accepted post-tightening.
+  const payload = {
+    terrain: { dem_path: '/data/site.tif' },
+    placements: [
+      { id: 'p1', lat: -33.8688, lon: 151.2093, sensor_name: 'Sensor-1' },
+    ],
+    zones: [],
+    threat_corridors: [{ bearing_deg: 45, start_distance_m: 1000 }],
+    constraints: { budget_aud: 250000 },
+    sim_results: null,
+    report_config: { include_kill_chain: true },
+  };
+  assert.equal(validateScenarioPayload(payload), true);
+});
+
+test('validateScenarioPayload(): rejects unsafe content inside sensor_library entry', () => {
+  // sensor_library is a SCENARIO_KEY because it round-trips through save/load,
+  // so it must still be subject to deep validation.
+  assert.equal(
+    validateScenarioPayload({
+      sensor_library: {
+        Radar: [{ name: '<script>alert(1)</script>', type: 'Radar' }],
+      },
+    }),
+    false,
+  );
+});
+
+test('validateScenarioPayload(): accepts a realistic sensor_library payload', () => {
+  // Positive round-trip case — a sanitised library shape must pass so that
+  // save-then-load preserves library content.
+  assert.equal(
+    validateScenarioPayload({
+      sensor_library: {
+        Radar: [
+          { name: 'Radar-1', type: 'Radar', range_band: 'medium', azimuth_coverage_deg: 120 },
+        ],
+        EO_IR: [
+          { name: 'EO_IR-1', type: 'EO_IR', range_band: 'long', azimuth_coverage_deg: 360 },
+        ],
+      },
+      effector_library: {
+        Jammer: [{ name: 'Jammer-1', type: 'Jammer', range_band: 'long', requires_los: false }],
+      },
+    }),
+    true,
+  );
+});
+
+// ---------------------------------------------------------------------------
 // S14.14-2: Scenario save/load — applyScenarioPayload
 // ---------------------------------------------------------------------------
 

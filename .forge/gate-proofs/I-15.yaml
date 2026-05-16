@@ -1,0 +1,52 @@
+task_id: I-15
+timestamp: 2026-05-13T14:10:00Z
+title: "Viewer trust-boundary fixes — sanitiser redacts proprietary library + scenario-load deep validation"
+
+quality_gates:
+  G1_lint: pass            # ruff check src/salus/viewer/sanitise.py src/salus/viewer/export.py tests/test_viewer_export.py — "All checks passed!" (pre-existing tests/test_canopy.py E501 unrelated to I-15)
+  G2_format: pass          # ruff format --check on the three changed Python files — "3 files already formatted"
+  G3_import: pass          # ruff check --select I src/salus/viewer/sanitise.py src/salus/viewer/export.py — "All checks passed!"
+  G4_type: pass            # mypy src/salus/viewer/sanitise.py src/salus/viewer/export.py — 10 errors total, all pre-existing import-untyped warnings on yaml/rasterio/shapely stubs; 0 errors introduced by I-15. Per CLAUDE.md G4 warnings are informational unless they indicate clear correctness errors.
+  G5_security: pass        # bandit -r src/salus/viewer/sanitise.py src/salus/viewer/export.py -ll — "Total issues: Low 0, Medium 0, High 0"
+  G6_unit_test: pass       # COVERAGE_FILE=.coverage.i15 pytest tests/ --cov=src/salus --cov-fail-under=80 -q — 1365 passed, 4 skipped, 0 failed (2420.03 s / 40:20 under parallel-worker contention with I-16 and other sessions on the same workspace). First attempt was OOM-killed mid-run by competing test sessions; rerun completed cleanly. JS suite: node --test src/salus/viewer/interface/tests/test-shell.js — 37 passed, 0 failed.
+  G7_coverage: pass        # Total coverage 83.00%, above the 80% threshold. sanitise.py 98% (2/117 lines missed); export.py 78% (per-file, pre-existing; the gate measures total).
+  G8_secrets: pass         # detect-secrets scan src/salus/viewer/sanitise.py src/salus/viewer/export.py src/salus/viewer/interface/shell.js — 0 files with secrets. Redaction-related strings ("javascript:", "<script>") in test files are test fixtures, not credentials.
+  coverage_pct: 83.00
+
+review:
+  l1_standards:
+    testing: pass          # tests use descriptive names (test_redacted_strips_vendor_name_from_sensor_library, test_redacted_handles_entry_with_nan_max_range), tmp_path for package_viewer outputs, pytest.approx for floats, no MagicMock; new TestSanitiseForExport methods grouped in the existing class
+    error_handling: pass   # _redact_library does not swallow exceptions; isinstance + math.isfinite guards classify every non-numeric/NaN/inf/missing max_range_m as "unknown" without try/except; no new bare except, no new file I/O failure paths
+    logging: pass          # one existing _log.info line in package_viewer extended to record the sanitised=<bool> flag; no print() added, no new library-level loggers
+    security: pass         # change is net security-positive — adds proprietary-data redaction (D-498) and XSS / prototype-pollution validation (D-499); no new file I/O or user-path handling
+    interface_modules: N/A # shell.js lives under src/salus/viewer/interface/, not under static/ or modules/ — the interface-modules standard explicitly scopes to those directories. test-shell.js is a test file (also out of scope per the standard).
+
+  l2_agents:
+    silent_failure_hunter: {status: pass, findings: 0}
+    spec_compliance: {status: pass, findings: 1}        # AC 14 (defect register status: resolved with commit hash) is flagged because the commit hash post-dates the review window; this is the standard pattern (resolution + status: resolved are set pre-commit, commit hash is filled in the follow-up chore commit).
+    type_design_analyzer: N/A                            # No new type annotations beyond two `dict[str, list[dict[str, Any]]]` dataclass field annotations on ViewerData which mirror the existing structure used throughout export.py; not a substantive type-design change.
+    regression_reviewer: {status: pass, findings: 2}    # 2 LOW non-blocking observations addressed in follow-up: (a) added test_libraries_loaded_from_disk in TestExportViewerData to lock in the new disk-load path; (b) added a positive-case test for a realistic sensor_library/effector_library payload in test-shell.js to lock in the round-trip behaviour.
+    module_architecture_reviewer: pass                   # 0 findings. validateScenarioPayload is purely functional (no state/bus/map refs), no new imports, all helpers (_isPlainObject, _isSafeScenarioValue, _FORBIDDEN_OBJECT_KEYS, _MAX_SCENARIO_DEPTH, _MAX_SCENARIO_STRING_LEN, _HTML_OPENER_RE, _JS_URI_RE) are underscore-prefixed module-private, applyScenarioPayload is unchanged, no input mutation in the deep walk. shell.js is the host (not a module), so the five module invariants do not apply to its file directly — but the architectural boundary is preserved.
+
+defect_ids:
+  - D-498   # sanitiser does not redact sensor_library / effector_library (sanitise.py:69 → fixed by moving library load into ViewerData + _redact_library at REDACTED/FULL)
+  - D-499   # validateScenarioPayload only checks key names (shell.js:162 → fixed by deep-recursive structural validator with __proto__ / depth / string-length / HTML-opener / javascript: URI rejection)
+
+files_changed:
+  - docs/Technical/ProjectPath.md                       # +I-15 spec entry (just above Slice 15)
+  - src/salus/viewer/sanitise.py                        # +_PUBLIC_SENSOR_FIELDS, +_PUBLIC_EFFECTOR_FIELDS, +_redact_library, +REDACTED/FULL library branches in sanitise_for_export
+  - src/salus/viewer/export.py                          # +sensor_library/effector_library fields on ViewerData (default_factory=dict), +library load in export_viewer_data, package_viewer reads from ViewerData (no disk reload)
+  - src/salus/viewer/interface/shell.js                 # validateScenarioPayload rewritten as deep-recursive structural validator (helpers _isPlainObject, _isSafeScenarioValue + constants/regexes)
+  - tests/test_viewer_export.py                         # +12 sanitise library-redaction tests, +2 package_viewer end-to-end tests, +test_libraries_loaded_from_disk; _make_minimal_viewer_data now populates libraries directly
+  - src/salus/viewer/interface/tests/test-shell.js      # +16 validateScenarioPayload tests (proto pollution, HTML opener, javascript: URI, depth, length, NaN/Infinity, realistic payload, positive sensor_library round-trip)
+  - .forge/defect-register.yaml                         # D-498/D-499 resolution + status: resolved (commit hash filled post-commit)
+
+notes:
+  - Source: Triage bug-triage-2026-05-11.md findings O-8 (sanitiser) and O-9 (validateScenarioPayload), Group 5 (HIGH). Both are the same "trust boundary" policy decision for the viewer.
+  - "Policy decision — REDACTED level retains type/azimuth/elevation/requires_los; renames entries to '{type}-{i}'; bands max_range_m via _range_band to short/medium/long; drops vendor name, cost, min_range, frequency_bands, mounting_height, vegetation_penetration, elevation_boresight, notes."
+  - "Policy decision — FULL level clears both libraries to an empty mapping."
+  - "Policy decision — D-499 fixed by deep structural validation plus an HTML/JS denylist (defence in depth) rather than a per-key Pydantic-style schema, avoiding a schema library in the bundle."
+  - D-551 (`_range_band` NaN fall-through to "long") is referenced but intentionally OUT of scope: the new _redact_library caller guards max_range_m validity before invoking _range_band, so the helper's NaN behaviour is moot in I-15. D-551 remains open for separate resolution.
+  - G6 pytest output (with --cov + --cov-fail-under=80) suffered repeated OOM-kill or pipe-truncation events under heavy parallel test-session contention on the workspace (I-16 and other sessions running concurrently); see CLAUDE.md notes carrying over from I-11/I-12/I-13.
+
+overall: pass

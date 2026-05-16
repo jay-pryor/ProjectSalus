@@ -173,17 +173,85 @@ export function saveScenario(state, bus, doc = globalThis.document) {
   bus.emit('scenario:saved', { timestamp: new Date().toISOString() });
 }
 
+// Deep-validation limits — defence-in-depth against pathological scenario
+// payloads (D-499). A legitimate save file has a handful of top-level keys
+// with shallow object trees; these caps are well above realistic content but
+// well below anything an attacker would use to wedge the parser or render path.
+const _MAX_SCENARIO_DEPTH = 32;
+const _MAX_SCENARIO_STRING_LEN = 100_000;
+
+// Keys that can pollute Object.prototype if assigned via dynamic key access.
+// JSON.parse itself does not pollute the prototype, but downstream code that
+// does e.g. `Object.assign(target, parsed)` or merges values can — reject at
+// the trust boundary instead of trusting every downstream consumer.
+const _FORBIDDEN_OBJECT_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+// Conservative HTML-tag-opener detection: "<" followed by a letter, "!", "/",
+// or "?" covers element openers, closers, comments, and processing
+// instructions. A scenario file legitimately contains paths, names, and
+// numbers — never markup — so any opener is suspicious. Combined with a
+// "javascript:" URI detector this raises the XSS bar against downstream
+// renderers that may use innerHTML (D-499).
+const _HTML_OPENER_RE = /<[!?/A-Za-z]/;
+const _JS_URI_RE = /javascript\s*:/i;
+
+function _isPlainObject(v) {
+  return (
+    v !== null &&
+    typeof v === 'object' &&
+    !Array.isArray(v) &&
+    Object.getPrototypeOf(v) === Object.prototype
+  );
+}
+
+function _isSafeScenarioValue(v, depth) {
+  if (depth > _MAX_SCENARIO_DEPTH) return false;
+  if (v === null) return true;
+  if (typeof v === 'boolean') return true;
+  if (typeof v === 'number') return Number.isFinite(v);
+  if (typeof v === 'string') {
+    if (v.length > _MAX_SCENARIO_STRING_LEN) return false;
+    if (_HTML_OPENER_RE.test(v)) return false;
+    if (_JS_URI_RE.test(v)) return false;
+    return true;
+  }
+  if (Array.isArray(v)) {
+    for (const item of v) {
+      if (!_isSafeScenarioValue(item, depth + 1)) return false;
+    }
+    return true;
+  }
+  if (_isPlainObject(v)) {
+    for (const k of Object.keys(v)) {
+      if (_FORBIDDEN_OBJECT_KEYS.has(k)) return false;
+      if (!_isSafeScenarioValue(v[k], depth + 1)) return false;
+    }
+    return true;
+  }
+  return false;
+}
+
 /**
- * Validate a parsed scenario object: must be a plain object whose keys are
- * a subset of SCENARIO_KEYS.
+ * Validate a parsed scenario object. Returns true only when:
+ *   - the root is a plain object (not array, not null, not a class instance);
+ *   - every top-level key is in SCENARIO_KEYS;
+ *   - every value (recursively) is plain JSON (null / boolean / number /
+ *     string / array / plain object) within depth and string-size limits;
+ *   - no nested key is `__proto__` / `constructor` / `prototype`;
+ *   - no string value contains an HTML-tag-opener pattern or a `javascript:`
+ *     URI (defence-in-depth against XSS in downstream renderers — see D-499).
  *
  * @param {unknown} parsed
  * @returns {boolean}
  */
 export function validateScenarioPayload(parsed) {
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+  if (!_isPlainObject(parsed)) return false;
   const validKeys = new Set(SCENARIO_KEYS);
-  return Object.keys(parsed).every(k => validKeys.has(k));
+  for (const k of Object.keys(parsed)) {
+    if (!validKeys.has(k)) return false;
+    if (!_isSafeScenarioValue(parsed[k], 1)) return false;
+  }
+  return true;
 }
 
 /**
