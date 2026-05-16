@@ -163,24 +163,61 @@ def compute_viewshed_through_canopy(
 
     When ``site.canopy_height_m`` is present **and** ``vegetation_penetration``
     is greater than zero, each visible cell's transmission coefficient is
-    calculated by ray-marching and accumulating per-cell attenuation:
+    calculated by ray-marching with a 3D line-of-sight check.  For every cell
+    ``j`` along the discrete ray from the observer to a candidate target ``k``,
+    the LOS elevation is linearly interpolated:
 
     .. code-block:: text
 
-        T_cell *= penetration ** (canopy_height_m[cell] / _CANOPY_REFERENCE_HEIGHT_M)
+        los_z(j) = obs_z + (target_surface_z - obs_z) * (dist_j / dist_k)
 
-    for every cell along the ray where ``canopy_height_m > 0``.
+    Attenuation is applied at cell ``j`` only when the LOS elevation falls
+    below the canopy top (``dem[j] + canopy_height_m[j]``).  A ray skimming
+    above the canopy receives no penalty; a ray dipping into the canopy
+    column is attenuated:
+
+    .. code-block:: text
+
+        T_target_k *= penetration ** (canopy_height_m[j] / _CANOPY_REFERENCE_HEIGHT_M)
 
     The returned array contains float32 transmission values in [0.0, 1.0]:
-    - 1.0 = fully visible, no canopy attenuation on the LOS path
-    - 0.0 = fully blocked (either terrain occlusion or total canopy extinction)
+
+    - 1.0 = fully visible, no canopy traversal on the LOS path
+    - 0.0 = terrain-occluded (not visible in the binary viewshed)
     - intermediate = partial signal penetration through canopy
+
+    **Initialisation:** Cells visible in the binary viewshed start at 1.0.
+    Visible cells that no discrete ray happens to land on (perimeter cells
+    missed by integer-rounded paths) retain the 1.0 default rather than
+    silently appearing as fully blocked.
+
+    **Occlusion handling:** When the ray walk encounters a cell that is not
+    visible in the binary viewshed it stops; cells beyond the occluder on
+    this ray are reached by other ray angles that don't pass through it.
+    Per-target accumulators are not carried past terrain occluders.
+
+    **Observer cell:** When the sensor is at or above the canopy top at its
+    own cell, transmission is 1.0.  When the sensor is below the canopy
+    height at its own cell the value reflects the canopy depth above the
+    sensor:
+
+    .. code-block:: text
+
+        T_obs = penetration ** (
+            (canopy_height_m[obs] - observer_height) / _CANOPY_REFERENCE_HEIGHT_M
+        )
 
     **NaN canopy cells** (nodata from rasterio load) are treated as canopy-free
     (no attenuation applied to that cell).  This is the conservative-open policy:
     nodata means "no CHM measurement available" rather than "confirmed dense
     canopy", so the signal is not penalised.  NaN cells in the CHM do not affect
     the >= 0 guarantee on finite values.
+
+    **NaN terrain cells:** A nodata observer-cell DEM elevation is rejected by
+    :func:`compute_viewshed` (called first), which raises :class:`ValueError`.
+    A nodata target-cell surface elevation falls back to conservative 2D
+    accumulation for that target (every canopy cell on the path is penalised,
+    no elevation gate) rather than silently leaving the cell unattenuated.
 
     When ``site.canopy_height_m`` is ``None`` **or** ``vegetation_penetration``
     is 0.0, falls back to the binary viewshed (same result as
@@ -199,8 +236,9 @@ def compute_viewshed_through_canopy(
         Float32 2D array matching ``site.dem`` shape.  Values in [0.0, 1.0].
 
     Raises:
-        ValueError: If ``vegetation_penetration`` is not in [0.0, 1.0], or if
-            the observer position is outside the raster extent.
+        ValueError: If ``vegetation_penetration`` is not in [0.0, 1.0], if
+            the observer position is outside the raster extent, or if the
+            observer cell has a nodata (NaN) DEM elevation.
     """
     if not (0.0 <= vegetation_penetration <= 1.0):
         raise ValueError(f"vegetation_penetration must be in [0, 1], got {vegetation_penetration}")
@@ -210,13 +248,20 @@ def compute_viewshed_through_canopy(
     if site.canopy_height_m is None or vegetation_penetration == 0.0:
         return binary.astype(np.float32)
 
-    # Canopy attenuation path: ray-march over the binary viewshed and accumulate
-    # transmission for each visible cell.
     canopy = site.canopy_height_m
+    dem = site.dem
+    surface = site.surface_array()
     obs_row, obs_col = _xy_to_rc(site, observer_x, observer_y)
-    rows, cols = site.dem.shape
+    rows, cols = dem.shape
+    # obs_z is finite here: compute_viewshed() above already raises ValueError
+    # if the observer DEM cell is nodata (NaN), so the LOS slopes below are
+    # never contaminated by a NaN observer elevation (D-586).
+    obs_z = float(dem[obs_row, obs_col]) + observer_height
 
-    transmission = np.zeros((rows, cols), dtype=np.float32)
+    # Visible cells start at 1.0 (no known canopy traversal); non-visible at 0.0.
+    # Visible cells that no ray reaches due to integer rounding retain 1.0
+    # rather than silently dropping to fully-blocked.
+    transmission = binary.astype(np.float32)
 
     if max_range is not None and max_range <= 0.0:
         max_range = None
@@ -230,43 +275,78 @@ def compute_viewshed_through_canopy(
     num_rays = max(360, 4 * max(rows, cols))
     angles = np.linspace(0, 2 * np.pi, num_rays, endpoint=False)
 
+    ray_max_t = np.zeros((rows, cols), dtype=np.float32)
+    ray_touched = np.zeros((rows, cols), dtype=bool)
+
     for angle in angles:
         dx = np.cos(angle)
         dy = np.sin(angle)
-        t_ray: float = 1.0
 
+        # Collect cells along this ray up to (but not past) the first occluder.
+        ray_path: list[tuple[int, int, int]] = []
         for step in range(1, max_cells + 1):
             c = obs_col + dx * step
             r = obs_row - dy * step
-
-            ci, ri = int(round(c)), int(round(r))
+            ci = int(round(c))
+            ri = int(round(r))
             if ri < 0 or ri >= rows or ci < 0 or ci >= cols:
                 break
-
             dist = step * site.resolution
             if max_range is not None and dist > max_range:
                 break
-
             if not binary[ri, ci]:
-                continue  # Terrain-blocked cell: leave transmission at 0.
+                # Terrain occluder — stop the ray.  Cells beyond are reached by
+                # other rays whose 2D paths don't cross this blocking cell.
+                break
+            ray_path.append((step, ri, ci))
 
-            ch = float(canopy[ri, ci])
-            # NaN → treat as canopy-free (D-245 policy: no measurement = no penalty).
-            # Clamp negative finite values to 0 to prevent t_ray exceeding 1.0 (D-247).
-            if math.isnan(ch):
-                ch = 0.0
-            elif ch < 0.0:
-                ch = 0.0
-            if ch > 0.0:
-                t_ray *= vegetation_penetration ** (ch / _CANOPY_REFERENCE_HEIGHT_M)
+        # For each visible cell on this ray, compute the 3D LOS attenuation by
+        # walking the cells in front of it and accumulating canopy penalties
+        # only where the interpolated LOS elevation falls below the canopy top.
+        for k_idx, (step_k, rk, ck) in enumerate(ray_path):
+            target_z = float(surface[rk, ck])
+            dist_k = step_k * site.resolution
+            # A nodata (NaN) target surface leaves the 3D LOS geometry
+            # undefined (D-587).  Fall back to conservative 2D accumulation —
+            # penalise every canopy cell in front — rather than silently
+            # leaving the cell unattenuated at 1.0.
+            los_defined = not math.isnan(target_z)
+            los_slope = (target_z - obs_z) / dist_k if los_defined else 0.0
 
-            # Take the maximum transmission seen so far for this cell so that
-            # cells visible from multiple ray paths get the least-attenuated value.
-            if t_ray > transmission[ri, ci]:
-                transmission[ri, ci] = t_ray
+            t = 1.0
+            for step_j, rj, cj in ray_path[: k_idx + 1]:
+                ch = float(canopy[rj, cj])
+                # NaN → no CHM measurement available; negative finite values
+                # are clamped to 0 even though the SiteModel validator rejects
+                # them, so future relaxations don't bypass the guard here.
+                if math.isnan(ch) or ch <= 0.0:
+                    continue
+                dem_j = float(dem[rj, cj])
+                canopy_top_j = dem_j + ch
+                los_z = obs_z + los_slope * (step_j * site.resolution)
+                if not los_defined or los_z < canopy_top_j:
+                    t *= vegetation_penetration ** (ch / _CANOPY_REFERENCE_HEIGHT_M)
 
-    # Observer cell is always fully visible.
-    transmission[obs_row, obs_col] = 1.0
+            if not ray_touched[rk, ck] or t > ray_max_t[rk, ck]:
+                ray_max_t[rk, ck] = t
+                ray_touched[rk, ck] = True
+
+    # Apply ray results.  Visible cells touched by at least one ray take the
+    # max-over-rays transmission; visible cells missed by all rays keep the 1.0
+    # baseline; non-visible cells stay at 0.0.
+    transmission[ray_touched] = ray_max_t[ray_touched]
+
+    # Observer cell: signal originates at the sensor, so the on-cell value
+    # reflects the canopy depth above the sensor.  Above-canopy or no-canopy
+    # observers see their own cell at 1.0.
+    obs_ch = float(canopy[obs_row, obs_col])
+    if math.isnan(obs_ch) or obs_ch <= 0.0 or observer_height >= obs_ch:
+        transmission[obs_row, obs_col] = 1.0
+    else:
+        canopy_above_sensor = obs_ch - observer_height
+        transmission[obs_row, obs_col] = vegetation_penetration ** (
+            canopy_above_sensor / _CANOPY_REFERENCE_HEIGHT_M
+        )
 
     return transmission
 

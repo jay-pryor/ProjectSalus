@@ -419,17 +419,38 @@ def test_viewshed_through_canopy_partial_penetration_between_zero_and_one() -> N
     assert 0.0 < t < 1.0, f"Expected 0 < transmission < 1, got {t}"
 
 
-def test_viewshed_through_canopy_observer_cell_always_one() -> None:
-    """Observer cell transmission is always 1.0."""
+def test_viewshed_through_canopy_observer_above_canopy_self_cell_one() -> None:
+    """Observer at or above the canopy top sees its own cell at transmission 1.0."""
     from salus.engine.viewshed import compute_viewshed_through_canopy
 
-    canopy = np.full((10, 10), 15.0, dtype=np.float64)  # dense canopy everywhere
+    canopy = np.full((10, 10), 5.0, dtype=np.float64)
     site = _site_with_canopy(canopy)
 
-    result = compute_viewshed_through_canopy(site, 5.0, 5.0, 2.0, vegetation_penetration=0.1)
+    # Observer height (8m) is above canopy top (5m) at the observer cell.
+    result = compute_viewshed_through_canopy(site, 5.0, 5.0, 8.0, vegetation_penetration=0.1)
 
     obs_row, obs_col = 5, 5  # origin_y=10, y=5 → row=5; origin_x=0, x=5 → col=5
     assert result[obs_row, obs_col] == pytest.approx(1.0)
+
+
+def test_viewshed_through_canopy_observer_under_canopy_attenuates_self_cell() -> None:
+    """Observer buried under canopy gets a self-cell value < 1.0 (overhead canopy, D-505)."""
+    from salus.engine.viewshed import _CANOPY_REFERENCE_HEIGHT_M, compute_viewshed_through_canopy
+
+    canopy = np.full((10, 10), 15.0, dtype=np.float64)
+    site = _site_with_canopy(canopy)
+
+    penetration = 0.1
+    observer_height = 2.0
+    result = compute_viewshed_through_canopy(
+        site, 5.0, 5.0, observer_height, vegetation_penetration=penetration
+    )
+
+    obs_row, obs_col = 5, 5
+    canopy_above = 15.0 - observer_height
+    expected = penetration ** (canopy_above / _CANOPY_REFERENCE_HEIGHT_M)
+    assert result[obs_row, obs_col] == pytest.approx(expected, abs=1e-4)
+    assert result[obs_row, obs_col] < 1.0
 
 
 def test_viewshed_through_canopy_invalid_penetration_raises() -> None:
@@ -500,6 +521,121 @@ def test_viewshed_through_canopy_exponential_decay_along_ray() -> None:
     expected_near = penetration ** (canopy_height / _CANOPY_REFERENCE_HEIGHT_M)
     assert t_near == pytest.approx(expected_near, abs=0.01), (
         f"Near cell transmission {t_near:.4f} should match penetration^(h/ref)={expected_near:.4f}"
+    )
+
+
+def test_viewshed_through_canopy_visible_cells_no_silent_perimeter_zeros() -> None:
+    """Visible cells that no integer-rounded ray lands on retain transmission 1.0 (D-494).
+
+    With a canopy-free site, every cell visible per the binary viewshed must have
+    transmission == 1.0.  The buggy initialisation (zeros + max over rays) left
+    perimeter cells missed by discrete rays at 0.0, indistinguishable from
+    terrain-blocked.
+    """
+    from salus.engine.viewshed import compute_viewshed, compute_viewshed_through_canopy
+
+    # Canopy is present (forces the attenuation code path) but every cell is
+    # canopy-free, so no ray should reduce transmission.
+    canopy = np.zeros((20, 20), dtype=np.float64)
+    site = _site_with_canopy(canopy)
+
+    binary = compute_viewshed(site, 0.0, 20.0, 2.0)
+    result = compute_viewshed_through_canopy(site, 0.0, 20.0, 2.0, vegetation_penetration=0.1)
+
+    visible = binary.astype(bool)
+    # Every visible cell must be exactly 1.0 — no silent perimeter zeros.
+    assert np.all(result[visible] == pytest.approx(1.0)), (
+        f"Found visible cells with transmission < 1.0: min={float(result[visible].min()):.4f}"
+    )
+
+
+def test_viewshed_through_canopy_ray_does_not_contaminate_past_occluder() -> None:
+    """Canopy attenuation does not bleed past a terrain occluder (D-495).
+
+    Place a tall ridge between observer and a cell that is visible only over
+    the top of the ridge (via DSM occlusion patterns).  The 2D ray path
+    through the ridge column must not stamp canopy attenuation onto the
+    far cell — instead the far cell either takes the unattenuated value from
+    a clear ray, or stays at the binary default.
+    """
+    from salus.engine.viewshed import compute_viewshed_through_canopy
+
+    rows, cols = 20, 20
+    dem = np.zeros((rows, cols), dtype=np.float64)
+    # Tall ridge at col 10 blocking direct east-west LOS at low observer height.
+    dem[:, 10] = 50.0
+    # Dense canopy on the ridge itself (canopy_height_m is measured ABOVE DEM, so
+    # the canopy is *on top* of the ridge — never on the path of a ray that goes
+    # *around* the ridge).
+    canopy = np.zeros((rows, cols), dtype=np.float64)
+    canopy[:, 10] = 20.0
+
+    site = SiteModel(
+        dem=dem,
+        canopy_height_m=canopy,
+        resolution=1.0,
+        origin_x=0.0,
+        origin_y=float(rows),
+    )
+
+    # Observer at row 10, col 0 with low height so the ridge blocks direct LOS.
+    result = compute_viewshed_through_canopy(site, 0.5, 9.5, 2.0, vegetation_penetration=0.1)
+
+    # Cells on the obs side of the ridge (col 0..9) should be visible.
+    near_side = result[:, :10]
+    assert np.any(near_side > 0.0)
+
+    # Cells on the far side of the ridge along the east-west direction must
+    # not be marked with attenuated transmission from a contaminated ray —
+    # they should be either 0.0 (terrain-blocked, no ray reached them) or
+    # 1.0 (visible via some path), but never an intermediate canopy-stained
+    # value derived from a ray that walked through the ridge column.
+    far_side = result[10, 11:]  # same row as observer, beyond the ridge
+    intermediate = (far_side > 0.0) & (far_side < 1.0)
+    assert not np.any(intermediate), (
+        f"Found contaminated transmission values past occluder: {far_side[intermediate]}"
+    )
+
+
+def test_viewshed_through_canopy_ray_above_canopy_no_attenuation() -> None:
+    """A LOS that skims above an intermediate canopy receives no attenuation (D-506).
+
+    Observer well above the canopy looking at a distant ground target — the
+    canopy cell sits *between* observer and target.  With a high observer the
+    interpolated LOS at the canopy cell is well above the canopy top, so no
+    attenuation accrues.  With a low observer the LOS dips into the canopy
+    column at the same intermediate cell and accrues a penalty.
+    """
+    from salus.engine.viewshed import compute_viewshed_through_canopy
+
+    rows, cols = 20, 20
+    dem = np.zeros((rows, cols), dtype=np.float64)
+    canopy = np.zeros((rows, cols), dtype=np.float64)
+    # Intermediate canopy cell midway between observer (col 0) and target (col 15).
+    canopy[10, 10] = 5.0
+
+    site = SiteModel(
+        dem=dem,
+        canopy_height_m=canopy,
+        resolution=1.0,
+        origin_x=0.0,
+        origin_y=float(rows),
+    )
+
+    # High observer (50m) — LOS to the ground target at col 15 stays well
+    # above the 5m canopy top at col 10.
+    result_high = compute_viewshed_through_canopy(site, 0.5, 9.5, 50.0, vegetation_penetration=0.1)
+
+    # Low observer (1m) — LOS to the same target dips into the canopy column.
+    result_low = compute_viewshed_through_canopy(site, 0.5, 9.5, 1.0, vegetation_penetration=0.1)
+
+    # High observer: target beyond canopy must be unattenuated.
+    assert result_high[10, 15] == pytest.approx(1.0), (
+        f"High observer LOS should skim above canopy, got t={result_high[10, 15]:.4f}"
+    )
+    # Low observer: target beyond canopy must be attenuated.
+    assert result_low[10, 15] < 1.0, (
+        f"Low observer LOS should pass through canopy, got t={result_low[10, 15]:.4f}"
     )
 
 
