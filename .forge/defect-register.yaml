@@ -676,8 +676,8 @@ defects:
     file: src/salus/ingest/boundaries.py
     line: 172
     description: "bare except Exception in _extract_epsg swallows ImportError and runtime faults from pyproj; should catch only CRSError"
-    resolution: "
-    status: resolved"
+    resolution: ""
+    status: resolved
     commit: "eef0997"
 
   - id: D-050
@@ -687,8 +687,8 @@ defects:
     file: src/salus/ingest/boundaries.py
     line: 53
     description: "max(union.geoms, ...) returns BaseGeometry per Shapely stubs; conflicts with declared -> Polygon return; no runtime guard for degenerate case"
-    resolution: "
-    status: resolved"
+    resolution: ""
+    status: resolved
     commit: "eef0997"
 
   - id: D-063
