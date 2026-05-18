@@ -1161,6 +1161,86 @@ _Exploration scenarios are stored in `demo/explore/` with the naming convention 
 
 ---
 
+**I-20: Coordinate-tools toolbar + shell-owned subsystem skeleton**
+- _Source:_ User feature request (2026-05-18): add a coordinate system to the viewer — a live cursor coordinate readout, a resettable origin point, a two-point distance measurement tool, and a toggleable grid — surfaced through a new top-of-screen toolbar. Scoped as a four-task feature: **I-20** infrastructure, **I-21** origin + readout, **I-22** measurement, **I-23** grid. I-20 builds the shared infrastructure only — no user-facing tool behaviour.
+- _Architecture decision:_ The coordinate tools must be usable regardless of which module is active, so they cannot be a navigable module (a module only exists while it is the active panel). They are built as a **shell-owned subsystem** — shell chrome modelled on the Save/Load buttons (`mountShellNavButtons`) and the permanent terrain canvas (I-18): the shell instantiates a `coord-tools` component with its own scoped map proxy (`createMapProxy(map, 'coord-tools', …)`) so its map layers stay prefix-enforced (`coord-tools:*`) and isolated, but it is not gated by the mode-manager and persists across module navigation. This is a new architectural category; `InterfaceArchitecture.md` gains a section documenting shell-owned subsystems.
+- _Design:_
+  1. Toolbar — restructure `#app` from a two-column flexbox to column-then-row: a new full-width `<header id="coord-toolbar">` of fixed height as the first child of `#app`, then the existing `#nav-bar` + `#main` row beneath. Because `#app` is `height:100vh; overflow:hidden`, the row shrinks by the toolbar height; the terrain-loader panel (`position:absolute` inside `#main`) moves down with `#main`, so there is no overlap with the nav bar or the terrain panel. Layout lives in `index.html` + `style.css`.
+  2. `coord-tools` component — a new `src/salus/viewer/interface/coord-tools/` directory (component JS + CSS), instantiated by `shell.js` with a `coord-tools`-prefixed scoped map proxy. I-20 renders the empty toolbar shell with the tool controls stubbed/disabled; I-21–I-23 fill them in.
+  3. Map proxy — add `queryTerrainElevation(lngLat)` to `map-proxy.js`, delegating to the raw MapLibre 3.6.2 method. It is a non-destructive read; expose it behind an opt-in flag matching the existing `allowTerrainSource` pattern, so only the coord-tools subsystem receives it. Document why it is safe to add.
+  4. State — add a `coord_tools` key to `VALID_STATE_KEYS` in `state-schema.js`, holding `{origin_lnglat, grid_enabled, grid_spacing_m, measure}` (sub-fields populated by I-21–I-23). The subsystem reads/writes it through the shell's state access; in-session only — not persisted with saved scenarios in v1.
+- _Acceptance criteria:_
+  1. A full-width toolbar renders along the top of the screen; the nav bar and the 3D map sit beneath it; the terrain-loader panel does not overlap the toolbar or the nav bar.
+  2. The toolbar persists and stays interactive across module navigation (it is shell chrome, not a module).
+  3. `map-proxy.js` exposes `queryTerrainElevation(lngLat)`; the existing 16-method base surface and the layer-prefix enforcement are unchanged; a module without the opt-in flag does not receive the method.
+  4. `state-schema.js` defines the `coord_tools` state key; the shell can read and write it; no module declares it in its contract.
+  5. The `coord-tools` component is instantiated by the shell with a `coord-tools`-prefixed scoped map proxy; any layers it later adds are prefix-enforced.
+  6. `InterfaceArchitecture.md` documents the shell-owned-subsystem category and the coord-tools toolbar.
+  7. The full JS test suite passes; new tests cover toolbar mounting, persistence across module navigation, the proxy `queryTerrainElevation` method, and the `coord_tools` state key.
+- _Out of scope:_ Any user-facing tool behaviour (origin, readout, measurement, grid — delivered by I-21–I-23). Camera getters (`getZoom`/`getBounds`) unless a later task needs them. Persisting `coord_tools` state into saved scenarios. The placement WGS84-vs-projected-CRS coordinate mismatch (logged as a separate defect).
+
+---
+
+**I-21: Coordinate-tools — origin point and live cursor coordinate readout**
+- _Source:_ Coordinate-tools feature (2026-05-18), task 2 of 4 — builds on the I-20 toolbar and shell-owned subsystem. Adds the resettable origin and the live X/Y/Z cursor readout.
+- _Design:_
+  1. Coordinate frame — a **local tangent-plane** frame anchored at the origin: `X = (lng − lng0)·(π/180)·R·cos(lat0)` metres east, `Y = (lat − lat0)·(π/180)·R` metres north, with `R` the Earth radius. This is a viewer-local frame, not the DEM's projected CRS — sub-metre accurate within a few km, which covers a cUAS site. `R` and the degree-to-radian factor are extracted as named constants.
+  2. Origin — defaults to the terrain centre (`centre_wgs84` from terrain metadata) when terrain loads; stored in `coord_tools.origin_lnglat`. A `coord-tools:origin` GeoJSON point layer renders a distinct target/crosshair symbol at the origin.
+  3. Reset — a "Set origin" toolbar button enters a one-click pick mode (cursor crosshair); the next map click sets the new origin, updates state and the indicator, and the readout (and later the grid) recompute. The pick mode is cancellable without changing the origin.
+  4. Cursor readout — an `api.map.on('mousemove', …)` handler converts `e.lngLat` to local X/Y and shows them in the toolbar; Z is the ground elevation from `queryTerrainElevation(e.lngLat)`. The handler is throttled to animation-frame cadence (mousemove fires very fast).
+  5. Graceful degradation — before terrain loads the readout shows "—"; outside the terrain footprint, or where `queryTerrainElevation` returns null (tiles not loaded), Z shows "—".
+- _Acceptance criteria:_
+  1. On terrain load the origin defaults to the terrain centre and a target indicator renders there on the map.
+  2. The toolbar shows the cursor's live X/Y in metres relative to the origin, updating as the cursor moves over the map.
+  3. The toolbar shows the cursor's Z (ground elevation in metres) where terrain elevation is available, and "—" where it is not.
+  4. The "Set origin" button enters a one-click pick mode; the next map click moves the origin and the indicator and readout recompute; the mode is cancellable without changing the origin.
+  5. Before any terrain is loaded the readout shows "—" and does not error.
+  6. The mousemove handler updates at most once per animation frame; all listeners and the `coord-tools:origin` layer are removed on subsystem disposal.
+  7. The full JS test suite passes; new tests cover the local-frame conversion maths, the origin default, the pick-mode reset, and the "—" degradation paths.
+- _Out of scope:_ Measurement (I-22), grid (I-23). True projected-CRS coordinates. Persisting the origin across reloads.
+
+---
+
+**I-22: Coordinate-tools — two-point measurement tool**
+- _Source:_ Coordinate-tools feature (2026-05-18), task 3 of 4 — builds on I-20 and I-21.
+- _Design:_
+  1. A "Measure" toolbar toggle enters measure mode (cursor crosshair) and captures exactly two map clicks. The two points render as a `coord-tools:measure-line` (LineString) plus `coord-tools:measure-points` (two circles), using the single-GeoJSON-source / `$type`-filtered line+circle-layers pattern from `threat-corridor-editor`.
+  2. The readout shows **ΔX, ΔY, ΔZ** (local-frame component distances; ΔZ from `queryTerrainElevation` at each endpoint) and **total distance**. The headline total is the **3D slant distance** `√(ΔX²+ΔY²+ΔZ²)`; the **2D horizontal** distance `√(ΔX²+ΔY²)` is also shown.
+  3. When terrain elevation is unavailable at an endpoint, ΔZ shows "—" and the headline total falls back to the 2D horizontal distance, clearly labelled as 2D.
+  4. A "clear" action removes the line and markers and resets for the next measurement; exiting measure mode also clears.
+  5. Click-conflict rule — measure mode is **mutually exclusive** with module draw modes (e.g. `zone-editor`, `threat-corridor-editor`): the Measure toggle is disabled while a module draw mode is active, and entering a module draw mode auto-exits measure mode, so a click is never double-handled.
+- _Acceptance criteria:_
+  1. The Measure toggle enters a two-click measure mode; the first and second clicks place two markers joined by a line on the map.
+  2. After the second click the readout shows ΔX, ΔY, ΔZ, the 3D slant total, and the 2D horizontal distance.
+  3. Where terrain elevation is unavailable, ΔZ shows "—" and the headline total is the 2D distance, labelled as such.
+  4. A clear action and exiting measure mode both remove the measurement layers and reset the measurement state.
+  5. The Measure toggle is disabled while a module draw mode is active; starting a module draw mode exits measure mode; a single click is never handled by both.
+  6. All `coord-tools:measure-*` layers and sources are prefix-correct and removed on clear and on subsystem disposal; click listeners are removed when measure mode exits.
+  7. The full JS test suite passes; new tests cover the two-click flow, the distance maths (3D slant and 2D fallback), the clear path, and the draw-mode mutual exclusion.
+- _Out of scope:_ Multi-point / multi-segment measured paths. Grid (I-23). Persisting measurements.
+
+---
+
+**I-23: Coordinate-tools — toggleable coordinate grid overlay**
+- _Source:_ Coordinate-tools feature (2026-05-18), task 4 of 4 — builds on I-20 and I-21.
+- _Design:_
+  1. A grid toggle button and a numeric spacing input (metres) in the toolbar. Spacing is clamped to named constants — `GRID_SPACING_MIN_M = 10`, `GRID_SPACING_MAX_M = 5000`, default `GRID_SPACING_DEFAULT_M = 100`. State lives in `coord_tools.grid_enabled` / `coord_tools.grid_spacing_m`.
+  2. The grid is lines parallel to the local X axis (running E–W) and Y axis (running N–S), spaced at the configured interval and **clipped to the terrain footprint** (`bounds_wgs84`) so the line set is bounded — no pan/zoom tracking required. Rendered as GeoJSON LineStrings.
+  3. The two **principal axes** (the X=0 and Y=0 lines through the origin) render emphasised (thicker / distinct colour) on a separate `coord-tools:grid-axes` layer; the minor grid is `coord-tools:grid`.
+  4. The grid regenerates when toggled on, when the spacing changes, and when the origin moves (I-21); it is removed when toggled off and on subsystem disposal.
+  5. When no terrain is loaded the grid toggle is disabled (no footprint to clip to).
+- _Acceptance criteria:_
+  1. The grid toggle adds and removes an axis-aligned grid of lines, clipped to the terrain footprint, at the configured spacing.
+  2. The spacing input is clamped to [`GRID_SPACING_MIN_M`, `GRID_SPACING_MAX_M`]; out-of-range input is corrected to the nearest limit; changing the spacing regenerates the grid.
+  3. The principal X and Y axes through the origin render visibly distinct from the minor grid lines.
+  4. Moving the origin (I-21) regenerates the grid against the new origin.
+  5. The grid toggle is disabled when no terrain is loaded.
+  6. The `coord-tools:grid` and `coord-tools:grid-axes` layers and sources are prefix-correct and removed when the grid is toggled off and on subsystem disposal.
+  7. The full JS test suite passes; new tests cover the spacing clamp, the toggle add/remove, the principal-axis emphasis, and origin-move regeneration.
+- _Out of scope:_ Grid labels / coordinate tick annotations. A rotated grid (the grid is always N/E axis-aligned). Grid lines beyond the terrain footprint. Persisting grid settings.
+
+---
+
 ### Slice 15 — Populate Full Sensor/Effector/Threat Database
 
 _Goal: populate the YAML database with all sensors from the research files to enable realistic configurations._
