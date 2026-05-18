@@ -509,9 +509,10 @@ async function main() {
   // coord-tools is shell chrome, not a navigable module: it persists across
   // module navigation and is not gated by the mode manager. It receives its
   // own `coord-tools`-prefixed scoped map proxy (with the queryTerrainElevation
-  // opt-in for the I-21 Z readout) so any layers it later adds are
-  // prefix-enforced, and a narrow handle onto the shell-owned `coord_tools`
-  // state key via the bypass path.
+  // opt-in for the I-21 Z readout) so any layers it adds are prefix-enforced,
+  // and a narrow state handle: read/write of the shell-owned `coord_tools` key
+  // plus read-only observation of `terrain` (so the origin can default to the
+  // terrain centre on load) — all via the shell bypass path.
   // -------------------------------------------------------------------
   const coordToolbar = doc.getElementById('coord-toolbar');
   if (coordToolbar) {
@@ -525,6 +526,8 @@ async function main() {
         state: {
           get: () => state.getState('coord_tools'),
           set: (value) => state.setState('coord_tools', value),
+          getTerrain: () => state.getState('terrain'),
+          watchTerrain: (callback) => state.watch('terrain', callback),
         },
       },
       doc

@@ -51,3 +51,10 @@
   opacity: 0.35;
   cursor: not-allowed;
 }
+
+/* Active pick mode — the "Set origin" button while awaiting a map click. */
+.coord-tools-btn[data-active="true"] {
+  background: #0f3460;
+  color: #ffffff;
+  border-color: #2266aa;
+}

@@ -1,0 +1,54 @@
+task_id: I-21
+timestamp: 2026-05-18T16:15:00Z
+title: "Coordinate-tools — origin point and live cursor coordinate readout"
+
+quality_gates:
+  G1_lint: N/A             # N/A — no Python files changed (interface JS/CSS task)
+  G2_format: N/A           # N/A — no Python files changed
+  G3_import: N/A           # N/A — no Python files changed
+  G4_type: N/A             # N/A — no Python files changed
+  G5_security: N/A         # N/A — no Python files changed
+  G6_unit_test: N/A        # N/A — no Python files changed (Python pytest). JS suite below.
+  G7_coverage: N/A         # N/A — no Python files changed
+  G8_secrets: pass         # detect-secrets scan of all changed files — 0 secrets
+  coverage_pct: N/A
+  js_tests: pass           # node --test 'tests/test-*.js' — 759 passed, 0 failed. test-coord-tools.js: 41 tests (toolbar shell, conversion maths, origin defaulting, pick-mode reset, readout + "—" degradation, throttle, disposal, D-606..D-611 regression tests).
+
+review:
+  l1_standards:
+    testing: pass          # test-coord-tools.js — every test carries assertions; names describe the scenario; node:assert/strict; mock map/state harness only, no shared-fixture pollution. Python-specific testing.md rules (pytest fixtures, tmp_path, pytest.approx) are N/A — interface JS.
+    error_handling: pass   # _renderReadout wraps queryTerrainElevation in try/catch (D-606); _setOrigin and _renderReadout reject non-finite lng/lat (D-607/D-608); origin-indicator map ops wrapped in try/catch+warn; createCoordTools throws named TypeErrors for malformed inputs. No swallowed exceptions — every failure path logs.
+    logging: pass          # console.warn diagnostics for failed elevation queries, non-finite origins, the rAF fallback (one-time latch) and an uninitialised coord_tools key — consistent with the terrain-loader console.warn convention.
+    security: N/A          # no file I/O of external or user data. test-coord-tools.js reads committed module manifests via an import.meta.url path (trusted, no traversal surface).
+    interface_modules: N/A # interface-modules.md applies to .js/.html/manifest.json under src/salus/viewer/static/ or modules/; none changed. coord-tools is a shell-owned subsystem under interface/ (InterfaceArchitecture.md §2.9), outside the module model. Its isolation / scoped-proxy / layer-prefix invariants were reviewed by module_architecture_reviewer (below).
+  l2_agents:
+    silent_failure_hunter: {status: pass, findings: 6}         # First pass returned fail with 5 findings (D-606/D-607 high, D-608/D-609 medium, D-610 low) — all logged and fixed. Re-review of the fixed file confirmed all 5 genuinely resolved and found 1 further low (D-611 — the D-610 guard missed non-object state values) — logged and fixed. Final state: pass.
+    spec_compliance: {status: pass, findings: 1}               # 1 informational finding only (the local-frame anchor is held in a module variable while state is the persistence sink — matches design point 2; no action). All 7 acceptance criteria satisfied with direct test coverage; no Out-of-scope item (measurement, grid, projected-CRS coordinates, origin persistence) implemented.
+    type_design_analyzer: N/A                                  # interface JS — no type annotations added or modified
+    regression_reviewer: {status: pass, findings: 2}           # 2 low findings, both test-only and both acknowledged non-issues: the navigation test's all-disabled loop was correctly superseded (set-origin is now enabled) — strengthened here with an explicit interactive-state assertion; the readout test moved from loose assert.match to exact assert.equal (a strengthening). All I-20 behaviour preserved; full suite 759/759.
+    module_architecture_reviewer: {status: pass, findings: 0}  # Isolation preserved (no cross-module imports, only the injected api used); coord-tools:origin source/layer prefix-scoped; only allowed map-proxy methods used; all map listeners + terrain watch + origin layer/source removed on dispose with a disposed-flag guard against a late animation frame; shell-granted terrain access is read-only and narrow (getTerrain/watchTerrain); terrain changes handled reactively via watch with a single approved one-time get() at mount.
+
+defect_ids:
+  - D-606   # queryTerrainElevation could throw and kill the readout — wrapped in try/catch (high, resolved)
+  - D-607   # a non-finite pick click wrote a NaN origin to state — finite guard in _setOrigin (high, resolved)
+  - D-608   # a malformed cursor position rendered "NaN m" — finite guard in _renderReadout (medium, resolved)
+  - D-609   # the requestAnimationFrame fallback silently disabled the throttle — one-time console.warn added (medium, resolved)
+  - D-610   # `api.state.get() ?? {}` masked an uninitialised coord_tools key — warn added (low, resolved)
+  - D-611   # the D-610 guard missed non-object state values — isSkeleton check tightened (low, resolved)
+
+files_changed:
+  - src/salus/viewer/interface/coord-tools/index.js            # I-21 behaviour: lngLatToLocalXY local-frame maths; origin defaulting from terrain; "Set origin" pick mode; rAF-throttled X/Y/Z readout; coord-tools:origin indicator layer; disposal; D-606..D-611 guards
+  - src/salus/viewer/interface/coord-tools/coord-tools.css     # active-pick-mode button style ([data-active="true"])
+  - src/salus/viewer/interface/shell.js                        # coord-tools state handle extended with getTerrain/watchTerrain (read-only terrain observation)
+  - src/salus/viewer/interface/tests/test-coord-tools.js       # rewritten with I-21 tests (41 total) incl. D-606..D-611 regression tests
+  - .forge/defect-register.yaml                                # D-606..D-611 logged (open → resolved)
+
+notes:
+  - Source — coordinate-tools feature (2026-05-18), task 2 of 4. Builds on the I-20 toolbar and shell-owned subsystem; adds the resettable origin and the live X/Y/Z cursor readout.
+  - Coordinate frame — a local tangent-plane frame anchored at the origin (X metres east via cos(lat0) scaling, Y metres north); EARTH_RADIUS_M and DEG_TO_RAD are named constants. lngLatToLocalXY is exported as a pure function and unit-tested directly.
+  - Origin defaults to the terrain centre (centre_wgs84) on terrain load — an approved one-time read at mount plus a reactive terrain watch for later loads. coord_tools.origin_lnglat is written through the shell bypass path; in-session only (excluded from SCENARIO_KEYS).
+  - The Measure and Grid toolbar controls remain disabled stubs — delivered by I-22 and I-23.
+  - L2 review run twice — silent_failure_hunter re-reviewed the fixed file and found D-611, which was then logged and fixed in turn.
+  - Commit hash for D-606..D-611 and this gate-proof is backfilled in a follow-up chore commit, matching the I-14..I-20 pattern on this branch.
+
+overall: pass
