@@ -49,6 +49,6 @@ notes:
   - Origin defaults to the terrain centre (centre_wgs84) on terrain load — an approved one-time read at mount plus a reactive terrain watch for later loads. coord_tools.origin_lnglat is written through the shell bypass path; in-session only (excluded from SCENARIO_KEYS).
   - The Measure and Grid toolbar controls remain disabled stubs — delivered by I-22 and I-23.
   - L2 review run twice — silent_failure_hunter re-reviewed the fixed file and found D-611, which was then logged and fixed in turn.
-  - Commit hash for D-606..D-611 and this gate-proof is backfilled in a follow-up chore commit, matching the I-14..I-20 pattern on this branch.
+  - Implementation, fixes and this gate-proof committed as 7c315bd; the D-606..D-611 commit hashes were backfilled into the defect register in a follow-up chore commit, matching the I-14..I-20 pattern on this branch.
 
 overall: pass

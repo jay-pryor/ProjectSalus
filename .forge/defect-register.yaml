@@ -6877,7 +6877,7 @@ defects:
     description: "_renderReadout calls api.map.queryTerrainElevation with no try/catch. The map proxy delegates verbatim to MapLibre's queryTerrainElevation, which can throw (not only return null) when the terrain renderer is mid-teardown or a terrain source is being swapped. A throw propagates out of _renderReadout and the rAF callback uncaught; the readout then silently stops updating for the rest of the session."
     resolution: "I-21: the queryTerrainElevation call in _renderReadout is wrapped in try/catch — a thrown query logs console.warn and Z degrades to the '—' placeholder while X/Y stay live. Covered by test 'a throw from queryTerrainElevation degrades Z to —'."
     status: resolved
-    commit: ""
+    commit: "7c315bd"
 
   - id: D-607
     severity: high
@@ -6888,7 +6888,7 @@ defects:
     description: "handleMapClick / _setOrigin only check that event.lngLat is non-null, not that lng/lat are finite numbers. A pick click carrying NaN/undefined coordinates writes a non-finite origin into coord_tools.origin_lnglat and originLngLat; every subsequent lngLatToLocalXY then yields NaN silently. The terrain-default path is guarded by _hasCentre; the pick path had no equivalent guard."
     resolution: "I-21: _setOrigin now rejects a non-finite lng/lat (console.warn + early return) so a malformed pick click cannot poison originLngLat or coord_tools.origin_lnglat. Covered by test 'a pick click with a non-finite lng/lat does not change the origin'."
     status: resolved
-    commit: ""
+    commit: "7c315bd"
 
   - id: D-608
     severity: medium
@@ -6899,7 +6899,7 @@ defects:
     description: "_renderReadout destructures lng/lat from moveEvent.lngLat after checking only that moveEvent.lngLat is non-null, then passes them to lngLatToLocalXY without a finite-number check. A mousemove with a malformed lngLat renders a 'NaN m' readout instead of the '—' placeholder the graceful-degradation design (point 5) specifies."
     resolution: "I-21: _renderReadout validates lng/lat with _isFiniteLngLat after destructuring; a malformed cursor position renders the '—' placeholder for all three fields. Covered by test 'a mousemove with a non-finite lng/lat shows —'."
     status: resolved
-    commit: ""
+    commit: "7c315bd"
 
   - id: D-609
     severity: medium
@@ -6910,7 +6910,7 @@ defects:
     description: "The requestAnimationFrame fallback runs the callback synchronously when globalThis.requestAnimationFrame is absent, silently disabling the AC-6 throttle. The fallback is selected at construction with no diagnostic, so a degraded (unthrottled) readout in a non-test environment would be invisible."
     resolution: "I-21: selecting the synchronous requestAnimationFrame fallback now emits a one-time console.warn (process-level latch) so an unthrottled readout in a non-test environment is visible rather than silent."
     status: resolved
-    commit: ""
+    commit: "7c315bd"
 
   - id: D-610
     severity: low
@@ -6921,7 +6921,7 @@ defects:
     description: "_setOrigin does `api.state.get() ?? {}`, masking the case where the shell-owned coord_tools key is unexpectedly null/absent: instead of surfacing that the I-20 skeleton state was never initialised, it silently writes a fresh object missing grid_enabled/grid_spacing_m/measure."
     resolution: "I-21: _setOrigin logs console.warn when api.state.get() returns null (the shell-owned coord_tools key should have been initialised at startup) before proceeding. Covered by test '_setOrigin still works when the coord_tools state starts null'."
     status: resolved
-    commit: ""
+    commit: "7c315bd"
 
   - id: D-611
     severity: low
@@ -6932,4 +6932,4 @@ defects:
     description: "The D-610 fix in _setOrigin guards against api.state.get() returning null but not against a non-null non-object value (string/number/array). `{ ...(coordTools ?? {}) }` would then spread a string into indexed character keys or spread an array's elements, producing a malformed coord_tools object with no warning — inconsistent with D-610's stated intent of catching regressed shell wiring."
     resolution: "I-21: _setOrigin now treats coord_tools as valid only when it is a non-null, non-array object (isSkeleton check); null, a primitive or an array all trigger the console.warn and fall back to a clean {} for the state write."
     status: resolved
-    commit: ""
+    commit: "7c315bd"
