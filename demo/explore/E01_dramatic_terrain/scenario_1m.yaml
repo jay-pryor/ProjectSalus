@@ -1,0 +1,53 @@
+# E01 Dramatic Terrain — 1 m high-resolution variant
+#
+# Same 2 km x 2 km site and sensor layout as scenario.yaml, but backed by the
+# 1 m DEM (dramatic_terrain_1m.tif) so the walled compound carries crisp
+# detail — true 2 m-thick walls, a clean 20 m gate gap, and sharp building
+# footprints — instead of the 5 m cell's coarse blocks.
+#
+# Run generate_hires.py first to create dramatic_terrain_1m.tif.
+#
+# Sensor placements are in projected coordinates (EPSG:28354) and so are
+# resolution-independent — they are unchanged from scenario.yaml.
+
+site_dem_path: dramatic_terrain_1m.tif
+
+sensor_placements:
+  # EO/IR on the guard tower — elevated 30 m structure for 360° close-in coverage
+  - sensor_name: Anduril WISP
+    position_x: 501060.0
+    position_y: 6101060.0
+    bearing_deg: 0.0
+    height_override_m: 0.0   # guard tower height already in DEM
+
+  # Radar on northern ridge peak — dominates the western approach corridor
+  - sensor_name: Echodyne EchoGuard
+    position_x: 500500.0
+    position_y: 6101825.0
+    bearing_deg: 225.0
+    height_override_m: 5.0
+
+  # Radar on eastern escarpment — covers eastern and southern approaches
+  - sensor_name: Echodyne EchoGuard
+    position_x: 501800.0
+    position_y: 6101400.0
+    bearing_deg: 270.0
+    height_override_m: 5.0
+
+  # RF detector on SW hill — passive detection, covers western corridor
+  - sensor_name: DroneShield RfOne Mk2
+    position_x: 500300.0
+    position_y: 6100350.0
+    bearing_deg: 0.0
+    height_override_m: 5.0
+
+protected_point: [501000.0, 6101000.0]
+
+threat_profiles:
+  - "DJI Mavic 3 — Low Slow"
+  - "FPV Racing Drone — Low Observable"
+
+sweep_altitudes_m: [30.0, 80.0, 150.0]
+sweep_dive_angles_deg: [0.0, -10.0, -20.0]
+sweep_segment_length_m: 50.0
+placement_bearing_step_deg: 45.0
