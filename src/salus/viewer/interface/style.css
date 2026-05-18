@@ -1,7 +1,9 @@
-/* Project Salus Interface — Two-column layout
+/* Project Salus Interface — column-then-row layout
  *
- * Left column: navigation bar (fixed width, full height)
- * Right column: map canvas (fills remaining space) + panel slot overlay
+ * Top: full-width coordinate-tools toolbar (fixed height, shell chrome)
+ * Beneath, a two-column row:
+ *   Left column: navigation bar (fixed width, full height)
+ *   Right column: map canvas (fills remaining space) + panel slot overlay
  */
 
 *, *::before, *::after {
@@ -24,7 +26,31 @@ html, body {
 
 #app {
   display: flex;
+  flex-direction: column;
   height: 100vh;
+  overflow: hidden;
+}
+
+/* ------------------------------------------------------------------ */
+/* Coordinate-tools toolbar (top, full width, fixed height)             */
+/* ------------------------------------------------------------------ */
+
+#coord-toolbar {
+  flex-shrink: 0;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  background: #13131f;
+  border-bottom: 1px solid #1e1e30;
+}
+
+/* App body: the nav bar + main row beneath the toolbar. Because #app is
+ * height:100vh; overflow:hidden, this row shrinks by the toolbar height. */
+#app-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -113,7 +139,9 @@ html, body {
   top: 12px;
   right: 12px;
   width: 340px;
-  max-height: calc(100vh - 24px);
+  /* Relative to #main (the row beneath the toolbar), not the viewport, so the
+   * panel is not clipped now that #main is shorter than 100vh by the toolbar. */
+  max-height: calc(100% - 24px);
   background: rgba(13, 13, 26, 0.94);
   border: 1px solid #252540;
   border-radius: 6px;

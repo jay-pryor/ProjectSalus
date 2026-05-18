@@ -355,6 +355,59 @@ crash the shell.
 
 ---
 
+### 2.9 Shell-Owned Subsystems
+
+Most interface behaviour lives in a **module** (Section 2.7): a discoverable
+unit with a manifest, gated by the mode manager, that exists only while it is
+the active panel. A small amount of behaviour cannot fit that model — it must
+remain present and interactive *regardless of which module is active*. That
+behaviour is built as a **shell-owned subsystem**.
+
+A shell-owned subsystem is chrome the shell constructs directly. Unlike a
+module it:
+
+- has **no `manifest.json`** and is not discovered — the shell imports and
+  instantiates it explicitly at startup;
+- has **no state/event contract** — it reads and writes shell-owned state keys
+  through the shell's bypass path (`setState` / `getState`), the same path the
+  shell uses for `ui`;
+- is **not gated by the mode manager** and has no panel-slot lifecycle — it is
+  mounted once and **persists across module navigation**;
+- when it needs the map, receives its **own scoped map proxy**
+  (`createMapProxy(map, prefix, …)`) exactly as a module does, so any layers it
+  adds stay prefix-enforced and isolated.
+
+Existing shell-owned subsystems:
+
+- **Save / Load scenario buttons** — `mountShellNavButtons` appends them below
+  the mode-manager module buttons; they act on every scenario state key.
+- **The permanent 3D terrain canvas** — the terrain source, hillshade layer and
+  3D terrain are the shared base canvas every module renders on; they outlive
+  any single module's unmount (Principle 3; see also the terrain-loader's
+  unmount behaviour).
+- **The coordinate-tools toolbar** — see below.
+
+#### Coordinate-tools toolbar
+
+The coordinate tools (live cursor coordinate readout, a resettable origin, a
+two-point distance measurement, and a toggleable grid) must be usable from any
+module, so they cannot be a module. They are a shell-owned subsystem:
+
+- A full-width `<header id="coord-toolbar">` of fixed height is the first child
+  of `#app`; the nav bar and map sit in a row beneath it.
+- The shell instantiates the `coord-tools` component (`coord-tools/index.js`)
+  once, after the mode manager and the Save/Load buttons, and renders it into
+  `#coord-toolbar`.
+- It receives a `coord-tools`-prefixed scoped map proxy created with the
+  `allowTerrainQuery` opt-in, so it can sample ground elevation
+  (`queryTerrainElevation`) for the Z readout while every layer it adds is
+  `coord-tools:*`-enforced.
+- Its state lives in the shell-owned `coord_tools` key (Section 3), written
+  through the bypass path. It is in-session only — `coord_tools` is **not** in
+  the saved-scenario key set.
+
+---
+
 ## 3. Shared State Schema
 
 The canonical state schema. Only keys defined here are valid in `reads[]` and
@@ -439,12 +492,23 @@ SharedState {
     nav_history: string[],
     pending_simulation: boolean,
     pending_optimiser: boolean
+  },
+
+  coord_tools: {                      ← coord-tools subsystem (§2.9), in-session
+    origin_lnglat: [lon, lat] | null,   only — not a saved-scenario key
+    grid_enabled: boolean,
+    grid_spacing_m: number | null,
+    measure: MeasureState | null
   }
 }
 ```
 
 `ui` is a shell-owned key. No module declares it in `writes[]`. The shell
 updates it directly (bypassing the Proxy write-path) when modes change.
+
+`coord_tools` is likewise a shell-owned key — written by the coord-tools
+subsystem through the shell bypass path, never declared by any module. It is
+ephemeral session state and is excluded from the saved-scenario key set.
 
 ---
 

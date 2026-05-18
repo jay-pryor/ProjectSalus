@@ -22,6 +22,11 @@ export const VALID_STATE_KEYS = new Set([
   'scenario_b_sim_results',
   'report_config',
   'ui',
+  // Shell-owned key for the coord-tools subsystem (I-20). Like 'ui' it is
+  // never declared in any module's reads[]/writes[]; the shell reads and
+  // writes it through the bypass path. In-session only — not persisted with
+  // saved scenarios (absent from SCENARIO_KEYS in shell.js).
+  'coord_tools',
 ]);
 
 /** All valid event names (Section 2.4). */

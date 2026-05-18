@@ -1,0 +1,53 @@
+/* coord-tools.css — Coordinate-tools subsystem styling (I-20).
+ *
+ * The toolbar container (`#coord-toolbar`) layout — full width, fixed height,
+ * position in the `#app` column — lives in style.css. This file styles only
+ * the subsystem's own contents rendered by coord-tools/index.js.
+ */
+
+.coord-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  font-size: 13px;
+}
+
+.coord-tools-label {
+  font-weight: 600;
+  color: #aaccee;
+  letter-spacing: 0.02em;
+}
+
+.coord-tools-readout {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color: #8888aa;
+  white-space: pre;
+}
+
+.coord-tools-btn {
+  background: #1a1a2e;
+  color: #d0d0e0;
+  border: 1px solid #252540;
+  border-radius: 4px;
+  padding: 5px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.12s, color 0.12s;
+}
+
+.coord-tools-btn:hover:not(:disabled) {
+  background: #0f3460;
+  color: #ffffff;
+  border-color: #1a4a80;
+}
+
+.coord-tools-btn:focus-visible {
+  outline: 2px solid #4488cc;
+  outline-offset: 1px;
+}
+
+.coord-tools-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}

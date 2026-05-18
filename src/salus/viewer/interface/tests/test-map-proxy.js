@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createMapProxy, LayerPrefixViolation, ALLOWED_MAP_METHODS, TERRAIN_LOADER_EXTRA_METHODS } from '../map-proxy.js';
+import { createMapProxy, LayerPrefixViolation, ALLOWED_MAP_METHODS, TERRAIN_LOADER_EXTRA_METHODS, COORD_TOOLS_EXTRA_METHODS } from '../map-proxy.js';
 
 // ---------------------------------------------------------------------------
 // Mock MapLibreGL map
@@ -35,6 +35,7 @@ function makeMockMap() {
     project(lngLat) { record('project', lngLat); return { x: 0, y: 0 }; },
     unproject(point) { record('unproject', point); return { lng: 0, lat: 0 }; },
     queryRenderedFeatures(point, opts) { record('queryRenderedFeatures', point, opts); return []; },
+    queryTerrainElevation(lngLat) { record('queryTerrainElevation', lngLat); return 137.25; },
     // Methods that must NOT be exposed on the proxy
     setStyle() { record('setStyle'); },
     remove() { record('remove'); },
@@ -314,4 +315,81 @@ test('terrain-loader proxy with setTerrainSource is still frozen', () => {
   const mock = makeMockMap();
   const proxy = createMapProxy(mock, 'terrain-loader', { allowTerrainSource: true });
   assert.throws(() => { proxy._map = mock; }, /Cannot add property/);
+});
+
+// ---------------------------------------------------------------------------
+// allowTerrainQuery option (I-20: coord-tools subsystem proxy path)
+// ---------------------------------------------------------------------------
+
+test('COORD_TOOLS_EXTRA_METHODS contains queryTerrainElevation', () => {
+  assert.ok(COORD_TOOLS_EXTRA_METHODS.has('queryTerrainElevation'));
+  assert.equal(COORD_TOOLS_EXTRA_METHODS.size, 1);
+});
+
+test('proxy without allowTerrainQuery does not expose queryTerrainElevation', () => {
+  const mock = makeMockMap();
+  const proxy = createMapProxy(mock, 'coord-tools');
+  assert.equal(proxy.queryTerrainElevation, undefined);
+});
+
+test('a regular module proxy never receives queryTerrainElevation', () => {
+  // The opt-in is coord-tools only — a normal module proxy must not get it.
+  const mock = makeMockMap();
+  const proxy = createMapProxy(mock, 'placement-editor');
+  assert.equal(proxy.queryTerrainElevation, undefined);
+});
+
+test('proxy with allowTerrainQuery=true exposes queryTerrainElevation', () => {
+  const mock = makeMockMap();
+  const proxy = createMapProxy(mock, 'coord-tools', { allowTerrainQuery: true });
+  assert.equal(typeof proxy.queryTerrainElevation, 'function');
+});
+
+test('queryTerrainElevation(lngLat) delegates to mapInstance and returns its value', () => {
+  const mock = makeMockMap();
+  const proxy = createMapProxy(mock, 'coord-tools', { allowTerrainQuery: true });
+  const result = proxy.queryTerrainElevation([133.7, -25.2]);
+  assert.equal(mock._calls.length, 1);
+  assert.equal(mock._calls[0].method, 'queryTerrainElevation');
+  assert.deepEqual(mock._calls[0].args, [[133.7, -25.2]]);
+  assert.equal(result, 137.25);
+});
+
+test('allowTerrainQuery does not change the 16-method base surface', () => {
+  // The base allowed-method set is unchanged by the opt-in.
+  assert.equal(ALLOWED_MAP_METHODS.size, 16);
+  const mock = makeMockMap();
+  const proxy = createMapProxy(mock, 'coord-tools', { allowTerrainQuery: true });
+  for (const m of ALLOWED_MAP_METHODS) {
+    assert.equal(typeof proxy[m], 'function', `base method '${m}' must remain present`);
+  }
+  // No destructive method leaks in alongside the opt-in.
+  assert.equal(proxy.setStyle, undefined);
+  assert.equal(proxy.setTerrain, undefined);
+  assert.equal(proxy.setTerrainSource, undefined);
+});
+
+test('layer-prefix enforcement is unchanged on an allowTerrainQuery proxy', () => {
+  const mock = makeMockMap();
+  const proxy = createMapProxy(mock, 'coord-tools', { allowTerrainQuery: true });
+  proxy.addSource('coord-tools:grid', { type: 'geojson' });
+  assert.equal(mock._calls[0].args[0], 'coord-tools:grid');
+  assert.throws(
+    () => proxy.addLayer({ id: 'grid', type: 'line' }),
+    (err) => err instanceof LayerPrefixViolation
+  );
+});
+
+test('coord-tools proxy with queryTerrainElevation is still frozen', () => {
+  const mock = makeMockMap();
+  const proxy = createMapProxy(mock, 'coord-tools', { allowTerrainQuery: true });
+  assert.throws(() => { proxy._map = mock; }, /Cannot add property/);
+});
+
+test('coord-tools proxy does not expose raw map instance via queryTerrainElevation', () => {
+  const mock = makeMockMap();
+  const proxy = createMapProxy(mock, 'coord-tools', { allowTerrainQuery: true });
+  for (const key of Object.getOwnPropertyNames(proxy)) {
+    assert.notEqual(proxy[key], mock, `proxy.${key} must not be the raw map instance`);
+  }
 });

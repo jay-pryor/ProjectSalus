@@ -6,6 +6,7 @@
   <title>Project Salus — Interface</title>
   <link rel="stylesheet" href="../static/vendor/maplibre-gl.css">
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="coord-tools/coord-tools.css">
 </head>
 <body>
   <!-- Loading overlay — shown while shell fetches sensor/effector libraries -->
@@ -30,12 +31,17 @@
   <input type="file" id="shell-load-file" accept=".salus.json" style="display:none" aria-hidden="true">
 
   <div id="app">
-    <nav id="nav-bar" aria-label="Module navigation">
-      <!-- Module buttons injected by mode-manager; shell buttons appended below -->
-    </nav>
-    <div id="main">
-      <div id="map"></div>
-      <div id="panel-slot" aria-live="polite"></div>
+    <!-- Coordinate-tools toolbar — shell-owned subsystem chrome, persists
+         across module navigation. Contents rendered by coord-tools/index.js. -->
+    <header id="coord-toolbar" aria-label="Coordinate tools"></header>
+    <div id="app-body">
+      <nav id="nav-bar" aria-label="Module navigation">
+        <!-- Module buttons injected by mode-manager; shell buttons appended below -->
+      </nav>
+      <div id="main">
+        <div id="map"></div>
+        <div id="panel-slot" aria-live="polite"></div>
+      </div>
     </div>
   </div>
 

@@ -1,0 +1,56 @@
+task_id: I-20
+timestamp: 2026-05-18T13:30:00Z
+title: "Coordinate-tools toolbar + shell-owned subsystem skeleton"
+
+quality_gates:
+  G1_lint: N/A             # N/A — no Python files changed (interface JS/HTML/CSS + docs task)
+  G2_format: N/A           # N/A — no Python files changed
+  G3_import: N/A           # N/A — no Python files changed
+  G4_type: N/A             # N/A — no Python files changed
+  G5_security: N/A         # N/A — no Python files changed
+  G6_unit_test: N/A        # N/A — no Python files changed (Python pytest). JS suite below.
+  G7_coverage: N/A         # N/A — no Python files changed
+  G8_secrets: pass         # detect-secrets scan of all changed files — 0 secrets
+  coverage_pct: N/A
+  js_tests: pass           # node --test 'tests/test-*.js' — 734 passed, 0 failed (709 baseline + 25 new: 11 in test-map-proxy.js, 14 in test-coord-tools.js, net of a 3-way split of one validation test)
+
+review:
+  l1_standards:
+    testing: pass          # test-coord-tools.js (new) + test-map-proxy.js additions — every test carries assertions; names describe the scenario; node:assert/strict; no shared-fixture pollution. Python-specific testing.md rules (pytest fixtures, tmp_path, pytest.approx) are N/A — this is interface JS.
+    error_handling: pass   # createCoordTools throws named TypeErrors for a bad toolbarEl / api / map-without-opt-in / state-without-get-set; shell.js guards a missing #coord-toolbar with console.warn; no swallowed exceptions. The lone catch in test-coord-tools.js's manifest scan is a documented skip of non-module directory entries, not an error swallow.
+    logging: pass          # shell.js adds one console.warn for an absent #coord-toolbar element, consistent with the existing shell.js diagnostics convention. (logging.md governs the Python library; print() rule N/A.)
+    security: N/A          # no file I/O of external or user-supplied data. test-coord-tools.js reads committed module manifests via a path derived from import.meta.url (trusted, no traversal surface).
+    interface_modules: N/A # interface-modules.md applies to .js/.html/manifest.json under src/salus/viewer/static/ or modules/; none changed. coord-tools is a shell-owned subsystem under interface/, deliberately outside the module model (no manifest, not mode-manager gated) — see InterfaceArchitecture.md §2.9. Its isolation/scoped-proxy/layer-prefix invariants were still reviewed by module_architecture_reviewer (below).
+  l2_agents:
+    silent_failure_hunter: {status: pass, findings: 3}         # 1 medium (D-603 — queryTerrainElevation null-return contract undocumented) + 2 low (D-604/D-605 — createCoordTools api guard did not verify the queryTerrainElevation opt-in or the state get/set shape). All 3 logged and fixed.
+    spec_compliance: {status: pass, findings: 1}               # 1 informational finding only — the inert '—' X/Y/Z readout placeholder span is toolbar-shell scaffolding, not I-21 behaviour (no mousemove handler, no api.map use); the reviewer rated it acceptable and required no change. All 7 acceptance criteria satisfied; no Out-of-scope item violated.
+    type_design_analyzer: N/A                                  # interface JS — no type annotations added or modified
+    regression_reviewer: {status: pass, findings: 0}           # map-proxy 16-method base surface, allowTerrainSource path, prefix enforcement and Object.freeze all unchanged; shell startup steps 1-11 unchanged; no VALID_STATE_KEYS key removed; #nav-bar/#main/#map/#panel-slot IDs preserved (getElementById is depth-independent); #panel-slot max-height 100vh→100% is a correct fix for the now-shorter #main; no existing test deleted or weakened.
+    module_architecture_reviewer: {status: pass, findings: 0}  # Literal trigger (files under static/ or modules/) is N/A — ran as defence-in-depth on the new shell-owned-subsystem code. Isolation (zero cross-module imports, no raw map/state access), scoped coord-tools-prefixed map proxy, layer-prefix scoping and the allowTerrainQuery opt-in mirroring allowTerrainSource all verified. One non-blocking observation (single-source the coord-tools prefix) was applied.
+
+defect_ids:
+  - D-603   # queryTerrainElevation null-return contract undocumented in JSDoc (medium) — resolved
+  - D-604   # createCoordTools api guard did not verify the allowTerrainQuery opt-in on api.map (low) — resolved
+  - D-605   # createCoordTools api guard did not verify api.state get/set are functions (low) — resolved
+
+files_changed:
+  - docs/Technical/InterfaceArchitecture.md                                  # +§2.9 Shell-Owned Subsystems (category + coord-tools toolbar); +coord_tools entry in the §3 state schema
+  - src/salus/viewer/interface/index.html                                    # #app restructured: #coord-toolbar header + #app-body row; coord-tools.css <link>
+  - src/salus/viewer/interface/style.css                                     # #app flex-direction:column; +#coord-toolbar (fixed 44px) +#app-body row; #panel-slot max-height 100vh→100%
+  - src/salus/viewer/interface/map-proxy.js                                   # +queryTerrainElevation behind allowTerrainQuery opt-in; +COORD_TOOLS_EXTRA_METHODS export; D-603 null-return JSDoc
+  - src/salus/viewer/interface/state-schema.js                                # +coord_tools shell-owned state key in VALID_STATE_KEYS
+  - src/salus/viewer/interface/shell.js                                       # +coord_tools state init; +step 12 mounting createCoordTools with a coord-tools-prefixed scoped map proxy
+  - src/salus/viewer/interface/coord-tools/index.js                           # NEW — coord-tools shell-owned subsystem component (toolbar shell, disabled stubs); D-604/D-605 guards
+  - src/salus/viewer/interface/coord-tools/coord-tools.css                    # NEW — coord-tools subsystem styling
+  - src/salus/viewer/interface/tests/test-coord-tools.js                      # NEW — 14 tests: toolbar mounting, persistence across navigation, dispose, input validation, scoped proxy, coord_tools state key
+  - src/salus/viewer/interface/tests/test-map-proxy.js                        # +11 tests for the allowTerrainQuery / queryTerrainElevation proxy path
+  - .forge/defect-register.yaml                                              # D-603..D-605 logged (open → resolved)
+
+notes:
+  - Source — user feature request (2026-05-18): a coordinate system for the viewer (cursor readout, resettable origin, distance measurement, toggleable grid), scoped as a four-task feature (I-20 infrastructure, I-21 origin+readout, I-22 measurement, I-23 grid). I-20 builds the shared infrastructure only — no user-facing tool behaviour.
+  - I-20 introduces a new architectural category — the shell-owned subsystem — documented in InterfaceArchitecture.md §2.9. coord-tools is NOT a navigable module: no manifest, not discovered, not mode-manager gated, persists across module navigation. It receives its own coord-tools-prefixed scoped map proxy (with the allowTerrainQuery opt-in) and reads/writes the shell-owned coord_tools state key via the shell bypass path.
+  - The toolbar renders disabled tool stubs (set-origin / measure / grid) and an inert '—' X/Y/Z readout placeholder; all user-facing behaviour is deferred to I-21–I-23 per spec.
+  - coord_tools is in-session only — deliberately excluded from SCENARIO_KEYS, mirroring the ui key.
+  - Commit hash for D-603..D-605 and this gate-proof is backfilled in a follow-up chore commit, matching the I-14..I-19 pattern on this branch.
+
+overall: pass

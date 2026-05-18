@@ -10,6 +10,9 @@
  *   - Exception: when options.allowTerrainSource=true (terrain-loader only),
  *     the proxy additionally exposes setTerrainSource() which delegates to
  *     setTerrain() internally (architectural exception per S14.3-3).
+ *   - Exception: when options.allowTerrainQuery=true (coord-tools subsystem
+ *     only), the proxy additionally exposes queryTerrainElevation() — a
+ *     non-destructive read of the 3D terrain (architectural opt-in per I-20).
  *   - addSource(id) and addLayer({id}) must use IDs prefixed with
  *     `{layerIdPrefix}:`. Unprefixed IDs throw LayerPrefixViolation.
  *   - removeSource and removeLayer also enforce the prefix so a module
@@ -80,6 +83,9 @@ export const ALLOWED_MAP_METHODS = new Set([
 /** Extra method present only when options.allowTerrainSource=true. */
 export const TERRAIN_LOADER_EXTRA_METHODS = new Set(['setTerrainSource']);
 
+/** Extra method present only when options.allowTerrainQuery=true. */
+export const COORD_TOOLS_EXTRA_METHODS = new Set(['queryTerrainElevation']);
+
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
@@ -94,6 +100,10 @@ export const TERRAIN_LOADER_EXTRA_METHODS = new Set(['setTerrainSource']);
  *   setTerrainSource(sourceId) method. This is an architectural exception for the
  *   terrain-loader module only — no other module should modify the map's terrain
  *   property. The shell sets this flag explicitly for terrain-loader.
+ * @param {boolean} [options.allowTerrainQuery=false] - when true, adds the
+ *   queryTerrainElevation(lngLat) method. This is an architectural opt-in for
+ *   the coord-tools shell-owned subsystem only. The shell sets this flag
+ *   explicitly for the coord-tools map proxy.
  * @returns {object} restricted map handle
  */
 export function createMapProxy(mapInstance, layerIdPrefix, options = {}) {
@@ -184,6 +194,31 @@ export function createMapProxy(mapInstance, layerIdPrefix, options = {}) {
       return sourceId === null
         ? mapInstance.setTerrain(null)
         : mapInstance.setTerrain({ source: sourceId });
+    };
+  }
+
+  // Architectural opt-in: the coord-tools subsystem reads the ground
+  // elevation under the cursor to build its Z readout (I-21). queryTerrain-
+  // Elevation is a pure read — it samples the already-loaded 3D terrain and
+  // mutates no map state — so exposing it weakens no isolation guarantee;
+  // it is gated behind a flag only so the surface stays minimal for modules
+  // that have no need of it. The shell enables this via options.allow-
+  // TerrainQuery for the coord-tools map proxy alone.
+  //
+  // Return contract (D-603): MapLibre's queryTerrainElevation returns a
+  // number in metres, or `null` when no 3D terrain source is set (no DEM
+  // loaded yet) or the point lies outside the loaded terrain tiles. The
+  // proxy delegates that contract verbatim — callers (the I-21 Z readout)
+  // MUST treat `null` as "elevation unavailable" and not as a coordinate.
+  if (options.allowTerrainQuery) {
+    /**
+     * Sample the ground elevation of the 3D terrain under a lng/lat.
+     * @param {[number, number]|object} lngLat - MapLibre LngLatLike
+     * @returns {number|null} elevation in metres, or null when no terrain
+     *   is loaded or the point is outside the loaded tiles.
+     */
+    proxy.queryTerrainElevation = function queryTerrainElevation(lngLat) {
+      return mapInstance.queryTerrainElevation(lngLat);
     };
   }
 

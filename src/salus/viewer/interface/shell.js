@@ -23,12 +23,14 @@
  *   9. Build module registry (api + runUnmount per module)
  *  10. Start mode manager (builds nav bar, wires prereq gating)
  *  11. Append shell-level Save/Load buttons to nav bar
+ *  12. Mount the coord-tools shell-owned subsystem (I-20)
  */
 
 import { createState } from './state.js';
 import { createBus } from './bus.js';
 import { createMapProxy } from './map-proxy.js';
 import { createModeManager } from './mode-manager.js';
+import { createCoordTools, COORD_TOOLS_LAYER_PREFIX } from './coord-tools/index.js';
 import {
   discoverModules,
   buildContracts,
@@ -428,6 +430,16 @@ async function main() {
     nav_history: [],
   });
 
+  // coord-tools subsystem state (I-20). Shell-owned, like 'ui' — no module
+  // declares it. The skeleton object's sub-fields are populated by I-21–I-23
+  // (origin, grid, measurement). In-session only — excluded from SCENARIO_KEYS.
+  state.setState('coord_tools', {
+    origin_lnglat: null,
+    grid_enabled: false,
+    grid_spacing_m: null,
+    measure: null,
+  });
+
   // -------------------------------------------------------------------
   // 8. Write fetched libraries to state (shell bypass — no contract check)
   //
@@ -490,6 +502,36 @@ async function main() {
   // 11. Append shell-level Save/Load buttons (S14.14-2)
   // -------------------------------------------------------------------
   mountShellNavButtons(navContainer, state, bus, doc);
+
+  // -------------------------------------------------------------------
+  // 12. Mount the coord-tools shell-owned subsystem (I-20)
+  //
+  // coord-tools is shell chrome, not a navigable module: it persists across
+  // module navigation and is not gated by the mode manager. It receives its
+  // own `coord-tools`-prefixed scoped map proxy (with the queryTerrainElevation
+  // opt-in for the I-21 Z readout) so any layers it later adds are
+  // prefix-enforced, and a narrow handle onto the shell-owned `coord_tools`
+  // state key via the bypass path.
+  // -------------------------------------------------------------------
+  const coordToolbar = doc.getElementById('coord-toolbar');
+  if (coordToolbar) {
+    const coordMapProxy = createMapProxy(map, COORD_TOOLS_LAYER_PREFIX, {
+      allowTerrainQuery: true,
+    });
+    createCoordTools(
+      coordToolbar,
+      {
+        map: coordMapProxy,
+        state: {
+          get: () => state.getState('coord_tools'),
+          set: (value) => state.setState('coord_tools', value),
+        },
+      },
+      doc
+    );
+  } else {
+    console.warn('[shell] #coord-toolbar not found in DOM — coord-tools subsystem not mounted');
+  }
 
   // Expose a narrow shell handle for debugging and programmatic navigation.
   // emitScenario is restricted to the two scenario lifecycle events to prevent

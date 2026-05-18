@@ -6834,3 +6834,36 @@ defects:
     resolution: "I-19: the 'progress' handler now uses Number.isFinite(data.pct) — a non-numeric pct falls back to 0 and is logged via console.warn; an absent pct is still treated as 0 silently (a legitimate frame). Covered by test 'a progress event with a non-numeric pct falls back to 0'."
     status: resolved
     commit: "637c4b1"
+
+  - id: D-603
+    severity: medium
+    task: I-20
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/map-proxy.js
+    line: 208
+    description: "queryTerrainElevation delegates MapLibre's raw return value, which is null when no 3D terrain source is set or the queried point is outside loaded tiles. The JSDoc never documents this null-return contract, so the I-21 Z-readout consumer has no signal that it must null-guard the result before arithmetic — a latent silent-failure across the I-20/I-21 task boundary."
+    resolution: "I-20: documented the return contract — added a comment block and a @returns {number|null} JSDoc on proxy.queryTerrainElevation in map-proxy.js stating null means 'no terrain loaded / point off-tile' and that callers MUST treat null as elevation-unavailable."
+    status: resolved
+    commit: ""
+
+  - id: D-604
+    severity: low
+    task: I-20
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/coord-tools/index.js
+    line: 64
+    description: "createCoordTools's api guard checks only api.map != null, not that api.map carries the allowTerrainQuery opt-in (queryTerrainElevation). If the shell wiring regresses (flag dropped / wrong proxy passed), createCoordTools accepts it silently and the failure surfaces only later in I-21 as a TypeError far from the cause."
+    resolution: "I-20: the api guard now rejects a map handle whose queryTerrainElevation is not a function, with a TypeError naming the allowTerrainQuery opt-in. Covered by test 'createCoordTools throws when api.map lacks the allowTerrainQuery opt-in'."
+    status: resolved
+    commit: ""
+
+  - id: D-605
+    severity: low
+    task: I-20
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/coord-tools/index.js
+    line: 64
+    description: "createCoordTools's api guard checks api.state != null but not that api.state.get / api.state.set are functions, despite the JSDoc declaring state: {get: Function, set: Function}. Passing { map, state: {} } passes the guard; the crash is deferred to the first I-21 caller."
+    resolution: "I-20: the api guard now rejects a state handle whose get or set is not a function, with a dedicated TypeError. Covered by test 'createCoordTools throws when api.state is not a { get, set } handle'."
+    status: resolved
+    commit: ""
