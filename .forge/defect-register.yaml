@@ -6743,6 +6743,94 @@ defects:
     file: src/salus/viewer/interface/modules/terrain-loader/index.js
     line: 351
     description: "Pre-existing: the EventSource opened in _pollTileProgress is closed only on the SSE 'complete'/'error' events. terrain-loader's onUnmount holds no handle to the in-flight EventSource, so navigating away mid-tile-generation leaves the SSE connection open and _loadTerrain keeps mutating DOM nodes of an unmounted panel. Not introduced by I-18 (the onUnmount change does not touch _pollTileProgress); surfaced because the thinner onUnmount makes it the most material remaining unhandled resource."
-    resolution: "Deferred — pre-existing leak, outside the I-18 acceptance criteria (terrain-canvas persistence). Fix is to store the EventSource on a cancellation context and es.close() it in onUnmount; tracked for a dedicated follow-up task."
-    status: deferred
+    resolution: "Deferred at I-18; RESOLVED in I-19. sseCtx now carries a cancel() handle; onUnmount calls sseCtx.cancel(), which closes the in-flight tile-progress EventSource and settles its poll promise via finish(). Navigating away mid-tile-generation no longer leaks the SSE connection. Covered by test 'onUnmount closes an in-flight tile-progress EventSource (D-594)'."
+    status: resolved
+    commit: ""
+
+  - id: D-595
+    severity: high
+    task: I-19
+    found_by: user_report
+    file: src/salus/viewer/interface/modules/terrain-loader/index.js
+    line: 359
+    description: "terrain-loader's _pollTileProgress consumed the tile-progress SSE stream with EventSource.onmessage. The backend formats every event with a named 'event:' line (event: progress / complete / error — _sse_event, D-404); EventSource.onmessage fires ONLY for unnamed 'message' events, so every progress/complete/error event was silently dropped. The stream's normal close then triggered EventSource.onerror, rejecting every UI DEM upload with a false 'SSE connection error during tile generation' even though server-side tile generation had succeeded. The only working path was a browser reload (adopt-latest-session bypasses the poll)."
+    resolution: "I-19: _pollTileProgress switched from EventSource.onmessage to es.addEventListener('progress'|'complete'|'error', …) so the backend's named SSE events are received. A normal DEM upload now resolves, writes terrain state and applies map layers instead of failing with a false connection error. Covered by the four D-595 tests."
+    status: resolved
+    commit: ""
+
+  - id: D-596
+    severity: high
+    task: I-19
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/terrain-loader/index.js
+    line: 383
+    description: "The D-594 unmount fix calls EventSource.close() in onUnmount, but close() dispatches no event. _pollTileProgress's promise settles only via its 'complete' or 'error' handler, so an external close leaves the promise permanently unsettled — the awaiting _loadTerrain hangs forever, pinning the panel, metadata and DEM/DSM file blobs in memory on every navigate-away-mid-generation. The D-594 leak relocated from the EventSource to the awaiting promise."
+    resolution: "I-19: sseCtx now carries a cancel() handle that calls finish(reject, …) — closing the stream AND rejecting the poll promise with a cancellation Error that _loadTerrain's catch handles. onUnmount calls sseCtx.cancel() instead of a bare es.close(), so the awaiting _loadTerrain no longer hangs. Covered by test 'a late SSE event after unmount neither writes state nor re-settles'."
+    status: resolved
+    commit: ""
+
+  - id: D-597
+    severity: medium
+    task: I-19
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/terrain-loader/index.js
+    line: 387
+    description: "_pollTileProgress had no 'settled' guard: closeStream and the complete/error handlers did not check whether the promise had already settled. A stray second SSE event (an error after a complete, or a duplicate error) re-invokes a handler, re-runs resolve()/reject() and es.close(), and executes handler logic after settlement."
+    resolution: "I-19: introduced a single 'settled' flag and a finish(settle, value) helper. finish() early-returns if already settled, so a duplicate or out-of-order SSE event cannot re-settle the promise or re-run teardown; all three handlers early-return when settled. Covered by test 'a late SSE event after unmount neither writes state nor re-settles'."
+    status: resolved
+    commit: ""
+
+  - id: D-598
+    severity: medium
+    task: I-19
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/terrain-loader/index.js
+    line: 392
+    description: "The 'progress' SSE handler writes to panel DOM nodes (#tl-progress-bar, #tl-status-msg) with no settled/unmounted guard. An SSE event already queued on the event loop before es.close() still invokes the handler against the now-unmounted panel, contradicting the stated D-594 invariant that handlers stop firing against an unmounted panel."
+    resolution: "I-19: the 'progress' handler now early-returns when the 'settled' flag is set (the flag is set by finish() on complete/error/cancel). An SSE event delivered after the stream is closed no longer mutates the unmounted panel. Covered by test 'a late SSE event after unmount neither writes state nor re-settles'."
+    status: resolved
+    commit: ""
+
+  - id: D-599
+    severity: low
+    task: I-19
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/terrain-loader/index.js
+    line: 396
+    description: "A malformed 'progress' SSE JSON payload is dropped via 'catch { return; }' with no console.warn, unlike the _adoptLatestSessionIfAvailable JSON-parse failures which log. Symptom is a silently frozen progress bar with no diagnostic trail."
+    resolution: "I-19: the malformed-payload catch in the 'progress' handler now logs console.warn('[terrain-loader] malformed progress SSE payload:', event.data) before returning, matching the _adoptLatestSessionIfAvailable diagnostics. Covered by test 'a malformed progress SSE payload is logged and does not crash the load'."
+    status: resolved
+    commit: ""
+
+  - id: D-600
+    severity: low
+    task: I-19
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/terrain-loader/index.js
+    line: 423
+    description: "A server-sent 'error' SSE event whose JSON payload omits 'message' silently discards any 'detail'/'error' fields and falls back to the generic 'Tile generation failed', unlike the HTTP error path (_loadTerrain) which checks body.detail || body.error."
+    resolution: "I-19: the 'error' handler now resolves the message as data.message || data.detail || data.error || <generic>, matching the HTTP error path in _loadTerrain. A server error payload that supplies only 'detail' now surfaces it. Covered by test 'server error SSE event without a message field falls back to detail'."
+    status: resolved
+    commit: ""
+
+  - id: D-601
+    severity: medium
+    task: I-19
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/terrain-loader/index.js
+    line: 398
+    description: "sseCtx holds only one {es, cancel} pair. The DEM file input is not disabled during a load, so a second file selection starts an overlapping _loadTerrain whose _pollTileProgress overwrites sseCtx.es/sseCtx.cancel. The first stream's cancel becomes unreachable; if the panel is then unmounted, onUnmount can only cancel the newer stream, so the older EventSource is never closed and its _loadTerrain promise never settles — reintroducing the D-594/D-596 hang and SSE leak for the first of two concurrent loads."
+    resolution: "I-19: added a loadInProgress re-entrancy guard in handleDemChange — a DEM selection made while a load is still streaming is ignored (with a console.warn). The flag is cleared in a .finally() on the _loadTerrain promise, so overlapping loads cannot occur and sseCtx's single-stream tracking is always correct. Covered by test 'a second DEM selection during an in-flight load is ignored'."
+    status: resolved
+    commit: ""
+
+  - id: D-602
+    severity: low
+    task: I-19
+    found_by: silent_failure_hunter
+    file: src/salus/viewer/interface/modules/terrain-loader/index.js
+    line: 422
+    description: "In the 'progress' handler, 'data.pct ?? 0' only guards null/undefined. A well-formed JSON frame carrying a non-numeric pct (string, NaN) passes through and sets progressBar.value and the status text to a garbage value silently — a degraded-but-silent display with no diagnostic."
+    resolution: "I-19: the 'progress' handler now uses Number.isFinite(data.pct) — a non-numeric pct falls back to 0 and is logged via console.warn; an absent pct is still treated as 0 silently (a legitimate frame). Covered by test 'a progress event with a non-numeric pct falls back to 0'."
+    status: resolved
     commit: ""

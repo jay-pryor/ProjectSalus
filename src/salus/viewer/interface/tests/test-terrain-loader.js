@@ -118,23 +118,42 @@ globalThis.document = {
 // Safe window.location mock
 globalThis.window = { location: { origin: 'http://localhost:8000' } };
 
-// EventSource mock
+// EventSource mock.
+//
+// The terrain-loader client consumes the *named* SSE events the backend emits
+// (event: progress / complete / error — see _sse_event, D-404) via
+// addEventListener, not onmessage (D-595). The mock therefore dispatches by
+// event type to addEventListener-registered handlers.
 const _esInstances = [];
 class MockEventSource {
   constructor(url) {
     this.url = url;
     this._closed = false;
-    this.onmessage = null;
-    this.onerror = null;
+    this._listeners = {};
     _esInstances.push(this);
   }
-  close() { this._closed = true; }
-  /** test helper: simulate an SSE message */
-  _emit(data) {
-    if (this.onmessage) this.onmessage({ data: JSON.stringify(data) });
+  addEventListener(type, handler) {
+    if (!this._listeners[type]) this._listeners[type] = [];
+    this._listeners[type].push(handler);
   }
-  _emitError() {
-    if (this.onerror) this.onerror(new Error('mock error'));
+  close() { this._closed = true; }
+  /**
+   * test helper: dispatch a named server-sent SSE message. `payload.type`
+   * selects the event name; the whole payload is JSON-encoded into event.data,
+   * matching the backend's `event: <type>\ndata: <json>` framing.
+   */
+  _emit(payload) {
+    const type = payload.type || 'message';
+    const event = { type, data: JSON.stringify(payload) };
+    for (const h of (this._listeners[type] ?? [])) h(event);
+  }
+  /** test helper: dispatch a transport-level connection error (no data). */
+  _emitConnectionError() {
+    for (const h of (this._listeners['error'] ?? [])) h({ type: 'error' });
+  }
+  /** test helper: dispatch a named event with a raw (possibly malformed) data string. */
+  _emitRaw(type, data) {
+    for (const h of (this._listeners[type] ?? [])) h({ type, data });
   }
 }
 globalThis.EventSource = MockEventSource;
@@ -825,5 +844,216 @@ test('adopt rejects metadata when min_zoom > max_zoom (D-475)', async () => {
 
   assert.equal(api._terrainValue(), null, 'inverted zoom range must fail validation');
 
+  delete globalThis.fetch;
+});
+
+// ---------------------------------------------------------------------------
+// I-19: tile-progress SSE client (D-595 named events, D-594 unmount close)
+//
+// The backend frames every tile-progress event with a named `event:` line
+// (event: progress / complete / error). The client must consume those via
+// addEventListener — `onmessage` never fires for named events, which silently
+// dropped every event and surfaced the stream's normal close as a false
+// "SSE connection error".
+// ---------------------------------------------------------------------------
+
+const _LOAD_METADATA = {
+  dem_path: '/tmp/dem.tif',
+  dsm_path: null,
+  crs_epsg: 28354,
+  bounds_wgs84: [148.0, -36.0, 149.0, -35.0],
+  centre_wgs84: [148.5, -35.5],
+  resolution_m: 1.0,
+  tile_url_template: '/api/terrain/tiles/{z}/{x}/{y}.png',
+  terrain_tile_count: 12,
+  terrain_min_zoom: 8,
+  terrain_max_zoom: 13,
+};
+
+/** Drive a DEM upload up to the point the tile-progress EventSource exists. */
+async function _startLoad(api) {
+  const panel = api.panel.mountedElements[0];
+  const demInput = panel.querySelector('#tl-dem-input');
+  globalThis.fetch = async () => ({ ok: true, json: async () => _LOAD_METADATA });
+  demInput.files = [{ name: 'dem.tif' }];
+  demInput._fire('change');
+  await new Promise(r => setTimeout(r, 10));
+  return { panel, es: _esInstances[_esInstances.length - 1] };
+}
+
+test('progress SSE event updates the progress bar and status (D-595)', async () => {
+  const api = makeMockApi();
+  init(api);
+  const { panel, es } = await _startLoad(api);
+  assert.ok(es, 'an EventSource must be opened for the tile-progress stream');
+
+  es._emit({ type: 'progress', pct: 42 });
+  const progressBar = panel.querySelector('#tl-progress-bar');
+  assert.equal(progressBar.value, 42, 'progress event must update the progress bar');
+
+  es._emit({ type: 'complete', pct: 100 });
+  await new Promise(r => setTimeout(r, 20));
+  delete globalThis.fetch;
+});
+
+test('complete SSE event finishes the load with no spurious error (D-595)', async () => {
+  const api = makeMockApi();
+  init(api);
+  const { panel, es } = await _startLoad(api);
+
+  es._emit({ type: 'complete', pct: 100 });
+  await new Promise(r => setTimeout(r, 20));
+
+  assert.deepEqual(api._terrainValue(), _LOAD_METADATA, 'terrain state must be set on complete');
+  const errorMsg = panel.querySelector('#tl-error-msg');
+  assert.equal(errorMsg.hidden, true, 'no error must be shown for a clean complete');
+  assert.ok(es._closed, 'the EventSource must be closed after complete');
+  delete globalThis.fetch;
+});
+
+test('server-sent error SSE event rejects with the payload message (D-595)', async () => {
+  const api = makeMockApi();
+  init(api);
+  const { panel, es } = await _startLoad(api);
+
+  es._emit({ type: 'error', message: 'All terrain tiles failed to generate' });
+  await new Promise(r => setTimeout(r, 20));
+
+  const errorMsg = panel.querySelector('#tl-error-msg');
+  assert.equal(errorMsg.hidden, false, 'error message must be shown');
+  assert.equal(errorMsg.textContent, 'Error: All terrain tiles failed to generate');
+  assert.equal(api._terrainValue(), null, 'terrain state must not be set on a failed load');
+  assert.ok(es._closed, 'the EventSource must be closed after a server error');
+  delete globalThis.fetch;
+});
+
+test('transport-level SSE connection error rejects with the generic message (D-595)', async () => {
+  const api = makeMockApi();
+  init(api);
+  const { panel, es } = await _startLoad(api);
+
+  es._emitConnectionError();
+  await new Promise(r => setTimeout(r, 20));
+
+  const errorMsg = panel.querySelector('#tl-error-msg');
+  assert.equal(errorMsg.hidden, false, 'error message must be shown');
+  assert.equal(errorMsg.textContent, 'Error: SSE connection error during tile generation');
+  assert.ok(es._closed, 'the EventSource must be closed after a connection error');
+  delete globalThis.fetch;
+});
+
+test('onUnmount closes an in-flight tile-progress EventSource (D-594)', async () => {
+  const api = makeMockApi();
+  init(api);
+  const { es } = await _startLoad(api);
+  assert.ok(es, 'an EventSource must be open mid-generation');
+  assert.equal(es._closed, false, 'EventSource is still open before unmount');
+
+  // Navigate away mid-tile-generation — no complete/error emitted.
+  for (const cb of api._unmountCallbacks) cb();
+
+  assert.ok(es._closed, 'onUnmount must close the in-flight tile-progress EventSource');
+  delete globalThis.fetch;
+});
+
+test('a late SSE event after unmount neither writes state nor re-settles (D-596/D-597/D-598)', async () => {
+  const api = makeMockApi();
+  init(api);
+  const { es } = await _startLoad(api);
+
+  // Navigate away — cancel() must close the stream AND settle the poll
+  // promise (D-596: close() alone fires no event).
+  for (const cb of api._unmountCallbacks) cb();
+  assert.ok(es._closed, 'unmount must close the stream');
+
+  // The server finishes after the user has already navigated away.
+  es._emit({ type: 'progress', pct: 90 });
+  es._emit({ type: 'complete', pct: 100 });
+  await new Promise(r => setTimeout(r, 20));
+
+  assert.equal(
+    api._terrainValue(), null,
+    'a complete delivered after unmount must not write terrain state',
+  );
+  delete globalThis.fetch;
+});
+
+test('server error SSE event without a message field falls back to detail (D-600)', async () => {
+  const api = makeMockApi();
+  init(api);
+  const { panel, es } = await _startLoad(api);
+
+  es._emit({ type: 'error', detail: 'DEM CRS not supported' });
+  await new Promise(r => setTimeout(r, 20));
+
+  const errorMsg = panel.querySelector('#tl-error-msg');
+  assert.equal(errorMsg.textContent, 'Error: DEM CRS not supported',
+    'a server error payload without `message` must surface its `detail`');
+  delete globalThis.fetch;
+});
+
+test('a second DEM selection during an in-flight load is ignored (D-601)', async () => {
+  const api = makeMockApi();
+  init(api);
+  const { es } = await _startLoad(api);
+  const esCountBefore = _esInstances.length;
+
+  // The user selects another file while load #1 is still streaming.
+  const panel = api.panel.mountedElements[0];
+  const demInput = panel.querySelector('#tl-dem-input');
+  demInput.files = [{ name: 'other.tif' }];
+  demInput._fire('change');
+  await new Promise(r => setTimeout(r, 10));
+
+  assert.equal(
+    _esInstances.length, esCountBefore,
+    'a re-entrant DEM selection must not start a second overlapping load',
+  );
+
+  // Load #1 completes; the in-progress guard then clears.
+  es._emit({ type: 'complete', pct: 100 });
+  await new Promise(r => setTimeout(r, 20));
+  delete globalThis.fetch;
+});
+
+test('a progress event with a non-numeric pct falls back to 0 (D-602)', async () => {
+  const api = makeMockApi();
+  init(api);
+  const { panel, es } = await _startLoad(api);
+
+  es._emit({ type: 'progress', pct: 'not-a-number' });
+  const progressBar = panel.querySelector('#tl-progress-bar');
+  assert.equal(progressBar.value, 0, 'a non-numeric pct must not set a garbage bar value');
+
+  es._emit({ type: 'complete', pct: 100 });
+  await new Promise(r => setTimeout(r, 20));
+  delete globalThis.fetch;
+});
+
+test('a malformed progress SSE payload is logged and does not crash the load (D-599)', async () => {
+  const api = makeMockApi();
+  init(api);
+  const { panel, es } = await _startLoad(api);
+
+  const warnings = [];
+  const origWarn = console.warn;
+  console.warn = (...args) => warnings.push(args.map(String).join(' '));
+  try {
+    es._emitRaw('progress', 'not-valid-json{');
+  } finally {
+    console.warn = origWarn;
+  }
+
+  assert.ok(
+    warnings.some(w => w.includes('malformed progress SSE payload')),
+    'a malformed progress payload must be logged via console.warn',
+  );
+  const progressBar = panel.querySelector('#tl-progress-bar');
+  assert.equal(progressBar.value, 0, 'a malformed progress event must not move the bar');
+
+  // The load still completes normally on the next well-formed event.
+  es._emit({ type: 'complete', pct: 100 });
+  await new Promise(r => setTimeout(r, 20));
+  assert.deepEqual(api._terrainValue(), _LOAD_METADATA, 'load completes after a malformed frame');
   delete globalThis.fetch;
 });

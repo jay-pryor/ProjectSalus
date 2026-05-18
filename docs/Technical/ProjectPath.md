@@ -1139,6 +1139,28 @@ _Exploration scenarios are stored in `demo/explore/` with the naming convention 
 
 ---
 
+**I-19: Terrain-loader SSE client consumes named events; in-flight tile-progress stream closed on unmount**
+- _Source:_ User-reported viewer bug (2026-05-18): loading a DEM through the terrain-loader file input fails with "Error: SSE connection error during tile generation" even though server-side tile generation succeeds (tiles written to disk, session registered). Logged as D-595. This task also resolves the deferred D-594 (the pre-existing `_pollTileProgress` EventSource leak on unmount).
+- _Diagnosis (D-595):_ The backend SSE formatter `_sse_event` (`interface_api/app.py`) emits every terrain-tile-progress event with a named `event:` line (`event: progress` / `event: complete` / `event: error`) — a deliberate D-404 change so `simulation-runner` / `optimiser` can dispatch by event type. `terrain-loader`'s `_pollTileProgress` consumes the stream with `EventSource.onmessage`, which by the SSE specification fires *only* for unnamed (`message`) events. Every progress / complete / error event is therefore silently missed; the stream then closes normally and `EventSource.onerror` fires, rejecting the load with a false "SSE connection error during tile generation". Server-side generation has in fact completed and the session is valid (`/api/terrain/sessions/latest` returns it) — the only working path today is a browser reload, which adopts the latest session and bypasses the poll entirely.
+- _Diagnosis (D-594):_ `_pollTileProgress` creates an `EventSource` but `onUnmount` holds no handle to it. Navigating away mid-tile-generation leaves the SSE connection open, and its handlers continue to mutate DOM nodes of an unmounted panel.
+- _Fix policy (decided here):_
+  1. Replace the `es.onmessage` handler in `_pollTileProgress` with `es.addEventListener('progress' | 'complete' | 'error', …)` so the named events the backend emits are actually received. The JSON-payload contract (`data.pct`, `data.message`) is unchanged.
+  2. The `'error'` listener must distinguish a server-sent SSE `error` *message* (a `MessageEvent` carrying a JSON `event.data` payload — reject with `data.message`) from a transport-level `EventSource` failure (a plain `Event` with no `data` — reject with the generic "SSE connection error during tile generation").
+  3. Thread a shared mutable SSE context (`{ es: null }`) from `init()` through `_loadTerrain` into `_pollTileProgress`; the `EventSource` is stored on it when opened and cleared when it closes. `onUnmount` closes any still-open `EventSource` via that context (D-594).
+  4. No server-side change — `_sse_event`'s `event:` line is the correct shared SSE contract; only the terrain-loader client is out of step with it.
+- _Acceptance criteria:_
+  1. `_pollTileProgress` registers listeners for the `progress`, `complete` and `error` SSE event types (not `onmessage`); a `progress` event updates the progress bar and status text; a `complete` event resolves the promise and closes the stream.
+  2. A server-sent `error` event (a message carrying a JSON `data` payload) rejects the load with that payload's `message`.
+  3. A transport-level `EventSource` failure (an error event with no `data`) rejects with "SSE connection error during tile generation".
+  4. A successful `complete` no longer produces a spurious rejection — a normal DEM upload via the file input resolves, writes `terrain` state, emits `terrain:loaded`, and applies the map layers.
+  5. `onUnmount` closes an in-flight tile-progress `EventSource` when one is open; after unmount no SSE handler mutates the panel (D-594).
+  6. `onUnmount` still removes the DEM-input `change` listener, unsubscribes the `terrain` watch, and preserves the permanent terrain canvas (I-18 behaviour unchanged).
+  7. `node --test src/salus/viewer/interface/tests/test-terrain-loader.js` passes; the `MockEventSource` gains `addEventListener` plus named-event emit support; tests cover progress / complete / error dispatch and the unmount-closes-EventSource path.
+  8. Defect register records D-595 (open → resolved) and D-594 (deferred → resolved), each with commit hash.
+- _Out of scope:_ Changing `_sse_event` or any backend SSE endpoint. Migrating terrain-loader off `EventSource` onto the fetch-reader SSE parser `simulation-runner` uses. Changes to any other module.
+
+---
+
 ### Slice 15 — Populate Full Sensor/Effector/Threat Database
 
 _Goal: populate the YAML database with all sensors from the research files to enable realistic configurations._

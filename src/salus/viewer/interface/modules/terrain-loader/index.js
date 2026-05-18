@@ -17,10 +17,11 @@
  *   - All external access goes through the injected api object (MUST Rule 2).
  *   - Exactly { init(api) } exported (MUST Rule 3).
  *   - Only 'terrain' written; only declared events emitted (MUST Rules 4, 10).
- *   - watch() and the file-input listener are unsubscribed in onUnmount
- *     (MUST Rule 9). The terrain source, hillshade layer and 3D canvas are
- *     the permanent base map and survive unmount by design (D-592) — MUST
- *     Rule 15 does not apply to the permanent base canvas.
+ *   - watch(), the file-input listener and any in-flight tile-progress SSE
+ *     stream are torn down in onUnmount (MUST Rule 9; SSE close per D-594).
+ *     The terrain source, hillshade layer and 3D canvas are the permanent
+ *     base map and survive unmount by design (D-592) — MUST Rule 15 does
+ *     not apply to the permanent base canvas.
  */
 
 // API_BASE is resolved inside init() from the execution environment to avoid
@@ -92,13 +93,36 @@ export function init(api) {
   const demInput = panel.querySelector('#tl-dem-input');
   const dsmInput = panel.querySelector('#tl-dsm-input');
 
+  // D-594: shared handle to the in-flight tile-progress poll so onUnmount can
+  // tear it down. `es` is the open EventSource; `cancel` settles the poll
+  // promise and closes the stream (D-596 — closing alone fires no event).
+  // Navigating away mid-tile-generation must not leave the SSE stream open
+  // with handlers still mutating an unmounted panel.
+  const sseCtx = { es: null, cancel: null };
+
+  // D-601: sseCtx tracks a single in-flight stream, so overlapping loads must
+  // be prevented — a second DEM selection while a load is still streaming
+  // would orphan the first stream's cancel handle. One terrain load at a time.
+  let loadInProgress = false;
+
   function handleDemChange() {
+    if (loadInProgress) {
+      console.warn(
+        '[terrain-loader] DEM selection ignored — a terrain load is already in progress'
+      );
+      return;
+    }
     const demFile = demInput.files && demInput.files[0];
     if (!demFile) return;
     const dsmFile = (dsmInput.files && dsmInput.files[0]) || null;
-    _loadTerrain(api, panel, demFile, dsmFile, apiBase).catch((err) => {
-      console.error('[terrain-loader] Unhandled terrain load error:', err);
-    });
+    loadInProgress = true;
+    _loadTerrain(api, panel, demFile, dsmFile, apiBase, sseCtx)
+      .catch((err) => {
+        console.error('[terrain-loader] Unhandled terrain load error:', err);
+      })
+      .finally(() => {
+        loadInProgress = false;
+      });
   }
 
   demInput.addEventListener('change', handleDemChange);
@@ -143,16 +167,23 @@ export function init(api) {
   // Cleanup on deactivation (MUST Rule 9).
   //
   // D-592: onUnmount tears down only this module's panel-scoped resources —
-  // the file-input listener, the terrain watch, and the in-flight adopt.
-  // It deliberately does NOT call _cleanupMapLayers: the terrain source,
-  // hillshade layer and 3D canvas are the permanent base map every other
-  // module renders on top of (InterfaceArchitecture.md §1 principle 3), so
-  // they must outlive a terrain-loader unmount. Removing them here blanked
-  // the terrain whenever the user opened any other module. The base canvas
-  // is replaced only by a new load/adoption (via _applyMapLayers), never by
-  // navigation. MUST Rule 15 does not apply to the permanent base canvas.
+  // the file-input listener, the terrain watch, the in-flight adopt, and the
+  // in-flight tile-progress SSE stream (D-594). It deliberately does NOT call
+  // _cleanupMapLayers: the terrain source, hillshade layer and 3D canvas are
+  // the permanent base map every other module renders on top of
+  // (InterfaceArchitecture.md §1 principle 3), so they must outlive a
+  // terrain-loader unmount. Removing them here blanked the terrain whenever
+  // the user opened any other module. The base canvas is replaced only by a
+  // new load/adoption (via _applyMapLayers), never by navigation. MUST
+  // Rule 15 does not apply to the permanent base canvas.
   api.panel.onUnmount(() => {
     adoptCtx.cancelled = true; // D-474: stop the in-flight adopt from acting
+    if (sseCtx.cancel) {
+      // D-594 / D-596: cancel() closes any in-flight tile-progress SSE stream
+      // AND settles its poll promise. EventSource.close() dispatches no event,
+      // so closing alone would leave the awaiting _loadTerrain pending forever.
+      sseCtx.cancel();
+    }
     demInput.removeEventListener('change', handleDemChange);
     unwatchTerrain(); // paired with api.state.watch above (MUST Rule 9)
   });
@@ -171,9 +202,11 @@ export function init(api) {
  * @param {File} demFile - selected DEM GeoTIFF
  * @param {File|null} dsmFile - optional DSM GeoTIFF
  * @param {string} apiBase - API base URL (resolved inside init — D-329)
+ * @param {{es: EventSource|null}} sseCtx - shared handle to the in-flight
+ *   tile-progress EventSource so onUnmount can close it (D-594)
  * @returns {Promise<void>}
  */
-async function _loadTerrain(api, panel, demFile, dsmFile, apiBase) {
+async function _loadTerrain(api, panel, demFile, dsmFile, apiBase, sseCtx) {
   const progressSection = panel.querySelector('#tl-progress-section');
   const statusMsg = panel.querySelector('#tl-status-msg');
   const progressBar = panel.querySelector('#tl-progress-bar');
@@ -220,7 +253,7 @@ async function _loadTerrain(api, panel, demFile, dsmFile, apiBase) {
     const progressUrl = metadata.tile_progress_url
       ? `${apiBase}${metadata.tile_progress_url}`
       : `${apiBase}/api/terrain/tile-progress`;
-    await _pollTileProgress(panel, progressUrl);
+    await _pollTileProgress(panel, progressUrl, sseCtx);
 
     // Write terrain state — watch() callback updates summary (MUST Rule 8).
     // Do NOT call api.state.get('terrain') after this set (MUST Rule 7).
@@ -344,45 +377,105 @@ async function _adoptLatestSessionIfAvailable(api, apiBase, ctx) {
 /**
  * Subscribe to a terrain-tile-progress SSE endpoint and resolve when complete.
  *
+ * The backend formats every event with a named `event:` line — `event:
+ * progress` / `event: complete` / `event: error` (see `_sse_event` in
+ * interface_api/app.py, added by D-404 so simulation-runner / optimiser can
+ * dispatch by type). `EventSource.onmessage` fires ONLY for unnamed `message`
+ * events, so the named events MUST be consumed via `addEventListener`;
+ * listening on `onmessage` silently dropped every event and let the stream's
+ * normal close surface as a false connection error (D-595).
+ *
  * @param {HTMLElement} panel
  * @param {string} progressUrl - Fully-qualified SSE URL (sessioned when the
  *   backend returned tile_progress_url; legacy unsessioned otherwise — D-426).
+ * @param {{es: EventSource|null, cancel: (() => void)|null}} sseCtx - shared
+ *   handle so onUnmount can close the stream and settle this promise if the
+ *   panel is torn down mid-generation (D-594 / D-596).
  * @returns {Promise<void>}
  */
-function _pollTileProgress(panel, progressUrl) {
+function _pollTileProgress(panel, progressUrl, sseCtx) {
   return new Promise((resolve, reject) => {
     const progressBar = panel.querySelector('#tl-progress-bar');
     const statusMsg = panel.querySelector('#tl-status-msg');
 
     const es = new EventSource(progressUrl);
+    let settled = false;
 
-    es.onmessage = (event) => {
+    // Settle the promise exactly once: close the stream, detach it from the
+    // shared context, then resolve/reject. The `settled` guard means a stray
+    // second SSE event — an error after a complete, or a duplicate event —
+    // cannot re-settle the promise or re-run teardown (D-597). The identity
+    // check (sseCtx.es === es) means a stale poll cannot null out a newer
+    // stream's handle.
+    const finish = (settle, value) => {
+      if (settled) return;
+      settled = true;
+      es.close();
+      if (sseCtx.es === es) {
+        sseCtx.es = null;
+        sseCtx.cancel = null;
+      }
+      settle(value);
+    };
+
+    sseCtx.es = es; // D-594: expose to onUnmount
+    // D-596: EventSource.close() dispatches no event, so an onUnmount that
+    // only closed the stream would leave this promise (and the awaiting
+    // _loadTerrain closure) pending forever. cancel() settles it explicitly.
+    sseCtx.cancel = () =>
+      finish(reject, new Error('Terrain load cancelled — panel unmounted'));
+
+    es.addEventListener('progress', (event) => {
+      if (settled) return; // D-598: ignore events queued before the stream closed
       let data;
       try {
         data = JSON.parse(event.data);
       } catch {
-        return; // ignore malformed SSE event
+        // D-599: surface a malformed frame instead of a silently frozen bar.
+        console.warn('[terrain-loader] malformed progress SSE payload:', event.data);
+        return;
       }
-
-      if (data.type === 'progress') {
-        const pct = data.pct ?? 0;
-        if (progressBar) progressBar.value = pct;
-        if (statusMsg) statusMsg.textContent = `Generating tiles… ${pct}%`;
-      } else if (data.type === 'complete') {
-        if (progressBar) progressBar.value = 100;
-        if (statusMsg) statusMsg.textContent = 'Tiles ready.';
-        es.close();
-        resolve();
-      } else if (data.type === 'error') {
-        es.close();
-        reject(new Error(data.message || 'Tile generation failed'));
+      // D-602: a frame may legitimately omit pct (treated as 0), but a
+      // present-yet-non-numeric pct is a malformed frame — fall back to 0
+      // and surface it rather than rendering a garbage bar value.
+      let pct = 0;
+      if (Number.isFinite(data.pct)) {
+        pct = data.pct;
+      } else if (data.pct != null) {
+        console.warn('[terrain-loader] non-numeric progress pct, treating as 0:', data.pct);
       }
-    };
+      if (progressBar) progressBar.value = pct;
+      if (statusMsg) statusMsg.textContent = `Generating tiles… ${pct}%`;
+    });
 
-    es.onerror = () => {
-      es.close();
-      reject(new Error('SSE connection error during tile generation'));
-    };
+    es.addEventListener('complete', () => {
+      if (settled) return;
+      if (progressBar) progressBar.value = 100;
+      if (statusMsg) statusMsg.textContent = 'Tiles ready.';
+      finish(resolve, undefined);
+    });
+
+    // Both a server-sent SSE event named `error` and a transport-level
+    // EventSource failure arrive on the 'error' type. A server message is a
+    // MessageEvent carrying a JSON payload in event.data; a connection
+    // failure is a plain Event with no data — the presence of event.data is
+    // what distinguishes them (D-595).
+    es.addEventListener('error', (event) => {
+      if (settled) return;
+      let message = 'SSE connection error during tile generation';
+      if (event && typeof event.data === 'string') {
+        message = 'Tile generation failed';
+        try {
+          const data = JSON.parse(event.data);
+          // D-600: honour any server-supplied detail, matching the HTTP error
+          // path in _loadTerrain (body.detail || body.error).
+          if (data) message = data.message || data.detail || data.error || message;
+        } catch {
+          // malformed payload — keep the generic 'Tile generation failed'
+        }
+      }
+      finish(reject, new Error(message));
+    });
   });
 }
 

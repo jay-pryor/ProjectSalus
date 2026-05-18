@@ -1,0 +1,55 @@
+task_id: I-19
+timestamp: 2026-05-18T09:30:00Z
+title: "Terrain-loader SSE client consumes named events; in-flight tile-progress stream closed on unmount"
+
+quality_gates:
+  G1_lint: N/A             # N/A — JS-only task (only .js files under modules/ + tests/ changed; no Python files modified)
+  G2_format: N/A           # N/A — JS-only task
+  G3_import: N/A           # N/A — JS-only task
+  G4_type: N/A             # N/A — JS-only task
+  G5_security: N/A         # N/A — JS-only task
+  G6_unit_test: N/A        # N/A — JS-only task (Python pytest). JS suite below.
+  G7_coverage: N/A         # N/A — JS-only task
+  G8_secrets: pass         # detect-secrets scan on the two changed JS files — "results": {} (0 secrets)
+  coverage_pct: N/A
+  js_tests: pass           # node --test src/salus/viewer/interface/tests/test-terrain-loader.js — 39 passed, 0 failed. Full JS suite (node --test 'tests/test-*.js') — 709 passed, 0 failed.
+
+review:
+  l1_standards:
+    testing: pass          # test-terrain-loader.js — MockEventSource rewritten (addEventListener + named-event _emit + _emitConnectionError + _emitRaw); 9 new tests cover progress/complete/error dispatch, transport vs server error, unmount-close, late-event-after-unmount, malformed pct/payload, detail fallback, and the overlapping-load guard; shared _LOAD_METADATA fixture + _startLoad helper; node:assert/strict; no mocks beyond makeMockApi/MockEventSource. No existing test deleted or weakened (regression-reviewer confirmed).
+    error_handling: pass   # the SSE 'error' handler distinguishes a server message (has event.data) from a transport failure; both JSON.parse blocks have try/catch with meaningful fallbacks (D-599 logs; D-600 honours detail/error); single-settlement finish() guard; no swallowed exceptions.
+    logging: pass          # console.warn added for malformed progress payloads (D-599), non-numeric pct (D-602) and ignored re-entrant DEM selection (D-601), consistent with the existing _adoptLatestSessionIfAvailable diagnostics.
+    security: pass         # external data (server SSE JSON) is parsed via JSON.parse inside try/catch — no eval, no injection surface; no file I/O or path handling. The SSE URL is the server-returned tile_progress_url (pre-existing).
+    interface_modules: pass  # sseCtx + loadInProgress are init()-scoped, not module-level globals; onUnmount tears down every panel-scoped resource (file-input listener, terrain watch, adopt cancel, SSE stream) — MUST Rule 9; permanent terrain canvas still NOT torn down (I-18 / InterfaceArchitecture §1 principle 3); no cross-module imports; only 'terrain' state + 'terrain:loaded' event used. module-architecture-reviewer: 0 findings.
+  l2_agents:
+    silent_failure_hunter: {status: pass, findings: 7}        # First pass: 5 findings (D-596 high, D-597/D-598 medium, D-599/D-600 low) — all logged and fixed. Re-review of the fixed _pollTileProgress: 2 further findings (D-601 medium — single-pair sseCtx orphans overlapping loads; D-602 low — unvalidated pct) — both logged and fixed. Re-review confirmed the original 5 genuinely resolved.
+    spec_compliance: {status: pass, findings: 1}               # 1 finding — AC-8 (defect register) not yet satisfied at review time; a workflow-ordering artifact: D-595/D-594 (and the L2-found D-596..D-602) are logged in Step 7 and resolved in Step 9, which post-date the L2 review. AC 1-7 fully satisfied; no scope creep; no backend or other-module file changed.
+    type_design_analyzer: N/A                                  # JS-only task — no type annotations added or modified
+    regression_reviewer: {status: pass, findings: 0}           # _loadTerrain signature change (added sseCtx) — sole call site updated; progress/complete/error behaviour preserved or improved vs the old onmessage code; I-18 canvas-persistence behaviour byte-for-byte unchanged; MockEventSource rewrite dropped no coverage (the removed _emitError helper had zero callers).
+    module_architecture_reviewer: {status: pass, findings: 0}  # All six invariant areas pass — isolation, state contract, reactive reads, event contracts, map layer scoping, onUnmount cleanup. sseCtx created inside init(); permanent terrain canvas correctly preserved on unmount.
+
+defect_ids:
+  - D-594   # deferred (I-18) → resolved: in-flight tile-progress EventSource now closed on unmount via sseCtx.cancel()
+  - D-595   # _pollTileProgress used EventSource.onmessage, which never fires for the backend's named SSE events → every UI DEM upload failed (resolved)
+  - D-596   # onUnmount es.close() left the poll promise unsettled → _loadTerrain hung; sseCtx.cancel() now settles it (resolved)
+  - D-597   # no single-settlement guard; finish()+settled flag added (resolved)
+  - D-598   # progress handler could mutate the unmounted panel; settled early-return added (resolved)
+  - D-599   # malformed progress payload swallowed silently; console.warn added (resolved)
+  - D-600   # server error payload without 'message' discarded detail/error; fallback added (resolved)
+  - D-601   # single-pair sseCtx orphaned overlapping loads; loadInProgress re-entrancy guard added (resolved)
+  - D-602   # non-numeric progress pct rendered as garbage; Number.isFinite guard added (resolved)
+
+files_changed:
+  - docs/Technical/ProjectPath.md                                            # +I-19 spec entry (after I-18, before Slice 15)
+  - src/salus/viewer/interface/modules/terrain-loader/index.js               # _pollTileProgress: addEventListener for named SSE events; single-settlement finish()/settled; sseCtx.cancel; loadInProgress guard; pct/payload validation
+  - src/salus/viewer/interface/tests/test-terrain-loader.js                  # MockEventSource rewrite; 11 new D-594..D-602 tests; _LOAD_METADATA fixture + _startLoad helper
+  - .forge/defect-register.yaml                                              # D-595..D-602 logged; D-594 + D-595..D-602 resolved (commit hash backfilled post-commit)
+
+notes:
+  - Source — user-reported viewer bug (2026-05-18): loading a DEM via the terrain-loader file input failed with "Error: SSE connection error during tile generation" although server-side tile generation succeeded (18 tiles written, session registered).
+  - Root cause (D-595) — the backend's _sse_event formats every tile-progress event with a named 'event:' line (D-404); terrain-loader's _pollTileProgress consumed the stream with EventSource.onmessage, which fires only for unnamed 'message' events, so every progress/complete/error event was dropped and the stream's normal close surfaced via onerror as a false connection error.
+  - No backend/server file was changed — _sse_event's named 'event:' line is the correct shared SSE contract (simulation-runner/optimiser already consume it). Only the terrain-loader client was out of step.
+  - L2 review was run twice — silent_failure_hunter re-reviewed the rewritten _pollTileProgress after the first round of fixes and found D-601/D-602, which were then logged and fixed in turn.
+  - Commit hash for D-594..D-602 and this gate-proof is backfilled in a follow-up chore commit, matching the I-14..I-18 pattern on this branch.
+
+overall: pass
