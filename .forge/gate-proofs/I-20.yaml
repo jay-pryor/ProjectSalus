@@ -51,6 +51,6 @@ notes:
   - I-20 introduces a new architectural category — the shell-owned subsystem — documented in InterfaceArchitecture.md §2.9. coord-tools is NOT a navigable module: no manifest, not discovered, not mode-manager gated, persists across module navigation. It receives its own coord-tools-prefixed scoped map proxy (with the allowTerrainQuery opt-in) and reads/writes the shell-owned coord_tools state key via the shell bypass path.
   - The toolbar renders disabled tool stubs (set-origin / measure / grid) and an inert '—' X/Y/Z readout placeholder; all user-facing behaviour is deferred to I-21–I-23 per spec.
   - coord_tools is in-session only — deliberately excluded from SCENARIO_KEYS, mirroring the ui key.
-  - Commit hash for D-603..D-605 and this gate-proof is backfilled in a follow-up chore commit, matching the I-14..I-19 pattern on this branch.
+  - Implementation, fixes and this gate-proof committed as b642b78; the D-603..D-605 commit hashes were backfilled into the defect register in a follow-up chore commit, matching the I-14..I-19 pattern on this branch.
 
 overall: pass
