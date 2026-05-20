@@ -6987,7 +6987,7 @@ defects:
     description: "_commitSpacing accepts an empty-string input silently. When the user clears the spacing field and blurs/changes, rawValue is '' so Number('') === 0, which clampGridSpacing then snaps to GRID_SPACING_MIN_M (10). The grid silently jumps to the densest legal spacing without any indication the user's input was discarded. Easy to trip, hard to notice."
     resolution: "I-23: _commitSpacing now trims the input and early-returns when empty/whitespace, restoring spacingInput.value to the current gridSpacingM. An empty field is treated as 'no commit' rather than silently snapping to MIN. Covered by test 'an empty spacing input restores the current value rather than snapping to MIN (D-616)'."
     status: resolved
-    commit: ""
+    commit: "7523ed7"
 
   - id: D-617
     severity: high
@@ -6998,7 +6998,7 @@ defects:
     description: "_generateGridFeatures does not validate the terrain bounds rectangle shape. A degenerate (east==west, north==south) bounds produces xMin==xMax==0 and renders two zero-length axes lines silently. An inverted (west > east, north > south) bounds renders backwards lines using the reversed endpoints — both silent."
     resolution: "I-23: _generateGridFeatures now validates the bounds rectangle (east > west && north > south) at the top of the function and returns empty FeatureCollections with a console.warn when degenerate or inverted. Covered by tests 'degenerate terrain bounds render an empty grid' and 'inverted terrain bounds (east<west) render an empty grid'."
     status: resolved
-    commit: ""
+    commit: "7523ed7"
 
   - id: D-618
     severity: medium
@@ -7009,7 +7009,7 @@ defects:
     description: "When _setOrigin's appended `if (gridEnabled) _renderGridLayers();` fires and the inner try/catch swallows a render failure, gridEnabled stays true but no grid is on the map. The next interaction proceeds with gridEnabled lying about reality — the Grid button shows active while the map shows nothing."
     resolution: "I-23: _renderGridLayers' catch branch now calls _removeGridLayers, sets gridEnabled=false, refreshes _updateGridControls and persists. The Grid button always reflects what is actually on the map. Covered by test 'a render failure rolls gridEnabled back to false and refreshes controls (D-618)'."
     status: resolved
-    commit: ""
+    commit: "7523ed7"
 
   - id: D-619
     severity: medium
@@ -7020,7 +7020,7 @@ defects:
     description: "The reactive terrain watch refreshes terrainBounds AFTER calling _setOrigin, so _setOrigin's appended grid-render branch runs with the OLD bounds (null on first load, stale on reload). The second render at the end of the watch corrects it via the D-614 remove-then-add idempotent pattern, but the first render is wasted work — and is silently wrong-output for the brief window before the second render."
     resolution: "I-23: the terrain watch callback now updates terrainBounds BEFORE calling _setOrigin. Any grid render triggered by the origin reset sees the new bounds. Covered by test 'terrain reload with new bounds renders against the NEW bounds (D-619)'."
     status: resolved
-    commit: ""
+    commit: "7523ed7"
 
   - id: D-620
     severity: medium
@@ -7031,7 +7031,7 @@ defects:
     description: "_removeGridLayers' try/catch wraps four sequential getLayer/removeLayer/getSource/removeSource calls. If the first removeLayer throws (e.g. style not loaded yet, proxy in odd state), the second layer and both sources are NOT removed — they leak. The catch logs but the partial removal is silent: subsequent _renderGridLayers calls hit the same partial state. On dispose the leaked layers remain on the map after subsystem teardown."
     resolution: "I-23: _removeGridLayers now isolates each layer/source removal in its own try/catch — a throw on one target no longer skips the remaining removals. Each per-target failure logs an individual console.warn naming the target id."
     status: resolved
-    commit: ""
+    commit: "7523ed7"
 
   - id: D-621
     severity: medium
@@ -7042,4 +7042,4 @@ defects:
     description: "spacingInput only fires 'change' (on blur/Enter), not 'input'. A user typing a new value and then clicking the Grid toggle to apply it can produce a browser-dependent race: in some browsers the click handler runs before the change handler commits, so the grid renders with the old spacing. The committed spacing is silently desynchronised from what the input shows."
     resolution: "I-23: _toggleGrid now flushes any unsaved spacing-input value (via _commitSpacing) before flipping gridEnabled, eliminating the click-before-change race. Covered by test 'a typed spacing value is flushed when the grid is toggled before the input blurs (D-621)'."
     status: resolved
-    commit: ""
+    commit: "7523ed7"
