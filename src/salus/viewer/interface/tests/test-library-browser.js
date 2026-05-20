@@ -484,11 +484,13 @@ test('map click in click-to-place mode emits placement:pending with coordinates'
   findPlaceButtons(panel)[0]._fire('click', {});
   api._triggerMapEvent('click', { point: { x: 50, y: 60 } });
 
-  assert.equal(api._emitted.length, 1);
-  assert.equal(api._emitted[0].event, 'placement:pending');
-  assert.equal(api._emitted[0].data.lng, 145.5);
-  assert.equal(api._emitted[0].data.lat, -34.2);
-  assert.equal(api._emitted[0].data.definition.name, 'Radar Alpha');
+  // I-22: click-to-place is also wrapped in drawmode:entered/exited for the
+  // coord-tools measurement mutex, so filter to the placement:pending under test.
+  const placements = api._emitted.filter((e) => e.event === 'placement:pending');
+  assert.equal(placements.length, 1);
+  assert.equal(placements[0].data.lng, 145.5);
+  assert.equal(placements[0].data.lat, -34.2);
+  assert.equal(placements[0].data.definition.name, 'Radar Alpha');
 });
 
 test('map click listener is removed after click-to-place fires', () => {
@@ -537,7 +539,17 @@ test('Escape key does not emit placement:pending', () => {
   // D-315 fix: keydown listener is on the map canvas, not document
   api._canvas._fire('keydown', { key: 'Escape' });
 
-  assert.equal(api._emitted.length, 0, 'Escape should not emit placement:pending');
+  // I-22: drawmode:entered/exited do fire around the cancelled mode; assert
+  // narrowly that no placement:pending leaked through, and that the only
+  // emits seen are the matched drawmode pair (a regression of any other
+  // stray emit would be caught by this stronger assertion).
+  const placements = api._emitted.filter((e) => e.event === 'placement:pending');
+  assert.equal(placements.length, 0, 'Escape should not emit placement:pending');
+  assert.deepEqual(
+    api._emitted.map((e) => e.event),
+    ['drawmode:entered', 'drawmode:exited'],
+    'only the matched drawmode pair should fire on a Place → Escape sequence',
+  );
 });
 
 test('onUnmount cancels active click-to-place mode and restores cursor', () => {

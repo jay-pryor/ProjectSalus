@@ -4,7 +4,7 @@
   "reads": ["terrain"],
   "writes": ["zones"],
   "prerequisites": ["terrain"],
-  "emits": ["zone:added", "zone:removed"],
+  "emits": ["zone:added", "zone:removed", "drawmode:entered", "drawmode:exited"],
   "subscribes": [],
   "layer_id_prefix": "zone-editor",
   "description": "Draw priority (coverage required) and exclusion (no-placement) zones on the terrain canvas."

@@ -4,7 +4,7 @@
   "reads": ["terrain"],
   "writes": ["threat_corridors"],
   "prerequisites": ["terrain"],
-  "emits": ["corridor:added", "corridor:removed"],
+  "emits": ["corridor:added", "corridor:removed", "drawmode:entered", "drawmode:exited"],
   "subscribes": [],
   "layer_id_prefix": "threat-corridor-editor",
   "description": "Draw and edit threat ingress corridor routes on the terrain canvas."

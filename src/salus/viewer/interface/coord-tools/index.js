@@ -15,8 +15,8 @@
  *
  * Tasks:
  *   - I-20 — toolbar shell + shell-owned subsystem skeleton (done).
- *   - I-21 — resettable origin point + live X/Y/Z cursor readout (this file).
- *   - I-22 — two-point distance measurement (Measure stub still disabled).
+ *   - I-21 — resettable origin point + live X/Y/Z cursor readout (done).
+ *   - I-22 — two-point distance measurement (this file).
  *   - I-23 — toggleable coordinate grid overlay (Grid stub still disabled).
  *
  * I-21 — coordinate frame: a local tangent-plane frame anchored at the origin.
@@ -54,18 +54,46 @@ const ORIGIN_PAINT = Object.freeze({
   'circle-stroke-color': '#ffffff',
 });
 
+// --- Measure tool map layers (I-22) -----------------------------------------
+
+/**
+ * Single GeoJSON source carrying both the line and the point features for the
+ * measure tool. Two layers filter the same source by `$type`, matching the
+ * pattern used by `threat-corridor-editor`. One source means a single setData
+ * keeps the line and the markers atomically in sync.
+ */
+const MEASURE_SOURCE = 'coord-tools:measure-source';
+const MEASURE_LINE_LAYER = 'coord-tools:measure-line';
+const MEASURE_POINTS_LAYER = 'coord-tools:measure-points';
+
+const MEASURE_LINE_PAINT = Object.freeze({
+  'line-color': '#ffe066',
+  'line-width': 2,
+  'line-opacity': 0.95,
+});
+
+const MEASURE_POINT_PAINT = Object.freeze({
+  'circle-radius': 5,
+  'circle-color': '#ffe066',
+  'circle-opacity': 0.95,
+  'circle-stroke-width': 2,
+  'circle-stroke-color': '#1a1a2e',
+});
+
 // --- Toolbar control labels -------------------------------------------------
 
 const SET_ORIGIN_LABEL = 'Set origin';
 const PICK_CANCEL_LABEL = 'Cancel';
+const MEASURE_LABEL = 'Measure';
+const MEASURE_CANCEL_LABEL = 'Cancel';
+const CLEAR_LABEL = 'Clear';
 
 /**
  * Disabled tool-control stubs — filled in by the named later task. `tool` is
- * the stable `data-tool` hook. (Set origin is a live control from I-21 and is
- * built separately, below.)
+ * the stable `data-tool` hook. (Set origin is a live control from I-21 and
+ * Measure is a live control from I-22; both are built separately, below.)
  */
 const TOOL_STUBS = [
-  { tool: 'measure', label: 'Measure', task: 'I-22' },
   { tool: 'grid', label: 'Grid', task: 'I-23' },
 ];
 
@@ -90,6 +118,40 @@ export function lngLatToLocalXY(lngLat, originLngLat) {
     (lng - lng0) * DEG_TO_RAD * EARTH_RADIUS_M * Math.cos(lat0 * DEG_TO_RAD);
   const y = (lat - lat0) * DEG_TO_RAD * EARTH_RADIUS_M;
   return { x, y };
+}
+
+/**
+ * I-22 — compute the local-frame deltas and totals for a two-point measurement.
+ *
+ * Both endpoints are projected to the local tangent plane anchored at the
+ * coord-tools origin, then ΔX/ΔY are the eastward/northward component
+ * distances and ΔZ the ground-elevation difference. The headline total is the
+ * 3D slant `√(ΔX²+ΔY²+ΔZ²)`; the 2D horizontal `√(ΔX²+ΔY²)` is always shown.
+ *
+ * When either endpoint's elevation is unavailable (off-tile, no terrain
+ * loaded, or the query threw) `hasZ` is false; `dz` and `slant3d` are then
+ * null and the headline falls back to `hyp2d`, labelled as 2D by the caller.
+ *
+ * @param {[number, number]} a            - first endpoint [lng, lat]
+ * @param {[number, number]} b            - second endpoint [lng, lat]
+ * @param {[number, number]} originLngLat - the coord-tools origin [lng, lat]
+ * @param {number | null}    zA           - ground elevation at `a` in metres
+ * @param {number | null}    zB           - ground elevation at `b` in metres
+ * @returns {{
+ *   dx: number, dy: number, dz: number | null,
+ *   hyp2d: number, slant3d: number | null, hasZ: boolean
+ * }}
+ */
+export function measurePair(a, b, originLngLat, zA, zB) {
+  const pa = lngLatToLocalXY(a, originLngLat);
+  const pb = lngLatToLocalXY(b, originLngLat);
+  const dx = pb.x - pa.x;
+  const dy = pb.y - pa.y;
+  const hyp2d = Math.hypot(dx, dy);
+  const hasZ = Number.isFinite(zA) && Number.isFinite(zB);
+  const dz = hasZ ? zB - zA : null;
+  const slant3d = hasZ ? Math.hypot(dx, dy, dz) : null;
+  return { dx, dy, dz, hyp2d, slant3d, hasZ };
 }
 
 // ---------------------------------------------------------------------------
@@ -120,6 +182,9 @@ function _formatMetres(value) {
 // emitted at most once per process rather than once per subsystem instance.
 let _rafFallbackWarned = false;
 
+// One-time latch for the drawmode underflow warning, same shape.
+let _drawModeUnderflowWarned = false;
+
 /** Build the origin-point GeoJSON Feature for a [lng, lat]. */
 function _originFeature(lngLat) {
   return {
@@ -140,12 +205,15 @@ function _originFeature(lngLat) {
  *   subsystem renders into (shell chrome — never the module panel slot).
  * @param {{
  *   map: object,
- *   state: {get: Function, set: Function, getTerrain: Function, watchTerrain: Function}
+ *   state: {get: Function, set: Function, getTerrain: Function, watchTerrain: Function},
+ *   bus: {on: Function}
  * }} api - the shell-built handle. `map` is a `coord-tools`-prefixed scoped map
  *   proxy (with `queryTerrainElevation`). `state` reads/writes the shell-owned
  *   `coord_tools` key (`get`/`set`) and gives read-only observation of the
  *   `terrain` key (`getTerrain`/`watchTerrain`) so the origin can default to
- *   the terrain centre.
+ *   the terrain centre. `bus.on` is a subscribe-only handle on the shell bus,
+ *   used by I-22 to observe `drawmode:entered` / `drawmode:exited` and keep
+ *   the Measure tool mutually exclusive with module draw modes.
  * @param {Document} [doc] - injectable document (for tests).
  * @returns {{root: HTMLElement, dispose: Function}}
  */
@@ -186,6 +254,14 @@ export function createCoordTools(toolbarEl, api, doc = globalThis.document) {
     throw new TypeError(
       'createCoordTools(…, api, …): api.state must provide get(), set(), ' +
       'getTerrain() and watchTerrain()'
+    );
+  }
+  // I-22: the Measure tool's mutex with module draw modes is driven by the
+  // shell bus — fail at construction if the bus handle is missing rather than
+  // a far-removed crash when the first drawmode event arrives.
+  if (api.bus == null || typeof api.bus.on !== 'function') {
+    throw new TypeError(
+      'createCoordTools(…, api, …): api.bus must provide on(event, callback)'
     );
   }
 
@@ -237,7 +313,35 @@ export function createCoordTools(toolbarEl, api, doc = globalThis.document) {
   originBtn.title = 'Set the coordinate origin: click, then click a map point';
   root.appendChild(originBtn);
 
-  // Measure / Grid — disabled until I-22 / I-23 wire them up.
+  // "Measure" — a live control from I-22. Two-click measurement; mutually
+  // exclusive with module draw modes (via drawmode:entered/exited).
+  const measureBtn = doc.createElement('button');
+  measureBtn.className = 'coord-tools-btn';
+  measureBtn.dataset.tool = 'measure';
+  measureBtn.dataset.active = 'false';
+  measureBtn.textContent = MEASURE_LABEL;
+  measureBtn.title =
+    'Measure: click to enter mode, then click two map points for ΔX/ΔY/ΔZ and total distance';
+  root.appendChild(measureBtn);
+
+  // Measure deltas / totals readout — only populated once two points are set.
+  const measureReadout = doc.createElement('span');
+  measureReadout.className = 'coord-tools-measure-readout';
+  measureReadout.dataset.role = 'measure-readout';
+  measureReadout.hidden = true;
+  root.appendChild(measureReadout);
+
+  // "Clear" — visible only when at least one measure point is on the map; a
+  // click removes the points/line and resets without exiting measure mode.
+  const clearBtn = doc.createElement('button');
+  clearBtn.className = 'coord-tools-btn';
+  clearBtn.dataset.tool = 'measure-clear';
+  clearBtn.textContent = CLEAR_LABEL;
+  clearBtn.title = 'Clear the current measurement';
+  clearBtn.hidden = true;
+  root.appendChild(clearBtn);
+
+  // Grid — disabled until I-23 wires it up.
   for (const { tool, label: text, task } of TOOL_STUBS) {
     const btn = doc.createElement('button');
     btn.className = 'coord-tools-btn';
@@ -254,10 +358,15 @@ export function createCoordTools(toolbarEl, api, doc = globalThis.document) {
 
   let originLngLat = null;     // [lng, lat] | null — the coordinate origin
   let pickMode = false;        // true while awaiting an origin-pick map click
-  let savedCursor = null;      // canvas cursor saved on entering pick mode
+  let savedCursor = null;      // canvas cursor saved on entering pick/measure
   let latestMoveEvent = null;  // most recent mousemove event (for the readout)
   let rafPending = false;      // true while a readout frame is scheduled
   let disposed = false;        // true after dispose() — guards a late frame
+
+  // I-22 — measure tool
+  let measureMode = false;     // true while in two-click measure mode
+  let measurePoints = [];      // collected [lng, lat] pairs (0..2)
+  let drawModeDepth = 0;       // count of active module draw modes; AC 5 mutex
 
   // ----- Readout -----------------------------------------------------------
 
@@ -374,6 +483,9 @@ export function createCoordTools(toolbarEl, api, doc = globalThis.document) {
   // ----- Pick mode ---------------------------------------------------------
 
   function _enterPickMode() {
+    // Pick-origin and measure are both single-handler click consumers in this
+    // subsystem; never let both be active at once so a click is unambiguous.
+    if (measureMode) _exitMeasureMode();
     pickMode = true;
     originBtn.dataset.active = 'true';
     originBtn.textContent = PICK_CANCEL_LABEL;
@@ -395,6 +507,223 @@ export function createCoordTools(toolbarEl, api, doc = globalThis.document) {
     savedCursor = null;
   }
 
+  // ----- Measure tool (I-22) -----------------------------------------------
+
+  /**
+   * Read the elevation at a lng/lat from the terrain. Mirrors the readout's
+   * D-606 / D-603 guards: returns null when the proxy returns null/non-finite
+   * or throws (mid-terrain teardown), so the caller can treat Z as unavailable
+   * rather than crash the measurement render.
+   */
+  function _safeQueryElevation(lngLat) {
+    try {
+      const z = api.map.queryTerrainElevation({ lng: lngLat[0], lat: lngLat[1] });
+      if (typeof z === 'number' && Number.isFinite(z)) return z;
+    } catch (err) {
+      console.warn('[coord-tools] measure: terrain elevation query failed:', err);
+    }
+    return null;
+  }
+
+  /** Build a FeatureCollection of the current measure points + line (if 2). */
+  function _measureFeatureCollection() {
+    const features = [];
+    for (const [lng, lat] of measurePoints) {
+      features.push({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [lng, lat] },
+        properties: {},
+      });
+    }
+    if (measurePoints.length === 2) {
+      features.push({
+        type: 'Feature',
+        geometry: {
+          type: 'LineString',
+          coordinates: measurePoints.map((p) => [p[0], p[1]]),
+        },
+        properties: {},
+      });
+    }
+    return { type: 'FeatureCollection', features };
+  }
+
+  function _removeMeasureLayers() {
+    try {
+      if (api.map.getLayer(MEASURE_LINE_LAYER)) api.map.removeLayer(MEASURE_LINE_LAYER);
+      if (api.map.getLayer(MEASURE_POINTS_LAYER)) api.map.removeLayer(MEASURE_POINTS_LAYER);
+      if (api.map.getSource(MEASURE_SOURCE)) api.map.removeSource(MEASURE_SOURCE);
+    } catch (err) {
+      console.warn('[coord-tools] failed to remove measure layers:', err);
+    }
+  }
+
+  /**
+   * Render (or update) the measure source + two `$type`-filtered layers. The
+   * line layer filters to LineString, the points layer to Point — one source,
+   * two layers, the convention used by `threat-corridor-editor`.
+   *
+   * D-614 / D-615: remove-then-add every time. The fast-path setData branch
+   * (real MapLibre sources expose setData; the test mock does not) made the
+   * production and test code paths diverge. More importantly, a partial
+   * failure (addSource OK, addLayer throws) would leave the source orphaned
+   * with no points layer, and the fast path would never restore it.
+   * Remove-then-add is idempotent — each call starts from a known-clean state.
+   */
+  function _renderMeasureLayers() {
+    try {
+      _removeMeasureLayers();
+      const data = _measureFeatureCollection();
+      api.map.addSource(MEASURE_SOURCE, { type: 'geojson', data });
+      api.map.addLayer({
+        id: MEASURE_LINE_LAYER,
+        type: 'line',
+        source: MEASURE_SOURCE,
+        filter: ['==', '$type', 'LineString'],
+        paint: { ...MEASURE_LINE_PAINT },
+      });
+      api.map.addLayer({
+        id: MEASURE_POINTS_LAYER,
+        type: 'circle',
+        source: MEASURE_SOURCE,
+        filter: ['==', '$type', 'Point'],
+        paint: { ...MEASURE_POINT_PAINT },
+      });
+    } catch (err) {
+      console.warn('[coord-tools] failed to render measure layers:', err);
+    }
+  }
+
+  /**
+   * Persist the measurement (or its absence) to `coord_tools.measure`. Same
+   * D-610 / D-611 guard as `_setOrigin`: only write when the shell-owned
+   * skeleton is the expected object shape.
+   */
+  function _persistMeasure(value) {
+    const coordTools = api.state.get();
+    const isSkeleton =
+      coordTools != null &&
+      typeof coordTools === 'object' &&
+      !Array.isArray(coordTools);
+    if (!isSkeleton) {
+      console.warn(
+        '[coord-tools] coord_tools state is not the expected shell skeleton ' +
+        'object:', coordTools
+      );
+    }
+    api.state.set({ ...(isSkeleton ? coordTools : {}), measure: value });
+  }
+
+  /** Format the measure readout from a completed two-point measurement. */
+  function _writeMeasureReadout(result) {
+    const dxText = _formatMetres(result.dx);
+    const dyText = _formatMetres(result.dy);
+    if (result.hasZ) {
+      // AC 2 — ΔX, ΔY, ΔZ, 3D slant headline, 2D horizontal also shown.
+      measureReadout.textContent =
+        `ΔX: ${dxText}  ΔY: ${dyText}  ΔZ: ${_formatMetres(result.dz)}  ` +
+        `3D: ${_formatMetres(result.slant3d)}  2D: ${_formatMetres(result.hyp2d)}`;
+    } else {
+      // AC 3 — Z unavailable: ΔZ "—" and the headline is the 2D distance,
+      // labelled as such.
+      measureReadout.textContent =
+        `ΔX: ${dxText}  ΔY: ${dyText}  ΔZ: ${VALUE_PLACEHOLDER}  ` +
+        `2D: ${_formatMetres(result.hyp2d)}`;
+    }
+  }
+
+  function _updateMeasureControls() {
+    measureBtn.dataset.active = measureMode ? 'true' : 'false';
+    measureBtn.textContent = measureMode ? MEASURE_CANCEL_LABEL : MEASURE_LABEL;
+    // AC 5 — disabled while any module draw mode is active. D-612: origin-pick
+    // is structurally the same kind of click-capturing single-handler mode, so
+    // the same mutex applies to it — a module click must never simultaneously
+    // place a sensor/waypoint/vertex AND move the coord-tools origin.
+    measureBtn.disabled = drawModeDepth > 0;
+    originBtn.disabled = drawModeDepth > 0;
+    clearBtn.hidden = measurePoints.length === 0;
+    measureReadout.hidden = measurePoints.length !== 2;
+  }
+
+  /**
+   * Clear the measurement: remove the layers, drop the points, hide the
+   * readout, and persist the cleared state. Used by both Clear (stays in
+   * mode) and by mode exit (called from `_exitMeasureMode`).
+   */
+  function _clearMeasurement() {
+    measurePoints = [];
+    _removeMeasureLayers();
+    measureReadout.textContent = '';
+    _persistMeasure(null);
+    _updateMeasureControls();
+  }
+
+  function _enterMeasureMode() {
+    // Mutex within the subsystem — never have both pick and measure capturing
+    // the same click. The cross-module mutex (AC 5) is handled separately.
+    if (pickMode) _exitPickMode();
+    // Start a fresh measurement on every entry.
+    measurePoints = [];
+    _removeMeasureLayers();
+    measureReadout.textContent = '';
+    _persistMeasure(null);
+    measureMode = true;
+    const canvas = api.map.getCanvas();
+    if (canvas != null && canvas.style != null) {
+      savedCursor = canvas.style.cursor;
+      canvas.style.cursor = 'crosshair';
+    }
+    _updateMeasureControls();
+  }
+
+  function _exitMeasureMode() {
+    if (!measureMode) return;
+    measureMode = false;
+    const canvas = api.map.getCanvas();
+    if (canvas != null && canvas.style != null) {
+      canvas.style.cursor = savedCursor != null ? savedCursor : '';
+    }
+    savedCursor = null;
+    // AC 4 — exiting measure mode clears.
+    _clearMeasurement();
+  }
+
+  /**
+   * Append a measure point. The first click drops a marker; the second click
+   * drops the line + second marker and renders the readout.
+   */
+  function _addMeasurePoint(event) {
+    if (!measureMode) return; // defence-in-depth — caller (handleMapClick) already gates
+    if (event == null || event.lngLat == null) return;
+    const { lng, lat } = event.lngLat;
+    if (!_isFiniteLngLat(lng, lat)) {
+      console.warn('[coord-tools] measure: ignoring non-finite click:', event.lngLat);
+      return;
+    }
+    if (measurePoints.length >= 2) return; // defensive — clear on entry, but be safe
+    measurePoints.push([lng, lat]);
+    _renderMeasureLayers();
+    if (measurePoints.length === 2) {
+      if (originLngLat == null) {
+        // No origin yet — distances are not meaningful in the local frame.
+        // Show placeholders; the measurement persists for visual reference.
+        measureReadout.textContent =
+          `ΔX: ${VALUE_PLACEHOLDER}  ΔY: ${VALUE_PLACEHOLDER}  ` +
+          `ΔZ: ${VALUE_PLACEHOLDER}  2D: ${VALUE_PLACEHOLDER}`;
+      } else {
+        const [a, b] = measurePoints;
+        const zA = _safeQueryElevation(a);
+        const zB = _safeQueryElevation(b);
+        const result = measurePair(a, b, originLngLat, zA, zB);
+        _writeMeasureReadout(result);
+      }
+      _persistMeasure({ a: measurePoints[0], b: measurePoints[1] });
+    } else {
+      _persistMeasure({ a: measurePoints[0], b: null });
+    }
+    _updateMeasureControls();
+  }
+
   // ----- Event handlers ----------------------------------------------------
 
   function handleMouseMove(event) {
@@ -409,11 +738,18 @@ export function createCoordTools(toolbarEl, api, doc = globalThis.document) {
   }
 
   function handleMapClick(event) {
-    if (!pickMode) return; // the readout-only click path is a no-op
-    _exitPickMode();
-    if (event != null && event.lngLat != null) {
-      _setOrigin([event.lngLat.lng, event.lngLat.lat]);
+    if (pickMode) {
+      _exitPickMode();
+      if (event != null && event.lngLat != null) {
+        _setOrigin([event.lngLat.lng, event.lngLat.lat]);
+      }
+      return;
     }
+    if (measureMode) {
+      _addMeasurePoint(event);
+      return;
+    }
+    // Outside any capture mode, a map click is a no-op for coord-tools.
   }
 
   function handleOriginButtonClick() {
@@ -423,9 +759,57 @@ export function createCoordTools(toolbarEl, api, doc = globalThis.document) {
     else _enterPickMode();
   }
 
+  function handleMeasureButtonClick() {
+    // Defensive — DOM `disabled` is the primary AC-5 enforcement, but a
+    // direct `_fire('click')` in tests or a programmatic dispatch could still
+    // trip this handler. Mirror the disabled gate here.
+    if (measureBtn.disabled) return;
+    if (measureMode) _exitMeasureMode();
+    else _enterMeasureMode();
+  }
+
+  function handleClearButtonClick() {
+    // AC 4 — Clear resets the measurement but stays in mode (so the user can
+    // place a fresh pair without re-toggling Measure).
+    _clearMeasurement();
+  }
+
+  function handleDrawModeEntered() {
+    drawModeDepth += 1;
+    // AC 5 — entering a module draw mode exits any active measure mode and
+    // disables the Measure toggle until every draw mode exits. D-612: the
+    // origin-pick is the structurally same kind of click-capturing mode, so
+    // the same mutex applies — exit it too.
+    if (measureMode) _exitMeasureMode();
+    if (pickMode) _exitPickMode();
+    _updateMeasureControls();
+  }
+
+  function handleDrawModeExited() {
+    if (drawModeDepth === 0) {
+      // An exited-without-entered means a module's mode lifecycle is broken;
+      // clamping at 0 keeps the counter stable but the underflow itself is
+      // worth surfacing once so the underlying bug can be fixed.
+      if (!_drawModeUnderflowWarned) {
+        console.warn(
+          '[coord-tools] drawmode:exited received with no matching :entered'
+        );
+        _drawModeUnderflowWarned = true;
+      }
+      return;
+    }
+    drawModeDepth -= 1;
+    _updateMeasureControls();
+  }
+
   originBtn.addEventListener('click', handleOriginButtonClick);
+  measureBtn.addEventListener('click', handleMeasureButtonClick);
+  clearBtn.addEventListener('click', handleClearButtonClick);
   api.map.on('mousemove', handleMouseMove);
   api.map.on('click', handleMapClick);
+  const unsubDrawEntered = api.bus.on('drawmode:entered', handleDrawModeEntered);
+  const unsubDrawExited = api.bus.on('drawmode:exited', handleDrawModeExited);
+  _updateMeasureControls();
 
   // ----- Origin defaulting from terrain ------------------------------------
 
@@ -444,17 +828,24 @@ export function createCoordTools(toolbarEl, api, doc = globalThis.document) {
   // ----- Disposal ----------------------------------------------------------
 
   /**
-   * Tear down the subsystem: remove every map listener, the terrain watch and
-   * the `coord-tools:origin` layer/source, restore the cursor if a pick was in
-   * progress, and remove the toolbar DOM.
+   * Tear down the subsystem: remove every map listener, the terrain watch, the
+   * shell-bus subscriptions, and the `coord-tools:origin` / `coord-tools:measure-*`
+   * layers and source; restore the cursor if a pick or measure was in progress,
+   * and remove the toolbar DOM.
    */
   function dispose() {
     disposed = true;
     api.map.off('mousemove', handleMouseMove);
     api.map.off('click', handleMapClick);
     originBtn.removeEventListener('click', handleOriginButtonClick);
+    measureBtn.removeEventListener('click', handleMeasureButtonClick);
+    clearBtn.removeEventListener('click', handleClearButtonClick);
+    if (typeof unsubDrawEntered === 'function') unsubDrawEntered();
+    if (typeof unsubDrawExited === 'function') unsubDrawExited();
     if (typeof unwatchTerrain === 'function') unwatchTerrain();
     if (pickMode) _exitPickMode();
+    if (measureMode) _exitMeasureMode();
+    _removeMeasureLayers();
     _removeOriginIndicator();
     if (root.parentNode != null) {
       root.parentNode.removeChild(root);

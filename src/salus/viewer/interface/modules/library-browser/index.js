@@ -4,7 +4,10 @@
  * Architecture: docs/Technical/InterfaceArchitecture.md §2.6
  *
  * Reads:       sensor_library, effector_library
- * Emits:       placement:pending
+ * Emits:       placement:pending,
+ *              drawmode:entered, drawmode:exited (I-22 — emitted around the
+ *              click-to-place mode, which captures an unscoped map click, so
+ *              the coord-tools measurement tool stays mutually exclusive with it)
  * Map sources: library-browser:drag-ghost
  * Map layers:  library-browser:drag-ghost-circle
  *
@@ -267,6 +270,10 @@ export function init(api) {
   function _enterClickToPlace(def) {
     if (clickCancelFn) clickCancelFn(); // cancel any previous mode first
     pendingDef = def;
+    // D-613: emit drawmode:entered BEFORE setting the cursor, so the coord-tools
+    // measure-mode exit (which restores its saved cursor) cannot overwrite the
+    // crosshair this mode is about to set.
+    api.bus.emit('drawmode:entered', { mode: 'place' });
     api.map.getCanvas().style.cursor = 'crosshair';
 
     function _onMapClick(e) {
@@ -294,6 +301,7 @@ export function init(api) {
       _clearGhost();
       pendingDef = null;
       clickCancelFn = null;
+      api.bus.emit('drawmode:exited', { mode: 'place' });
     };
   }
 

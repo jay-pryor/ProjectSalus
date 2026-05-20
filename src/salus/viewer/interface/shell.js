@@ -529,6 +529,12 @@ async function main() {
           getTerrain: () => state.getState('terrain'),
           watchTerrain: (callback) => state.watch('terrain', callback),
         },
+        // I-22 — subscribe-only handle on the raw shell bus, so the
+        // shell-owned subsystem can observe module draw-mode lifecycle for the
+        // Measure tool's mutex without being given emit or arbitrary access.
+        bus: {
+          on: (event, callback) => bus.on(event, callback),
+        },
       },
       doc
     );

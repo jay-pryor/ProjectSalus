@@ -25,6 +25,15 @@
   white-space: pre;
 }
 
+/* I-22 — completed-measurement deltas + totals; sits beside the live readout
+ * once two points are placed. Distinct accent matches the on-map measure line. */
+.coord-tools-measure-readout {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color: #ffe066;
+  white-space: pre;
+  margin-left: 6px;
+}
+
 .coord-tools-btn {
   background: #1a1a2e;
   color: #d0d0e0;

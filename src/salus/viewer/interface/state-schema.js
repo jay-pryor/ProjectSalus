@@ -54,4 +54,11 @@ export const VALID_EVENTS = new Set([
   'scenario:loaded',
   'scenario:saved',
   'shell:library-load-error',
+  // Draw-mode lifecycle (I-22). A module emits drawmode:entered when it starts
+  // any click-capturing interaction mode (route/zone draw, vertex edit, point
+  // pick) and drawmode:exited when it leaves it. The coord-tools shell-owned
+  // subsystem subscribes so its two-point measurement stays mutually exclusive
+  // with module draw modes — a single map click is never handled by both.
+  'drawmode:entered',
+  'drawmode:exited',
 ]);

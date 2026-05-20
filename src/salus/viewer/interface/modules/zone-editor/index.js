@@ -5,7 +5,10 @@
  *
  * Reads:        terrain (prerequisite only — checked by shell)
  * Writes:       zones
- * Emits:        zone:added, zone:removed
+ * Emits:        zone:added, zone:removed,
+ *               drawmode:entered, drawmode:exited (I-22 — emitted around the
+ *               click-capturing draw and vertex-edit modes so the coord-tools
+ *               measurement tool stays mutually exclusive with them)
  * Map sources:  zone-editor:priority-source
  *               zone-editor:exclusion-source
  *               zone-editor:working-source
@@ -584,6 +587,10 @@ export function init(api) {
     drawType = (zoneTypeSelect ? String(zoneTypeSelect.value) : '') || 'priority';
     if (drawBtn) drawBtn.textContent = 'Stop Drawing';
     if (drawHint) drawHint.hidden = false;
+    // D-613: emit drawmode:entered BEFORE setting the cursor, so the coord-tools
+    // measure-mode exit (which restores its saved cursor) cannot overwrite the
+    // crosshair this draw mode is about to set.
+    api.bus.emit('drawmode:entered', { mode: 'draw' });
     api.map.getCanvas().style.cursor = 'crosshair';
     api.map.on('click', _onDrawClick);
     api.map.on('dblclick', _onDrawDblClick);
@@ -596,6 +603,7 @@ export function init(api) {
     api.map.getCanvas().style.cursor = '';
     api.map.off('click', _onDrawClick);
     api.map.off('dblclick', _onDrawDblClick);
+    api.bus.emit('drawmode:exited', { mode: 'draw' });
   }
 
   // -------------------------------------------------------------------------
@@ -722,6 +730,8 @@ export function init(api) {
 
     editingId = zoneId;
     editingCoords = zone.coordinates.map(c => [...c]);
+    // Vertex editing captures map clicks/drags — same coord-tools signal.
+    api.bus.emit('drawmode:entered', { mode: 'edit' });
 
     _updateEditHandlesSource();
     if (editBar) editBar.hidden = false;
@@ -817,6 +827,7 @@ export function init(api) {
 
   function _exitEditMode(commit) {
     if (!editingId) return;
+    api.bus.emit('drawmode:exited', { mode: 'edit' });
     if (commit) {
       const idx = zones.findIndex(z => z.id === editingId);
       if (idx !== -1) {

@@ -1,9 +1,11 @@
 /**
  * test-coord-tools.js — Unit tests for the coord-tools shell-owned subsystem.
  *
- * Covers the I-20 infrastructure (toolbar shell, `coord_tools` state key) and
- * the I-21 behaviour (local-frame conversion maths, origin defaulting, the
- * pick-mode reset, the live X/Y/Z readout and its "—" degradation paths).
+ * Covers the I-20 infrastructure (toolbar shell, `coord_tools` state key), the
+ * I-21 behaviour (local-frame conversion maths, origin defaulting, the
+ * pick-mode reset, the live X/Y/Z readout and its "—" degradation paths) and
+ * the I-22 measure tool (two-click measurement, ΔX/ΔY/ΔZ + 3D slant + 2D
+ * fallback maths, clear path, disposal, and draw-mode mutual exclusion).
  *
  * Run: node --test src/salus/viewer/interface/tests/test-coord-tools.js
  */
@@ -17,10 +19,11 @@ import {
   createCoordTools,
   COORD_TOOLS_LAYER_PREFIX,
   lngLatToLocalXY,
+  measurePair,
 } from '../coord-tools/index.js';
 import { createMapProxy, LayerPrefixViolation } from '../map-proxy.js';
 import { createState } from '../state.js';
-import { VALID_STATE_KEYS } from '../state-schema.js';
+import { VALID_STATE_KEYS, VALID_EVENTS } from '../state-schema.js';
 
 // ---------------------------------------------------------------------------
 // Minimal DOM stub — only what coord-tools/index.js touches.
@@ -170,17 +173,46 @@ function makeStateHandle(opts = {}) {
   };
 }
 
-/** Build a full test harness: toolbar element, doc, mock map, state, api. */
+/**
+ * Mock shell bus — subscribe + fire only. Coord-tools is given a subscribe-only
+ * handle, so the test bus deliberately omits `emit` to mirror that surface.
+ */
+function makeMockBus() {
+  const handlers = {};
+  return {
+    on(event, cb) {
+      if (!handlers[event]) handlers[event] = [];
+      handlers[event].push(cb);
+      return () => {
+        const a = handlers[event];
+        if (a) {
+          const i = a.indexOf(cb);
+          if (i !== -1) a.splice(i, 1);
+        }
+      };
+    },
+    _fire(event, data) {
+      for (const cb of (handlers[event] || []).slice()) cb(data);
+    },
+    _handlerCount(event) {
+      return (handlers[event] || []).length;
+    },
+  };
+}
+
+/** Build a full test harness: toolbar element, doc, mock map, state, bus, api. */
 function makeHarness(opts = {}) {
   const doc = makeDoc();
   const toolbar = makeElement('header');
   const mockMap = makeMockMap(opts);
   const state = makeStateHandle(opts);
+  const bus = makeMockBus();
   const api = {
     map: createMapProxy(mockMap, 'coord-tools', { allowTerrainQuery: true }),
     state,
+    bus,
   };
-  return { doc, toolbar, mockMap, state, api };
+  return { doc, toolbar, mockMap, state, bus, api };
 }
 
 /** A MapLibre-shaped pointer event at a lng/lat. */
@@ -237,25 +269,26 @@ test('the toolbar renders a label and an X/Y/Z readout (dashes before terrain)',
   assert.equal(readout.textContent, 'X: —  Y: —  Z: —');
 });
 
-test('the toolbar renders the set-origin, measure and grid controls', () => {
+test('the toolbar renders the set-origin, measure, measure-clear and grid controls', () => {
   const { doc, toolbar, api } = makeHarness();
   const { root } = createCoordTools(toolbar, api, doc);
 
   const tools = toolButtons(root).map((b) => b.dataset.tool);
-  assert.deepEqual(tools.sort(), ['grid', 'measure', 'set-origin']);
+  assert.deepEqual(tools.sort(), ['grid', 'measure', 'measure-clear', 'set-origin']);
 });
 
-test('measure and grid stay disabled stubs; set-origin is a live control', () => {
+test('grid stays a disabled stub; set-origin and measure are live controls', () => {
   const { doc, toolbar, api } = makeHarness();
   const { root } = createCoordTools(toolbar, api, doc);
 
   const byTool = Object.fromEntries(
     toolButtons(root).map((b) => [b.dataset.tool, b]),
   );
-  assert.equal(byTool.measure.disabled, true, 'measure remains an I-22 stub');
   assert.equal(byTool.grid.disabled, true, 'grid remains an I-23 stub');
   assert.equal(byTool['set-origin'].disabled, false, 'set-origin is enabled in I-21');
   assert.equal(byTool['set-origin'].textContent, 'Set origin');
+  assert.equal(byTool.measure.disabled, false, 'measure is enabled in I-22');
+  assert.equal(byTool.measure.textContent, 'Measure');
 });
 
 test('the toolbar is unaffected by module panel navigation', () => {
@@ -271,13 +304,13 @@ test('the toolbar is unaffected by module panel navigation', () => {
 
   assert.equal(toolbar.children.length, 1);
   assert.equal(toolbar.children[0], root);
-  assert.equal(toolButtons(root).length, 3);
+  assert.equal(toolButtons(root).length, 4);
   // The controls keep their interactive state across navigation.
   const byTool = Object.fromEntries(
     toolButtons(root).map((b) => [b.dataset.tool, b]),
   );
   assert.equal(byTool['set-origin'].disabled, false);
-  assert.equal(byTool.measure.disabled, true);
+  assert.equal(byTool.measure.disabled, false);
   assert.equal(byTool.grid.disabled, true);
 });
 
@@ -311,18 +344,34 @@ test('createCoordTools throws when api.state is missing a required method', () =
   // D-605: get/set/getTerrain/watchTerrain must all be functions.
   const { doc, toolbar, api } = makeHarness();
   const goodMap = api.map;
-  assert.throws(() => createCoordTools(toolbar, { map: goodMap }, doc), TypeError);
+  const goodBus = api.bus;
+  assert.throws(() => createCoordTools(toolbar, { map: goodMap, bus: goodBus }, doc), TypeError);
   assert.throws(
-    () => createCoordTools(toolbar, { map: goodMap, state: {} }, doc),
+    () => createCoordTools(toolbar, { map: goodMap, state: {}, bus: goodBus }, doc),
     TypeError,
   );
   assert.throws(
     () =>
       createCoordTools(
         toolbar,
-        { map: goodMap, state: { get: () => null, set: () => {} } },
+        { map: goodMap, state: { get: () => null, set: () => {} }, bus: goodBus },
         doc,
       ),
+    TypeError,
+  );
+});
+
+test('createCoordTools throws when api.bus is missing on()', () => {
+  // I-22: the Measure tool's mutex with module draw modes depends on the bus.
+  const { doc, toolbar, api } = makeHarness();
+  const goodMap = api.map;
+  const goodState = api.state;
+  assert.throws(
+    () => createCoordTools(toolbar, { map: goodMap, state: goodState }, doc),
+    TypeError,
+  );
+  assert.throws(
+    () => createCoordTools(toolbar, { map: goodMap, state: goodState, bus: {} }, doc),
     TypeError,
   );
 });
@@ -532,7 +581,7 @@ test('a pick click with a non-finite lng/lat does not change the origin', () => 
 test('_setOrigin still works when the coord_tools state starts null (D-610)', () => {
   // A null coord_tools (a shell wiring regression) must not crash the origin
   // write — the origin is still persisted.
-  const { doc, toolbar, mockMap } = makeHarness();
+  const { doc, toolbar, mockMap, bus } = makeHarness();
   let coordTools = null;
   const state = {
     get: () => coordTools,
@@ -543,6 +592,7 @@ test('_setOrigin still works when the coord_tools state starts null (D-610)', ()
   const api = {
     map: createMapProxy(mockMap, 'coord-tools', { allowTerrainQuery: true }),
     state,
+    bus,
   };
   assert.doesNotThrow(() => createCoordTools(toolbar, api, doc));
   assert.deepEqual(coordTools.origin_lnglat, [133, -25]);
@@ -733,3 +783,386 @@ test('no module declares coord_tools in its reads[] or writes[] contract', () =>
   }
   assert.ok(checked > 0, 'expected at least one module manifest to be checked');
 });
+
+// ===========================================================================
+// I-22 — measure tool helpers
+// ===========================================================================
+
+function measureButtonOf(root) {
+  return root.children.find((c) => c.dataset && c.dataset.tool === 'measure');
+}
+
+function clearButtonOf(root) {
+  return root.children.find((c) => c.dataset && c.dataset.tool === 'measure-clear');
+}
+
+function measureReadoutOf(root) {
+  return root.children.find(
+    (c) => c.dataset && c.dataset.role === 'measure-readout',
+  );
+}
+
+// ===========================================================================
+// I-22 — drawmode:* events are valid contract events
+// ===========================================================================
+
+test('drawmode:entered and drawmode:exited are valid bus events', () => {
+  assert.ok(VALID_EVENTS.has('drawmode:entered'));
+  assert.ok(VALID_EVENTS.has('drawmode:exited'));
+});
+
+// ===========================================================================
+// I-22 — measurePair distance maths (AC 2, 3, 7)
+// ===========================================================================
+
+test('measurePair: identical endpoints yield zero deltas and a zero total', () => {
+  const r = measurePair([133, -25], [133, -25], [133, -25], 100, 100);
+  assert.equal(r.dx, 0);
+  assert.equal(r.dy, 0);
+  assert.equal(r.dz, 0);
+  assert.equal(r.hyp2d, 0);
+  assert.equal(r.slant3d, 0);
+  assert.equal(r.hasZ, true);
+});
+
+test('measurePair: a one-degree NE move yields a known 3D slant when elevated', () => {
+  // At lat0 = -25°, one degree east ≈ 111195·cos(25°) ≈ 100776 m; one degree
+  // north ≈ 111195 m; with a 200 m climb the 3D slant is sqrt(dx²+dy²+dz²).
+  const r = measurePair([133, -25], [134, -24], [133, -25], 100, 300);
+  assert.ok(Math.abs(r.dx - 100776) < 5, `dx was ${r.dx}`);
+  assert.ok(Math.abs(r.dy - 111195) < 5, `dy was ${r.dy}`);
+  assert.equal(r.dz, 200);
+  const expected2d = Math.hypot(r.dx, r.dy);
+  const expected3d = Math.hypot(r.dx, r.dy, 200);
+  assert.ok(Math.abs(r.hyp2d - expected2d) < 1e-6);
+  assert.ok(Math.abs(r.slant3d - expected3d) < 1e-6);
+  assert.ok(r.slant3d > r.hyp2d, '3D slant must exceed the 2D horizontal');
+  assert.equal(r.hasZ, true);
+});
+
+test('measurePair: a missing endpoint elevation yields hasZ=false and null dz/slant3d', () => {
+  const r = measurePair([133, -25], [134, -25], [133, -25], 100, null);
+  assert.equal(r.hasZ, false);
+  assert.equal(r.dz, null);
+  assert.equal(r.slant3d, null);
+  // The 2D horizontal is still computed.
+  assert.ok(Number.isFinite(r.hyp2d) && r.hyp2d > 0);
+});
+
+test('measurePair: a non-finite elevation (NaN) is treated as unavailable', () => {
+  const r = measurePair([133, -25], [134, -25], [133, -25], NaN, 50);
+  assert.equal(r.hasZ, false);
+  assert.equal(r.dz, null);
+  assert.equal(r.slant3d, null);
+});
+
+// ===========================================================================
+// I-22 — two-click flow + on-map layers (AC 1, 6, 7)
+// ===========================================================================
+
+test('Measure: clicking the toggle enters mode, sets crosshair, and clears any prior state', () => {
+  const { doc, toolbar, api, mockMap } = makeHarness({ terrain: TERRAIN });
+  const { root } = createCoordTools(toolbar, api, doc);
+  const btn = measureButtonOf(root);
+
+  btn._fire('click');
+  assert.equal(btn.dataset.active, 'true');
+  assert.equal(btn.textContent, 'Cancel');
+  assert.equal(mockMap._canvas.style.cursor, 'crosshair');
+  assert.equal(measureReadoutOf(root).hidden, true, 'no measurement yet — readout hidden');
+  assert.equal(clearButtonOf(root).hidden, true, 'no points yet — clear hidden');
+});
+
+test('Measure: a single click places one marker, the second click places line + second marker', () => {
+  const { doc, toolbar, api, mockMap } = makeHarness({ terrain: TERRAIN });
+  mockMap._setElevation(150);
+  const { root } = createCoordTools(toolbar, api, doc);
+
+  measureButtonOf(root)._fire('click'); // enter mode
+  mockMap._emit('click', pointerEvent(133.1, -25.0));
+
+  // After one click: a Point feature exists; no line yet.
+  let src = api.map.getSource('coord-tools:measure-source');
+  assert.ok(src, 'a coord-tools:measure-source must be added on the first click');
+  assert.equal(src.data.features.length, 1);
+  assert.equal(src.data.features[0].geometry.type, 'Point');
+  assert.equal(clearButtonOf(root).hidden, false, 'Clear must be visible with a point');
+  assert.equal(measureReadoutOf(root).hidden, true, 'readout is hidden until 2nd click');
+
+  // Both prefix-correct layers exist immediately (one source, two $type layers).
+  assert.ok(api.map.getLayer('coord-tools:measure-line'));
+  assert.ok(api.map.getLayer('coord-tools:measure-points'));
+
+  mockMap._emit('click', pointerEvent(133.2, -25.0));
+
+  src = api.map.getSource('coord-tools:measure-source');
+  const types = src.data.features.map((f) => f.geometry.type).sort();
+  assert.deepEqual(types, ['LineString', 'Point', 'Point']);
+  assert.equal(measureReadoutOf(root).hidden, false, 'readout is shown after 2nd click');
+});
+
+test('Measure: after two clicks the readout shows ΔX, ΔY, ΔZ, 3D slant and 2D horizontal', () => {
+  const { doc, toolbar, api, mockMap } = makeHarness({ terrain: TERRAIN });
+  mockMap._setElevation(120); // both points share this elevation → ΔZ = 0
+  const { root } = createCoordTools(toolbar, api, doc);
+
+  measureButtonOf(root)._fire('click');
+  mockMap._emit('click', pointerEvent(133, -25));        // origin point
+  mockMap._emit('click', pointerEvent(133.001, -25));    // ~100 m east
+
+  const text = measureReadoutOf(root).textContent;
+  const m = text.match(
+    /^ΔX: (-?\d+) m {2}ΔY: (-?\d+) m {2}ΔZ: (-?\d+) m {2}3D: (\d+) m {2}2D: (\d+) m$/,
+  );
+  assert.ok(m, `measure readout did not match the expected shape: "${text}"`);
+  // 0.001° lng at -25° lat ≈ 100.78 m east; ΔY = 0; ΔZ = 0; 3D == 2D.
+  assert.ok(Math.abs(Number(m[1]) - 101) < 2, `ΔX was ${m[1]}`);
+  assert.equal(m[2], '0');
+  assert.equal(m[3], '0');
+  assert.equal(m[4], m[5], 'with ΔZ=0 the 3D slant equals the 2D horizontal');
+});
+
+// ===========================================================================
+// I-22 — Z-unavailable fallback (AC 3, 7)
+// ===========================================================================
+
+test('Measure: when terrain elevation is unavailable, ΔZ shows "—" and the headline is 2D', () => {
+  const { doc, toolbar, api, mockMap } = makeHarness({ terrain: TERRAIN });
+  mockMap._setElevation(null); // queryTerrainElevation returns null off-tile
+  const { root } = createCoordTools(toolbar, api, doc);
+
+  measureButtonOf(root)._fire('click');
+  mockMap._emit('click', pointerEvent(133, -25));
+  mockMap._emit('click', pointerEvent(133.001, -25));
+
+  const text = measureReadoutOf(root).textContent;
+  // No 3D segment; "ΔZ: —" present; 2D total present.
+  assert.match(text, /ΔZ: —/, `readout was "${text}"`);
+  assert.ok(!/3D:/.test(text), `3D label must not appear when Z is unavailable: "${text}"`);
+  assert.match(text, /2D: \d+ m/, `2D total must appear when Z is unavailable: "${text}"`);
+});
+
+test('Measure: a queryTerrainElevation throw at an endpoint falls back to the 2D total', () => {
+  // D-606 mirror for the measure path.
+  const { doc, toolbar, api, mockMap } = makeHarness({
+    terrain: TERRAIN,
+    elevationThrows: true,
+  });
+  const { root } = createCoordTools(toolbar, api, doc);
+
+  measureButtonOf(root)._fire('click');
+  assert.doesNotThrow(() => {
+    mockMap._emit('click', pointerEvent(133, -25));
+    mockMap._emit('click', pointerEvent(133.001, -25));
+  });
+  const text = measureReadoutOf(root).textContent;
+  assert.match(text, /ΔZ: —/, `readout was "${text}"`);
+  assert.match(text, /2D: \d+ m/, `2D total must remain: "${text}"`);
+});
+
+// ===========================================================================
+// I-22 — clear + exit semantics (AC 4, 6, 7)
+// ===========================================================================
+
+test('Measure: Clear removes the layers, hides the readout, and stays in mode', () => {
+  const { doc, toolbar, api, mockMap } = makeHarness({ terrain: TERRAIN });
+  mockMap._setElevation(50);
+  const { root } = createCoordTools(toolbar, api, doc);
+
+  measureButtonOf(root)._fire('click');
+  mockMap._emit('click', pointerEvent(133, -25));
+  mockMap._emit('click', pointerEvent(133.001, -25));
+  assert.ok(api.map.getSource('coord-tools:measure-source'));
+
+  clearButtonOf(root)._fire('click');
+
+  // Layers + source gone; readout + clear hidden; still in measure mode.
+  assert.equal(api.map.getSource('coord-tools:measure-source'), undefined);
+  assert.equal(api.map.getLayer('coord-tools:measure-line'), undefined);
+  assert.equal(api.map.getLayer('coord-tools:measure-points'), undefined);
+  assert.equal(measureReadoutOf(root).hidden, true);
+  assert.equal(clearButtonOf(root).hidden, true);
+  assert.equal(measureButtonOf(root).dataset.active, 'true', 'still in measure mode');
+
+  // A fresh pair after Clear renders again — confirms layers can be re-added.
+  mockMap._emit('click', pointerEvent(133.002, -25));
+  mockMap._emit('click', pointerEvent(133.003, -25));
+  assert.ok(api.map.getSource('coord-tools:measure-source'));
+});
+
+test('Measure: toggling Measure off (Cancel) clears the layers and restores the cursor', () => {
+  const { doc, toolbar, api, mockMap } = makeHarness({ terrain: TERRAIN });
+  mockMap._setElevation(50);
+  const { root } = createCoordTools(toolbar, api, doc);
+  const btn = measureButtonOf(root);
+
+  btn._fire('click');
+  mockMap._emit('click', pointerEvent(133, -25));
+  mockMap._emit('click', pointerEvent(133.001, -25));
+  assert.ok(api.map.getSource('coord-tools:measure-source'));
+
+  btn._fire('click'); // exit measure mode
+
+  assert.equal(btn.dataset.active, 'false');
+  assert.equal(btn.textContent, 'Measure');
+  assert.equal(mockMap._canvas.style.cursor, '', 'cursor restored on exit');
+  assert.equal(api.map.getSource('coord-tools:measure-source'), undefined);
+  assert.equal(measureReadoutOf(root).hidden, true);
+  assert.equal(clearButtonOf(root).hidden, true);
+});
+
+test('Measure: coord_tools.measure is written on each click and cleared on exit', () => {
+  const { doc, toolbar, api, state, mockMap } = makeHarness({ terrain: TERRAIN });
+  mockMap._setElevation(50);
+  const { root } = createCoordTools(toolbar, api, doc);
+  const btn = measureButtonOf(root);
+
+  assert.equal(state._coordTools().measure, null);
+
+  btn._fire('click');
+  mockMap._emit('click', pointerEvent(133, -25));
+  assert.deepEqual(state._coordTools().measure, { a: [133, -25], b: null });
+
+  mockMap._emit('click', pointerEvent(133.001, -25));
+  assert.deepEqual(state._coordTools().measure, { a: [133, -25], b: [133.001, -25] });
+
+  btn._fire('click'); // exit
+  assert.equal(state._coordTools().measure, null);
+});
+
+// ===========================================================================
+// I-22 — pick / measure click mutex within the subsystem (AC 5)
+// ===========================================================================
+
+test('a single map click is consumed by Measure, not by the origin pick (and vice versa)', () => {
+  const { doc, toolbar, api, state, mockMap } = makeHarness({ terrain: TERRAIN });
+  const { root } = createCoordTools(toolbar, api, doc);
+  const originBefore = state._coordTools().origin_lnglat;
+
+  // While in measure mode, a click must drop a measure point — not move the origin.
+  measureButtonOf(root)._fire('click');
+  mockMap._emit('click', pointerEvent(134, -24));
+  assert.deepEqual(state._coordTools().origin_lnglat, originBefore, 'origin unchanged');
+  assert.ok(api.map.getSource('coord-tools:measure-source'), 'measure point recorded');
+
+  // Pressing the origin button while in measure mode exits measure mode.
+  originButtonOf(root)._fire('click');
+  assert.equal(measureButtonOf(root).dataset.active, 'false');
+  assert.equal(api.map.getSource('coord-tools:measure-source'), undefined);
+
+  // The next click is consumed by the origin pick, not by Measure.
+  mockMap._emit('click', pointerEvent(135, -23));
+  assert.deepEqual(state._coordTools().origin_lnglat, [135, -23]);
+});
+
+// ===========================================================================
+// I-22 — module draw-mode mutex (AC 5, 7)
+// ===========================================================================
+
+test('a drawmode:entered while idle disables the Measure toggle', () => {
+  const { doc, toolbar, api, bus } = makeHarness({ terrain: TERRAIN });
+  const { root } = createCoordTools(toolbar, api, doc);
+  const btn = measureButtonOf(root);
+  assert.equal(btn.disabled, false, 'enabled with no draw modes active');
+
+  bus._fire('drawmode:entered', { mode: 'draw' });
+  assert.equal(btn.disabled, true, 'disabled while a module draw mode is active');
+
+  bus._fire('drawmode:exited', { mode: 'draw' });
+  assert.equal(btn.disabled, false, 're-enabled when every draw mode exits');
+});
+
+test('a drawmode:entered also exits origin-pick mode and disables the Set origin button (D-612)', () => {
+  // D-612: origin-pick is structurally the same kind of click-capturing
+  // single-handler mode as Measure, so the same mutex applies — a module
+  // click must never simultaneously move the coord-tools origin AND place a
+  // sensor / waypoint / vertex.
+  const { doc, toolbar, api, bus, state, mockMap } = makeHarness({ terrain: TERRAIN });
+  const { root } = createCoordTools(toolbar, api, doc);
+  const originBtn = originButtonOf(root);
+  const originBefore = state._coordTools().origin_lnglat;
+
+  originBtn._fire('click'); // enter origin-pick mode
+  assert.equal(originBtn.dataset.active, 'true');
+
+  bus._fire('drawmode:entered', { mode: 'draw' });
+  assert.equal(originBtn.dataset.active, 'false', 'origin-pick exited');
+  assert.equal(originBtn.disabled, true, 'Set origin button disabled by the draw mode');
+
+  // A click while a module draw mode is active must NOT move the origin.
+  mockMap._emit('click', pointerEvent(135, -23));
+  assert.deepEqual(state._coordTools().origin_lnglat, originBefore);
+
+  bus._fire('drawmode:exited', { mode: 'draw' });
+  assert.equal(originBtn.disabled, false, 'Set origin re-enabled when the draw mode exits');
+});
+
+test('drawmode:entered while measure is active exits measure and clears layers', () => {
+  const { doc, toolbar, api, bus, mockMap } = makeHarness({ terrain: TERRAIN });
+  mockMap._setElevation(80);
+  const { root } = createCoordTools(toolbar, api, doc);
+  const btn = measureButtonOf(root);
+
+  btn._fire('click');
+  mockMap._emit('click', pointerEvent(133, -25));
+  assert.ok(api.map.getSource('coord-tools:measure-source'));
+
+  bus._fire('drawmode:entered', { mode: 'draw' });
+  assert.equal(btn.dataset.active, 'false', 'measure mode exited');
+  assert.equal(btn.disabled, true, 'Measure now disabled');
+  assert.equal(api.map.getSource('coord-tools:measure-source'), undefined);
+});
+
+test('overlapping draw modes balance via a depth counter — Measure stays disabled until the last exit', () => {
+  const { doc, toolbar, api, bus } = makeHarness({ terrain: TERRAIN });
+  const { root } = createCoordTools(toolbar, api, doc);
+  const btn = measureButtonOf(root);
+
+  bus._fire('drawmode:entered', { mode: 'draw' });
+  bus._fire('drawmode:entered', { mode: 'pick' });
+  assert.equal(btn.disabled, true);
+
+  bus._fire('drawmode:exited', { mode: 'pick' });
+  assert.equal(btn.disabled, true, 'still one draw mode active');
+
+  bus._fire('drawmode:exited', { mode: 'draw' });
+  assert.equal(btn.disabled, false, 're-enabled when depth reaches zero');
+});
+
+test('a Measure click is a no-op when the button has been disabled by a draw mode', () => {
+  // Defensive — a programmatic _fire('click') on a disabled button must not
+  // re-enter measure mode (AC 5: a single click is never double-handled).
+  const { doc, toolbar, api, bus } = makeHarness({ terrain: TERRAIN });
+  const { root } = createCoordTools(toolbar, api, doc);
+  const btn = measureButtonOf(root);
+
+  bus._fire('drawmode:entered', { mode: 'draw' });
+  btn._fire('click');
+  assert.equal(btn.dataset.active, 'false', 'must remain idle when disabled');
+});
+
+// ===========================================================================
+// I-22 — disposal (AC 6)
+// ===========================================================================
+
+test('dispose removes the coord-tools:measure-* layers, source and bus subscriptions', () => {
+  const { doc, toolbar, api, bus, mockMap } = makeHarness({ terrain: TERRAIN });
+  mockMap._setElevation(50);
+  const { root, dispose } = createCoordTools(toolbar, api, doc);
+
+  measureButtonOf(root)._fire('click');
+  mockMap._emit('click', pointerEvent(133, -25));
+  mockMap._emit('click', pointerEvent(133.001, -25));
+  assert.ok(api.map.getSource('coord-tools:measure-source'));
+  assert.equal(bus._handlerCount('drawmode:entered'), 1);
+  assert.equal(bus._handlerCount('drawmode:exited'), 1);
+
+  dispose();
+
+  assert.equal(api.map.getSource('coord-tools:measure-source'), undefined);
+  assert.equal(api.map.getLayer('coord-tools:measure-line'), undefined);
+  assert.equal(api.map.getLayer('coord-tools:measure-points'), undefined);
+  assert.equal(bus._handlerCount('drawmode:entered'), 0, 'drawmode:entered unsubscribed');
+  assert.equal(bus._handlerCount('drawmode:exited'), 0, 'drawmode:exited unsubscribed');
+});
+
