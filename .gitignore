@@ -42,3 +42,6 @@ output/
 .env
 *.credentials
 PersonalDocumentReferences/
+
+# Claude Code harness state (lockfiles, not source)
+.claude/scheduled_tasks.lock
