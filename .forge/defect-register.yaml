@@ -6943,7 +6943,7 @@ defects:
     description: "handleDrawModeEntered exits measureMode but NOT pickMode (origin-pick). If a user is in origin-pick mode and a module emits drawmode:entered (library-browser Place, threat-corridor-editor Draw/Edit/Pick, zone-editor Draw/Edit), pickMode stays active. The next map click is then consumed by both coord-tools (sets the origin via handleMapClick) AND the module's draw handler — a single click simultaneously sets the coordinate origin AND places a sensor/waypoint/vertex. AC 5's spirit applies equally to origin-pick because it is also a click-capturing single-handler mode."
     resolution: "I-22: handleDrawModeEntered now exits pickMode as well as measureMode when any module draw mode begins, and _updateMeasureControls disables originBtn together with measureBtn while drawModeDepth > 0. Covered by test 'a drawmode:entered also exits origin-pick mode and disables the Set origin button (D-612)'."
     status: resolved
-    commit: ""
+    commit: "c3e3f3b"
 
   - id: D-613
     severity: medium
@@ -6954,7 +6954,7 @@ defects:
     description: "Three modules set canvas.style.cursor='crosshair' BEFORE emitting drawmode:entered (tce _startDrawMode line 497→501; tce _startPickPoint line 768→772; zone-editor _startDrawMode line 590→594). coord-tools handleDrawModeEntered then synchronously calls _exitMeasureMode (when measure is active) which restores the canvas cursor to coord-tools's savedCursor — overwriting the module's crosshair. Net effect: when a module's draw mode is entered while measure mode was active, the crosshair never appears even though the click handler is wired up — draw mode looks unresponsive."
     resolution: "I-22: every module enter path now emits drawmode:entered BEFORE setting the canvas cursor — tce _startDrawMode, tce _startPickPoint, zone-editor _startDrawMode, and library-browser _enterClickToPlace. coord-tools's measure-exit cursor restore therefore runs first, and the module's crosshair write wins. Existing JS test suite covers the entered/exited contract end-to-end (780/780 pass)."
     status: resolved
-    commit: ""
+    commit: "c3e3f3b"
 
   - id: D-614
     severity: medium
@@ -6965,7 +6965,7 @@ defects:
     description: "_renderMeasureLayers wraps addSource + addLayer (x2) in a single try/catch that only console.warns. If addSource succeeds but the line layer add throws, the source and zero or one layers are left orphaned. On the next call, the existing-source fast path updates the data — but the missing points layer is never recreated, so the line renders without endpoint markers. _renderOriginIndicator uses remove-then-add and self-heals; the measure path does not."
     resolution: "I-22: _renderMeasureLayers now calls _removeMeasureLayers() at the top before re-adding source + both layers — the same idempotent remove-then-add pattern as _renderOriginIndicator. A partial failure on a previous call no longer leaves orphan state because the next render starts from a known-clean slate."
     status: resolved
-    commit: ""
+    commit: "c3e3f3b"
 
   - id: D-615
     severity: medium
@@ -6976,4 +6976,4 @@ defects:
     description: "_renderMeasureLayers's setData fast path is the only sane path in real MapLibre (a GeoJSONSource always has setData). The else branch (fall through to addSource with the source already present) is unreachable in production but reachable in the test mock (sources stored as raw specs with no setData). In tests addSource silently overwrites; in real MapLibre addSource with a duplicate id throws — and the catch swallows it, leaving the source's data stale. Works-in-test, silently-fails-in-prod shape."
     resolution: "I-22: the setData fast path was removed as part of the D-614 fix — _renderMeasureLayers now removes the source before re-adding it, so the duplicate-addSource throw path is no longer reachable in production or in tests. Production and test execution paths are now identical."
     status: resolved
-    commit: ""
+    commit: "c3e3f3b"
