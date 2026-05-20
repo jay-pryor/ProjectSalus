@@ -16,8 +16,8 @@
  * Tasks:
  *   - I-20 — toolbar shell + shell-owned subsystem skeleton (done).
  *   - I-21 — resettable origin point + live X/Y/Z cursor readout (done).
- *   - I-22 — two-point distance measurement (this file).
- *   - I-23 — toggleable coordinate grid overlay (Grid stub still disabled).
+ *   - I-22 — two-point distance measurement (done).
+ *   - I-23 — toggleable coordinate grid overlay (this file).
  *
  * I-21 — coordinate frame: a local tangent-plane frame anchored at the origin.
  * `X` is metres east, `Y` is metres north, both relative to the origin; `Z` is
@@ -39,6 +39,27 @@ const EARTH_RADIUS_M = 6_371_000;
 
 /** Degrees-to-radians factor. */
 const DEG_TO_RAD = Math.PI / 180;
+
+// --- Grid spacing bounds (I-23 design point 1) ------------------------------
+
+/** Minimum grid spacing in metres (10 m — fine enough for a small site). */
+export const GRID_SPACING_MIN_M = 10;
+
+/** Maximum grid spacing in metres (5 km — coarse enough for a wide site). */
+export const GRID_SPACING_MAX_M = 5_000;
+
+/** Default grid spacing in metres (100 m — a sensible cUAS-site default). */
+export const GRID_SPACING_DEFAULT_M = 100;
+
+/**
+ * Defensive cap on the number of grid lines generated per axis. A 50 km × 50
+ * km site (the upper end of a plausible cUAS deployment) at the 10 m minimum
+ * spacing is 5 000 lines per axis — well under this cap. Anything above it
+ * is a corrupt bounds payload (or a pathological spacing); we bail out with
+ * a warning rather than freeze the browser by trying to render millions of
+ * LineStrings.
+ */
+const GRID_MAX_LINES_PER_AXIS = 10_000;
 
 // --- Origin indicator map layer ---------------------------------------------
 
@@ -80,6 +101,31 @@ const MEASURE_POINT_PAINT = Object.freeze({
   'circle-stroke-color': '#1a1a2e',
 });
 
+// --- Grid map layers (I-23) -------------------------------------------------
+
+/**
+ * Two layers, one source each: `coord-tools:grid` carries the minor grid
+ * (the regularly spaced lines); `coord-tools:grid-axes` carries the two
+ * principal axes (X=0 and Y=0 through the origin) — emphasised with thicker,
+ * brighter strokes so the user can see the frame's anchor at a glance.
+ */
+const GRID_SOURCE = 'coord-tools:grid';
+const GRID_LAYER = 'coord-tools:grid';
+const GRID_AXES_SOURCE = 'coord-tools:grid-axes';
+const GRID_AXES_LAYER = 'coord-tools:grid-axes';
+
+const GRID_PAINT = Object.freeze({
+  'line-color': '#5588cc',
+  'line-width': 1,
+  'line-opacity': 0.35,
+});
+
+const GRID_AXES_PAINT = Object.freeze({
+  'line-color': '#88bbee',
+  'line-width': 2,
+  'line-opacity': 0.85,
+});
+
 // --- Toolbar control labels -------------------------------------------------
 
 const SET_ORIGIN_LABEL = 'Set origin';
@@ -87,15 +133,10 @@ const PICK_CANCEL_LABEL = 'Cancel';
 const MEASURE_LABEL = 'Measure';
 const MEASURE_CANCEL_LABEL = 'Cancel';
 const CLEAR_LABEL = 'Clear';
+const GRID_LABEL = 'Grid';
 
-/**
- * Disabled tool-control stubs — filled in by the named later task. `tool` is
- * the stable `data-tool` hook. (Set origin is a live control from I-21 and
- * Measure is a live control from I-22; both are built separately, below.)
- */
-const TOOL_STUBS = [
-  { tool: 'grid', label: 'Grid', task: 'I-23' },
-];
+// All three toolbar tools (set-origin, measure, grid) are now live controls
+// built explicitly below; no remaining disabled stubs.
 
 // ---------------------------------------------------------------------------
 // Local tangent-plane conversion (exported — pure, unit-tested directly)
@@ -118,6 +159,43 @@ export function lngLatToLocalXY(lngLat, originLngLat) {
     (lng - lng0) * DEG_TO_RAD * EARTH_RADIUS_M * Math.cos(lat0 * DEG_TO_RAD);
   const y = (lat - lat0) * DEG_TO_RAD * EARTH_RADIUS_M;
   return { x, y };
+}
+
+/**
+ * I-23 — inverse of `lngLatToLocalXY`: project a local tangent-plane (x, y)
+ * back to a [lng, lat]. The grid generator works in metres in the local frame
+ * (so spacing is uniform) and then converts each line endpoint back to
+ * geographic coordinates for the GeoJSON LineStrings the map renders.
+ *
+ *   lng = lng0 + x / ((π/180)·R·cos(lat0))
+ *   lat = lat0 + y / ((π/180)·R)
+ *
+ * @param {{x: number, y: number}} xy - metres east / north of the origin
+ * @param {[number, number]} originLngLat - origin [lng, lat] in degrees
+ * @returns {[number, number]} the [lng, lat] in degrees
+ */
+export function localXYToLngLat(xy, originLngLat) {
+  const { x, y } = xy;
+  const [lng0, lat0] = originLngLat;
+  const lng =
+    lng0 + x / (DEG_TO_RAD * EARTH_RADIUS_M * Math.cos(lat0 * DEG_TO_RAD));
+  const lat = lat0 + y / (DEG_TO_RAD * EARTH_RADIUS_M);
+  return [lng, lat];
+}
+
+/**
+ * Clamp a candidate spacing to the I-23 grid bounds. A non-finite value
+ * falls back to the default. AC 2: out-of-range input is corrected to the
+ * nearest limit rather than rejected.
+ *
+ * @param {number} value - the candidate spacing in metres
+ * @returns {number} clamped to [GRID_SPACING_MIN_M, GRID_SPACING_MAX_M]
+ */
+export function clampGridSpacing(value) {
+  if (!Number.isFinite(value)) return GRID_SPACING_DEFAULT_M;
+  if (value < GRID_SPACING_MIN_M) return GRID_SPACING_MIN_M;
+  if (value > GRID_SPACING_MAX_M) return GRID_SPACING_MAX_M;
+  return value;
 }
 
 /**
@@ -341,16 +419,30 @@ export function createCoordTools(toolbarEl, api, doc = globalThis.document) {
   clearBtn.hidden = true;
   root.appendChild(clearBtn);
 
-  // Grid — disabled until I-23 wires it up.
-  for (const { tool, label: text, task } of TOOL_STUBS) {
-    const btn = doc.createElement('button');
-    btn.className = 'coord-tools-btn';
-    btn.dataset.tool = tool;
-    btn.textContent = text;
-    btn.disabled = true;
-    btn.title = `${text} — added in ${task}`;
-    root.appendChild(btn);
-  }
+  // "Grid" — a live control from I-23. Toggles a coordinate grid clipped to
+  // the terrain footprint; the adjacent spacing input controls the interval.
+  const gridBtn = doc.createElement('button');
+  gridBtn.className = 'coord-tools-btn';
+  gridBtn.dataset.tool = 'grid';
+  gridBtn.dataset.active = 'false';
+  gridBtn.textContent = GRID_LABEL;
+  gridBtn.title = 'Toggle the coordinate grid (clipped to the terrain footprint)';
+  gridBtn.disabled = true; // enabled once terrain is loaded
+  root.appendChild(gridBtn);
+
+  // Numeric spacing input (metres). Clamped to [MIN, MAX] on commit.
+  const spacingInput = doc.createElement('input');
+  spacingInput.className = 'coord-tools-input';
+  spacingInput.dataset.tool = 'grid-spacing';
+  spacingInput.type = 'number';
+  spacingInput.min = String(GRID_SPACING_MIN_M);
+  spacingInput.max = String(GRID_SPACING_MAX_M);
+  spacingInput.step = '1';
+  spacingInput.value = String(GRID_SPACING_DEFAULT_M);
+  spacingInput.title =
+    `Grid spacing in metres (clamped to ${GRID_SPACING_MIN_M}–${GRID_SPACING_MAX_M})`;
+  spacingInput.disabled = true; // enabled once terrain is loaded
+  root.appendChild(spacingInput);
 
   toolbarEl.appendChild(root);
 
@@ -367,6 +459,11 @@ export function createCoordTools(toolbarEl, api, doc = globalThis.document) {
   let measureMode = false;     // true while in two-click measure mode
   let measurePoints = [];      // collected [lng, lat] pairs (0..2)
   let drawModeDepth = 0;       // count of active module draw modes; AC 5 mutex
+
+  // I-23 — grid tool
+  let gridEnabled = false;     // true while the grid overlay is rendered
+  let gridSpacingM = GRID_SPACING_DEFAULT_M; // spacing in metres
+  let terrainBounds = null;    // [west, south, east, north] | null
 
   // ----- Readout -----------------------------------------------------------
 
@@ -478,6 +575,9 @@ export function createCoordTools(toolbarEl, api, doc = globalThis.document) {
     api.state.set({ ...(isSkeleton ? coordTools : {}), origin_lnglat: originLngLat });
     _renderOriginIndicator(originLngLat);
     if (latestMoveEvent != null) _renderReadout(latestMoveEvent);
+    // I-23 AC 4 — when the origin moves, regenerate the grid against the new
+    // frame. _renderGridLayers is a no-op when the grid is disabled.
+    if (gridEnabled) _renderGridLayers();
   }
 
   // ----- Pick mode ---------------------------------------------------------
@@ -724,6 +824,253 @@ export function createCoordTools(toolbarEl, api, doc = globalThis.document) {
     _updateMeasureControls();
   }
 
+  // ----- Grid tool (I-23) --------------------------------------------------
+
+  /** True when `terrain` carries a usable [west, south, east, north] bounds. */
+  function _hasBounds(terrain) {
+    return (
+      terrain != null &&
+      Array.isArray(terrain.bounds_wgs84) &&
+      terrain.bounds_wgs84.length === 4 &&
+      terrain.bounds_wgs84.every(
+        (n) => typeof n === 'number' && Number.isFinite(n)
+      )
+    );
+  }
+
+  /**
+   * Generate the grid as two FeatureCollections (minor lines + principal
+   * axes). Lines are constant-longitude (X = xk) or constant-latitude
+   * (Y = yk) in the local frame, clipped to the terrain bounds rectangle.
+   * Returns empty FeatureCollections when origin or bounds are missing.
+   *
+   * The "principal axes" are the X=0 and Y=0 lines through the origin —
+   * separated out so they can render on their own emphasised layer. Since
+   * 0 is a multiple of every spacing, they naturally land on the grid-aligned
+   * tick range whenever the origin sits inside the terrain footprint.
+   */
+  function _generateGridFeatures() {
+    const empty = { type: 'FeatureCollection', features: [] };
+    if (
+      originLngLat == null ||
+      terrainBounds == null ||
+      !Number.isFinite(gridSpacingM) ||
+      gridSpacingM <= 0
+    ) {
+      return { minor: empty, axes: empty };
+    }
+    const [west, south, east, north] = terrainBounds;
+    // D-617: a degenerate (zero-area) or inverted bounds rectangle would
+    // render zero-length lines or reversed endpoints with no visible warning.
+    // Refuse to render and log instead.
+    if (!(east > west) || !(north > south)) {
+      console.warn(
+        '[coord-tools] grid: degenerate or inverted terrain bounds; refusing to render',
+        { west, south, east, north }
+      );
+      return { minor: empty, axes: empty };
+    }
+    const [lng0, lat0] = originLngLat;
+    const cosLat0 = Math.cos(lat0 * DEG_TO_RAD);
+    if (!Number.isFinite(cosLat0) || cosLat0 === 0) {
+      // A pole-anchored origin would make the longitude-metre scale collapse.
+      console.warn('[coord-tools] grid: invalid cos(lat0); refusing to render');
+      return { minor: empty, axes: empty };
+    }
+    const xToLng = (x) =>
+      lng0 + x / (DEG_TO_RAD * EARTH_RADIUS_M * cosLat0);
+    const yToLat = (y) => lat0 + y / (DEG_TO_RAD * EARTH_RADIUS_M);
+    // Bounds → local-frame extent.
+    const xMin = (west - lng0) * DEG_TO_RAD * EARTH_RADIUS_M * cosLat0;
+    const xMax = (east - lng0) * DEG_TO_RAD * EARTH_RADIUS_M * cosLat0;
+    const yMin = (south - lat0) * DEG_TO_RAD * EARTH_RADIUS_M;
+    const yMax = (north - lat0) * DEG_TO_RAD * EARTH_RADIUS_M;
+
+    const spacing = gridSpacingM;
+    const xFirst = Math.ceil(xMin / spacing) * spacing;
+    const xLast = Math.floor(xMax / spacing) * spacing;
+    const yFirst = Math.ceil(yMin / spacing) * spacing;
+    const yLast = Math.floor(yMax / spacing) * spacing;
+    const numX =
+      xLast >= xFirst ? Math.round((xLast - xFirst) / spacing) + 1 : 0;
+    const numY =
+      yLast >= yFirst ? Math.round((yLast - yFirst) / spacing) + 1 : 0;
+    if (
+      numX > GRID_MAX_LINES_PER_AXIS ||
+      numY > GRID_MAX_LINES_PER_AXIS
+    ) {
+      console.warn(
+        '[coord-tools] grid: line count exceeds safety cap; not rendering',
+        { numX, numY, spacing }
+      );
+      return { minor: empty, axes: empty };
+    }
+
+    const minorFeatures = [];
+    const axesFeatures = [];
+    // Constant-X lines (run N-S, parallel to the local Y axis).
+    for (let k = 0; k < numX; k += 1) {
+      const xk = xFirst + k * spacing;
+      const lng = xToLng(xk);
+      const feature = {
+        type: 'Feature',
+        geometry: {
+          type: 'LineString',
+          coordinates: [[lng, south], [lng, north]],
+        },
+        properties: { axis: 'x', value: xk },
+      };
+      (xk === 0 ? axesFeatures : minorFeatures).push(feature);
+    }
+    // Constant-Y lines (run E-W, parallel to the local X axis).
+    for (let k = 0; k < numY; k += 1) {
+      const yk = yFirst + k * spacing;
+      const lat = yToLat(yk);
+      const feature = {
+        type: 'Feature',
+        geometry: {
+          type: 'LineString',
+          coordinates: [[west, lat], [east, lat]],
+        },
+        properties: { axis: 'y', value: yk },
+      };
+      (yk === 0 ? axesFeatures : minorFeatures).push(feature);
+    }
+    return {
+      minor: { type: 'FeatureCollection', features: minorFeatures },
+      axes: { type: 'FeatureCollection', features: axesFeatures },
+    };
+  }
+
+  function _removeGridLayers() {
+    // D-620: isolate each remove in its own try/catch — a throw on the first
+    // call (e.g. style not loaded, proxy in odd state) must not skip the
+    // remaining removes and leak the rest of the resources.
+    const targets = [
+      ['layer', GRID_LAYER],
+      ['layer', GRID_AXES_LAYER],
+      ['source', GRID_SOURCE],
+      ['source', GRID_AXES_SOURCE],
+    ];
+    for (const [kind, id] of targets) {
+      try {
+        if (kind === 'layer') {
+          if (api.map.getLayer(id)) api.map.removeLayer(id);
+        } else {
+          if (api.map.getSource(id)) api.map.removeSource(id);
+        }
+      } catch (err) {
+        console.warn(`[coord-tools] failed to remove grid ${kind} ${id}:`, err);
+      }
+    }
+  }
+
+  /**
+   * Render (or re-render) the two grid layers. Mirrors the D-614 idempotent
+   * remove-then-add pattern so a partial failure cannot leave orphan layers.
+   *
+   * D-618: on any render failure the gridEnabled flag is rolled back to false
+   * and the controls are refreshed so the Grid button never lies about what
+   * is actually on the map. _removeGridLayers is called again on the way out
+   * to drop any partial state from the failed add chain.
+   */
+  function _renderGridLayers() {
+    if (!gridEnabled) return;
+    try {
+      _removeGridLayers();
+      const { minor, axes } = _generateGridFeatures();
+      api.map.addSource(GRID_SOURCE, { type: 'geojson', data: minor });
+      api.map.addLayer({
+        id: GRID_LAYER,
+        type: 'line',
+        source: GRID_SOURCE,
+        paint: { ...GRID_PAINT },
+      });
+      api.map.addSource(GRID_AXES_SOURCE, { type: 'geojson', data: axes });
+      api.map.addLayer({
+        id: GRID_AXES_LAYER,
+        type: 'line',
+        source: GRID_AXES_SOURCE,
+        paint: { ...GRID_AXES_PAINT },
+      });
+    } catch (err) {
+      console.warn('[coord-tools] failed to render grid layers:', err);
+      _removeGridLayers();
+      gridEnabled = false;
+      _updateGridControls();
+      _persistGrid();
+    }
+  }
+
+  /**
+   * Persist coord_tools.{grid_enabled, grid_spacing_m}. Same D-610 / D-611
+   * skeleton guard as _setOrigin and _persistMeasure.
+   */
+  function _persistGrid() {
+    const coordTools = api.state.get();
+    const isSkeleton =
+      coordTools != null &&
+      typeof coordTools === 'object' &&
+      !Array.isArray(coordTools);
+    if (!isSkeleton) {
+      console.warn(
+        '[coord-tools] coord_tools state is not the expected shell skeleton ' +
+        'object:', coordTools
+      );
+    }
+    api.state.set({
+      ...(isSkeleton ? coordTools : {}),
+      grid_enabled: gridEnabled,
+      grid_spacing_m: gridSpacingM,
+    });
+  }
+
+  function _updateGridControls() {
+    const hasTerrain = terrainBounds != null;
+    // AC 5 — grid toggle disabled when no terrain is loaded (no footprint).
+    gridBtn.disabled = !hasTerrain;
+    spacingInput.disabled = !hasTerrain;
+    gridBtn.dataset.active = gridEnabled ? 'true' : 'false';
+  }
+
+  function _toggleGrid() {
+    if (gridBtn.disabled) return; // defensive — no terrain
+    // D-621: flush any in-flight typed value on the spacing input before
+    // toggling. Without this, a browser that fires the toggle's click before
+    // the input's change event would render with the previously-committed
+    // spacing while the field shows a different value.
+    if (spacingInput.value !== String(gridSpacingM)) {
+      _commitSpacing(spacingInput.value);
+    }
+    gridEnabled = !gridEnabled;
+    if (gridEnabled) _renderGridLayers();
+    else _removeGridLayers();
+    _persistGrid();
+    _updateGridControls();
+  }
+
+  /**
+   * Commit a new spacing value: clamp to [MIN, MAX], correct the input field
+   * if the user typed out of range (AC 2), persist, and regenerate when the
+   * grid is on. D-616: an empty or whitespace-only input is treated as "no
+   * commit" — the field is restored to the current spacing rather than
+   * silently snapping to MIN (which is what `Number('') === 0` would do).
+   */
+  function _commitSpacing(rawValue) {
+    const trimmed = typeof rawValue === 'string' ? rawValue.trim() : rawValue;
+    if (trimmed === '' || trimmed == null) {
+      spacingInput.value = String(gridSpacingM);
+      return;
+    }
+    const numeric = Number(trimmed);
+    const clamped = clampGridSpacing(numeric);
+    spacingInput.value = String(clamped);
+    if (clamped === gridSpacingM) return;
+    gridSpacingM = clamped;
+    if (gridEnabled) _renderGridLayers();
+    _persistGrid();
+  }
+
   // ----- Event handlers ----------------------------------------------------
 
   function handleMouseMove(event) {
@@ -802,14 +1149,25 @@ export function createCoordTools(toolbarEl, api, doc = globalThis.document) {
     _updateMeasureControls();
   }
 
+  function handleGridButtonClick() {
+    _toggleGrid();
+  }
+
+  function handleSpacingInputChange() {
+    _commitSpacing(spacingInput.value);
+  }
+
   originBtn.addEventListener('click', handleOriginButtonClick);
   measureBtn.addEventListener('click', handleMeasureButtonClick);
   clearBtn.addEventListener('click', handleClearButtonClick);
+  gridBtn.addEventListener('click', handleGridButtonClick);
+  spacingInput.addEventListener('change', handleSpacingInputChange);
   api.map.on('mousemove', handleMouseMove);
   api.map.on('click', handleMapClick);
   const unsubDrawEntered = api.bus.on('drawmode:entered', handleDrawModeEntered);
   const unsubDrawExited = api.bus.on('drawmode:exited', handleDrawModeExited);
   _updateMeasureControls();
+  _updateGridControls();
 
   // ----- Origin defaulting from terrain ------------------------------------
 
@@ -819,10 +1177,29 @@ export function createCoordTools(toolbarEl, api, doc = globalThis.document) {
   if (_hasCentre(initialTerrain)) {
     _setOrigin(initialTerrain.centre_wgs84);
   }
+  if (_hasBounds(initialTerrain)) {
+    terrainBounds = [...initialTerrain.bounds_wgs84];
+    _updateGridControls();
+  }
 
-  // Reactive — when terrain (re)loads, default the origin to its centre.
+  // Reactive — when terrain (re)loads, default the origin to its centre and
+  // refresh the grid against the new footprint. D-619: terrainBounds is
+  // updated BEFORE _setOrigin, so the grid render that _setOrigin triggers
+  // (when gridEnabled is true) sees the new bounds, not the previous ones.
   const unwatchTerrain = api.state.watchTerrain((terrain) => {
+    if (_hasBounds(terrain)) {
+      terrainBounds = [...terrain.bounds_wgs84];
+    } else {
+      // Terrain was cleared — drop bounds and any rendered grid.
+      terrainBounds = null;
+      if (gridEnabled) {
+        gridEnabled = false;
+        _removeGridLayers();
+        _persistGrid();
+      }
+    }
     if (_hasCentre(terrain)) _setOrigin(terrain.centre_wgs84);
+    _updateGridControls();
   });
 
   // ----- Disposal ----------------------------------------------------------
@@ -830,8 +1207,8 @@ export function createCoordTools(toolbarEl, api, doc = globalThis.document) {
   /**
    * Tear down the subsystem: remove every map listener, the terrain watch, the
    * shell-bus subscriptions, and the `coord-tools:origin` / `coord-tools:measure-*`
-   * layers and source; restore the cursor if a pick or measure was in progress,
-   * and remove the toolbar DOM.
+   * / `coord-tools:grid*` layers and sources; restore the cursor if a pick or
+   * measure was in progress, and remove the toolbar DOM.
    */
   function dispose() {
     disposed = true;
@@ -840,12 +1217,15 @@ export function createCoordTools(toolbarEl, api, doc = globalThis.document) {
     originBtn.removeEventListener('click', handleOriginButtonClick);
     measureBtn.removeEventListener('click', handleMeasureButtonClick);
     clearBtn.removeEventListener('click', handleClearButtonClick);
+    gridBtn.removeEventListener('click', handleGridButtonClick);
+    spacingInput.removeEventListener('change', handleSpacingInputChange);
     if (typeof unsubDrawEntered === 'function') unsubDrawEntered();
     if (typeof unsubDrawExited === 'function') unsubDrawExited();
     if (typeof unwatchTerrain === 'function') unwatchTerrain();
     if (pickMode) _exitPickMode();
     if (measureMode) _exitMeasureMode();
     _removeMeasureLayers();
+    _removeGridLayers();
     _removeOriginIndicator();
     if (root.parentNode != null) {
       root.parentNode.removeChild(root);

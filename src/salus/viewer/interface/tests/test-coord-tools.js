@@ -3,9 +3,11 @@
  *
  * Covers the I-20 infrastructure (toolbar shell, `coord_tools` state key), the
  * I-21 behaviour (local-frame conversion maths, origin defaulting, the
- * pick-mode reset, the live X/Y/Z readout and its "—" degradation paths) and
- * the I-22 measure tool (two-click measurement, ΔX/ΔY/ΔZ + 3D slant + 2D
- * fallback maths, clear path, disposal, and draw-mode mutual exclusion).
+ * pick-mode reset, the live X/Y/Z readout and its "—" degradation paths), the
+ * I-22 measure tool (two-click measurement, ΔX/ΔY/ΔZ + 3D slant + 2D
+ * fallback maths, clear path, disposal, and draw-mode mutual exclusion) and
+ * the I-23 grid tool (spacing clamp, toggle add/remove, principal-axis
+ * emphasis, origin-move regeneration, and terrain-driven enable gate).
  *
  * Run: node --test src/salus/viewer/interface/tests/test-coord-tools.js
  */
@@ -19,7 +21,12 @@ import {
   createCoordTools,
   COORD_TOOLS_LAYER_PREFIX,
   lngLatToLocalXY,
+  localXYToLngLat,
   measurePair,
+  clampGridSpacing,
+  GRID_SPACING_MIN_M,
+  GRID_SPACING_MAX_M,
+  GRID_SPACING_DEFAULT_M,
 } from '../coord-tools/index.js';
 import { createMapProxy, LayerPrefixViolation } from '../map-proxy.js';
 import { createState } from '../state.js';
@@ -269,26 +276,48 @@ test('the toolbar renders a label and an X/Y/Z readout (dashes before terrain)',
   assert.equal(readout.textContent, 'X: —  Y: —  Z: —');
 });
 
-test('the toolbar renders the set-origin, measure, measure-clear and grid controls', () => {
+test('the toolbar renders the set-origin, measure, measure-clear, grid and grid-spacing controls', () => {
   const { doc, toolbar, api } = makeHarness();
   const { root } = createCoordTools(toolbar, api, doc);
 
   const tools = toolButtons(root).map((b) => b.dataset.tool);
-  assert.deepEqual(tools.sort(), ['grid', 'measure', 'measure-clear', 'set-origin']);
+  assert.deepEqual(
+    tools.sort(),
+    ['grid', 'grid-spacing', 'measure', 'measure-clear', 'set-origin'],
+  );
 });
 
-test('grid stays a disabled stub; set-origin and measure are live controls', () => {
+test('all toolbar controls are live; grid + spacing start disabled until terrain loads', () => {
   const { doc, toolbar, api } = makeHarness();
   const { root } = createCoordTools(toolbar, api, doc);
 
   const byTool = Object.fromEntries(
     toolButtons(root).map((b) => [b.dataset.tool, b]),
   );
-  assert.equal(byTool.grid.disabled, true, 'grid remains an I-23 stub');
   assert.equal(byTool['set-origin'].disabled, false, 'set-origin is enabled in I-21');
   assert.equal(byTool['set-origin'].textContent, 'Set origin');
   assert.equal(byTool.measure.disabled, false, 'measure is enabled in I-22');
   assert.equal(byTool.measure.textContent, 'Measure');
+  // I-23: grid + spacing are live controls but disabled until terrain loads
+  // (no footprint to clip the grid to — AC 5).
+  assert.equal(byTool.grid.disabled, true, 'grid is disabled without terrain');
+  assert.equal(byTool.grid.textContent, 'Grid');
+  assert.equal(byTool['grid-spacing'].disabled, true, 'spacing input disabled without terrain');
+  assert.equal(byTool['grid-spacing'].value, String(GRID_SPACING_DEFAULT_M));
+});
+
+test('grid + spacing become enabled once terrain loads', () => {
+  const { doc, toolbar, api, state } = makeHarness();
+  const { root } = createCoordTools(toolbar, api, doc);
+  const byTool = Object.fromEntries(
+    toolButtons(root).map((b) => [b.dataset.tool, b]),
+  );
+  assert.equal(byTool.grid.disabled, true);
+
+  state._setTerrain(TERRAIN);
+
+  assert.equal(byTool.grid.disabled, false, 'grid enabled when terrain present');
+  assert.equal(byTool['grid-spacing'].disabled, false, 'spacing input enabled');
 });
 
 test('the toolbar is unaffected by module panel navigation', () => {
@@ -304,14 +333,15 @@ test('the toolbar is unaffected by module panel navigation', () => {
 
   assert.equal(toolbar.children.length, 1);
   assert.equal(toolbar.children[0], root);
-  assert.equal(toolButtons(root).length, 4);
+  assert.equal(toolButtons(root).length, 5);
   // The controls keep their interactive state across navigation.
   const byTool = Object.fromEntries(
     toolButtons(root).map((b) => [b.dataset.tool, b]),
   );
   assert.equal(byTool['set-origin'].disabled, false);
   assert.equal(byTool.measure.disabled, false);
-  assert.equal(byTool.grid.disabled, true);
+  assert.equal(byTool.grid.disabled, true, 'grid disabled without terrain');
+  assert.equal(byTool['grid-spacing'].disabled, true);
 });
 
 // ===========================================================================
@@ -1165,4 +1195,395 @@ test('dispose removes the coord-tools:measure-* layers, source and bus subscript
   assert.equal(bus._handlerCount('drawmode:entered'), 0, 'drawmode:entered unsubscribed');
   assert.equal(bus._handlerCount('drawmode:exited'), 0, 'drawmode:exited unsubscribed');
 });
+
+// ===========================================================================
+// I-23 — grid tool helpers
+// ===========================================================================
+
+function gridButtonOf(root) {
+  return root.children.find((c) => c.dataset && c.dataset.tool === 'grid');
+}
+
+function spacingInputOf(root) {
+  return root.children.find(
+    (c) => c.dataset && c.dataset.tool === 'grid-spacing',
+  );
+}
+
+// ===========================================================================
+// I-23 — pure maths: localXYToLngLat (inverse) and clampGridSpacing (AC 2, 7)
+// ===========================================================================
+
+test('localXYToLngLat: (0, 0) returns the origin lng/lat unchanged', () => {
+  const [lng, lat] = localXYToLngLat({ x: 0, y: 0 }, [133, -25]);
+  assert.equal(lng, 133);
+  assert.equal(lat, -25);
+});
+
+test('localXYToLngLat round-trips through lngLatToLocalXY within 1e-9 deg', () => {
+  const origin = [133, -25];
+  const samples = [
+    [133.001, -25],
+    [134.0, -24.5],
+    [132.5, -25.7],
+    [0, 0],
+  ];
+  for (const sample of samples) {
+    const xy = lngLatToLocalXY(sample, origin);
+    const back = localXYToLngLat(xy, origin);
+    assert.ok(Math.abs(back[0] - sample[0]) < 1e-9, `lng round-trip ${sample}: got ${back[0]}`);
+    assert.ok(Math.abs(back[1] - sample[1]) < 1e-9, `lat round-trip ${sample}: got ${back[1]}`);
+  }
+});
+
+test('clampGridSpacing: clamps below the min, above the max, and leaves in-range alone', () => {
+  assert.equal(clampGridSpacing(5), GRID_SPACING_MIN_M, 'below min snaps to MIN');
+  assert.equal(clampGridSpacing(10), GRID_SPACING_MIN_M);
+  assert.equal(clampGridSpacing(100), 100);
+  assert.equal(clampGridSpacing(5000), GRID_SPACING_MAX_M);
+  assert.equal(clampGridSpacing(50000), GRID_SPACING_MAX_M, 'above max snaps to MAX');
+});
+
+test('clampGridSpacing: non-finite values fall back to the default', () => {
+  assert.equal(clampGridSpacing(NaN), GRID_SPACING_DEFAULT_M);
+  assert.equal(clampGridSpacing(Infinity), GRID_SPACING_DEFAULT_M);
+  assert.equal(clampGridSpacing(-Infinity), GRID_SPACING_DEFAULT_M);
+});
+
+// ===========================================================================
+// I-23 — toggle add/remove and prefix-correct layers (AC 1, 6, 7)
+// ===========================================================================
+
+test('Grid: clicking the toggle adds both coord-tools:grid* layers and sources', () => {
+  const { doc, toolbar, api, mockMap } = makeHarness({ terrain: TERRAIN });
+  const { root } = createCoordTools(toolbar, api, doc);
+  const btn = gridButtonOf(root);
+
+  assert.equal(api.map.getSource('coord-tools:grid'), undefined);
+  assert.equal(api.map.getSource('coord-tools:grid-axes'), undefined);
+
+  btn._fire('click');
+
+  assert.equal(btn.dataset.active, 'true');
+  assert.ok(api.map.getSource('coord-tools:grid'), 'minor-grid source present');
+  assert.ok(api.map.getSource('coord-tools:grid-axes'), 'axes source present');
+  assert.ok(api.map.getLayer('coord-tools:grid'), 'minor-grid layer present');
+  assert.ok(api.map.getLayer('coord-tools:grid-axes'), 'axes layer present');
+  // Every layer id this subsystem touched is coord-tools-prefixed.
+  for (const [op, id] of mockMap._calls) {
+    if (op === 'addLayer' || op === 'addSource') {
+      assert.match(id, /^coord-tools:/, `layer/source id "${id}" must carry the coord-tools prefix`);
+    }
+  }
+});
+
+test('Grid: clicking the toggle a second time removes the layers and sources', () => {
+  const { doc, toolbar, api } = makeHarness({ terrain: TERRAIN });
+  const { root } = createCoordTools(toolbar, api, doc);
+  const btn = gridButtonOf(root);
+
+  btn._fire('click'); // on
+  assert.ok(api.map.getSource('coord-tools:grid'));
+
+  btn._fire('click'); // off
+
+  assert.equal(btn.dataset.active, 'false');
+  assert.equal(api.map.getSource('coord-tools:grid'), undefined);
+  assert.equal(api.map.getSource('coord-tools:grid-axes'), undefined);
+  assert.equal(api.map.getLayer('coord-tools:grid'), undefined);
+  assert.equal(api.map.getLayer('coord-tools:grid-axes'), undefined);
+});
+
+test('Grid: with the default spacing and a 2°×2° footprint, many minor lines are generated', () => {
+  // The TERRAIN fixture spans [132,-26]→[134,-24] — ~111 km on a side at this
+  // latitude. At a 100 m default spacing, the minor-grid line count is in the
+  // thousands. Assert a lower bound so we know the generator did fire.
+  const { doc, toolbar, api } = makeHarness({ terrain: TERRAIN });
+  const { root } = createCoordTools(toolbar, api, doc);
+  gridButtonOf(root)._fire('click');
+
+  const minorSrc = api.map.getSource('coord-tools:grid');
+  const axesSrc = api.map.getSource('coord-tools:grid-axes');
+  assert.ok(minorSrc.data.features.length > 100, `expected many minor lines, got ${minorSrc.data.features.length}`);
+  // Exactly two principal axes (X=0 and Y=0) when origin is inside the bounds.
+  assert.equal(axesSrc.data.features.length, 2, 'axes layer must hold exactly the two principal lines');
+});
+
+// ===========================================================================
+// I-23 — principal-axis emphasis (AC 3, 7)
+// ===========================================================================
+
+test('Grid: the X=0 and Y=0 axes through the origin land on the axes layer with distinct paint', () => {
+  const { doc, toolbar, api, mockMap } = makeHarness({ terrain: TERRAIN });
+  const { root } = createCoordTools(toolbar, api, doc);
+  gridButtonOf(root)._fire('click');
+
+  // The axes source carries the two principal lines: one at lng=lng0, one at lat=lat0.
+  const axesFeatures = api.map.getSource('coord-tools:grid-axes').data.features;
+  const lng0 = 133;
+  const lat0 = -25;
+  const hasXAxis = axesFeatures.some((f) =>
+    f.geometry.coordinates.every((c) => Math.abs(c[0] - lng0) < 1e-9)
+  );
+  const hasYAxis = axesFeatures.some((f) =>
+    f.geometry.coordinates.every((c) => Math.abs(c[1] - lat0) < 1e-9)
+  );
+  assert.ok(hasXAxis, 'an axes line must run at constant lng=lng0 (the X=0 axis)');
+  assert.ok(hasYAxis, 'an axes line must run at constant lat=lat0 (the Y=0 axis)');
+
+  // The two layers must be visibly distinct: the recorded addLayer paint
+  // dicts must differ on width and colour.
+  const addLayerSpecs = mockMap._calls.filter((c) => c[0] === 'addLayer');
+  assert.ok(addLayerSpecs.some((c) => c[1] === 'coord-tools:grid'));
+  assert.ok(addLayerSpecs.some((c) => c[1] === 'coord-tools:grid-axes'));
+  // The mock stores specs in mockMap as well — extract them.
+  // mockMap stores the spec passed to addLayer keyed by id (sources[] is for sources;
+  // layers[] holds the spec). We retrieve them via getLayer.
+  const minorSpec = api.map.getLayer('coord-tools:grid');
+  const axesSpec = api.map.getLayer('coord-tools:grid-axes');
+  assert.ok(minorSpec, 'minor-grid layer present');
+  assert.ok(axesSpec, 'axes layer present');
+  assert.notEqual(
+    minorSpec.paint['line-color'],
+    axesSpec.paint['line-color'],
+    'principal axes must use a different line-color from the minor grid',
+  );
+  assert.ok(
+    axesSpec.paint['line-width'] > minorSpec.paint['line-width'],
+    'principal axes must be drawn thicker than the minor grid',
+  );
+});
+
+// ===========================================================================
+// I-23 — D-616..D-621 regression tests
+// ===========================================================================
+
+test('Grid: an empty spacing input restores the current value rather than snapping to MIN (D-616)', () => {
+  const { doc, toolbar, api } = makeHarness({ terrain: TERRAIN });
+  const { root } = createCoordTools(toolbar, api, doc);
+  const spacing = spacingInputOf(root);
+
+  spacing.value = '250';
+  spacing._fire('change');
+  assert.equal(spacing.value, '250');
+
+  // Now clear the field and commit — must NOT collapse to MIN.
+  spacing.value = '';
+  spacing._fire('change');
+  assert.equal(spacing.value, '250', 'empty input must not snap to MIN');
+});
+
+test('Grid: degenerate terrain bounds render an empty grid rather than zero-length lines (D-617)', () => {
+  // east==west and north==south — a zero-area footprint must refuse to render.
+  const DEGENERATE = Object.freeze({
+    centre_wgs84: [133, -25],
+    bounds_wgs84: [133, -25, 133, -25],
+    resolution_m: 1,
+  });
+  const { doc, toolbar, api } = makeHarness({ terrain: DEGENERATE });
+  const { root } = createCoordTools(toolbar, api, doc);
+  gridButtonOf(root)._fire('click');
+
+  const minorSrc = api.map.getSource('coord-tools:grid');
+  const axesSrc = api.map.getSource('coord-tools:grid-axes');
+  assert.equal(minorSrc.data.features.length, 0, 'no minor lines for a zero-area bounds');
+  assert.equal(axesSrc.data.features.length, 0, 'no axes lines for a zero-area bounds');
+});
+
+test('Grid: inverted terrain bounds (east<west) render an empty grid (D-617)', () => {
+  const INVERTED = Object.freeze({
+    centre_wgs84: [133, -25],
+    bounds_wgs84: [134, -24, 132, -26], // west, south, east, north all swapped
+    resolution_m: 1,
+  });
+  const { doc, toolbar, api } = makeHarness({ terrain: INVERTED });
+  const { root } = createCoordTools(toolbar, api, doc);
+  gridButtonOf(root)._fire('click');
+
+  const minorSrc = api.map.getSource('coord-tools:grid');
+  assert.equal(minorSrc.data.features.length, 0, 'inverted bounds must not draw backwards lines');
+});
+
+test('Grid: a render failure rolls gridEnabled back to false and refreshes controls (D-618)', () => {
+  // Force a render failure by reassigning the underlying mock's addLayer to
+  // one that throws — the scoped map proxy delegates through to the mock.
+  const { doc, toolbar, api, mockMap } = makeHarness({ terrain: TERRAIN });
+  const { root } = createCoordTools(toolbar, api, doc);
+  const btn = gridButtonOf(root);
+
+  const originalAddLayer = mockMap.addLayer;
+  mockMap.addLayer = () => { throw new Error('boom'); };
+  try {
+    btn._fire('click'); // attempt to enable — should fail and roll back
+  } finally {
+    mockMap.addLayer = originalAddLayer;
+  }
+  assert.equal(btn.dataset.active, 'false', 'Grid button must show inactive after a failed render');
+  assert.equal(api.map.getSource('coord-tools:grid'), undefined, 'no orphan source after failed render');
+  assert.equal(api.map.getSource('coord-tools:grid-axes'), undefined);
+});
+
+test('Grid: terrain reload with new bounds renders against the NEW bounds (D-619)', () => {
+  const { doc, toolbar, api, state } = makeHarness({ terrain: TERRAIN });
+  const { root } = createCoordTools(toolbar, api, doc);
+  gridButtonOf(root)._fire('click');
+  const linesBefore = api.map.getSource('coord-tools:grid').data.features.length;
+
+  // Load a much SMALLER terrain footprint — line count must drop accordingly,
+  // proving the regenerated grid used the new bounds rather than the old.
+  const SMALL = Object.freeze({
+    centre_wgs84: [133, -25],
+    bounds_wgs84: [132.95, -25.05, 133.05, -24.95],
+    resolution_m: 1,
+  });
+  state._setTerrain(SMALL);
+
+  const linesAfter = api.map.getSource('coord-tools:grid').data.features.length;
+  assert.ok(linesAfter < linesBefore, `smaller bounds → fewer minor lines (before=${linesBefore}, after=${linesAfter})`);
+});
+
+test('Grid: a typed spacing value is flushed when the grid is toggled before the input blurs (D-621)', () => {
+  const { doc, toolbar, api, state } = makeHarness({ terrain: TERRAIN });
+  const { root } = createCoordTools(toolbar, api, doc);
+  const btn = gridButtonOf(root);
+  const spacing = spacingInputOf(root);
+
+  // User types a new spacing then clicks the toggle WITHOUT firing 'change'.
+  spacing.value = '500';
+  btn._fire('click'); // enable the grid; toggle must commit pending spacing first
+
+  assert.equal(state._coordTools().grid_spacing_m, 500, 'pending typed value must be flushed on toggle');
+  assert.equal(spacing.value, '500');
+});
+
+// ===========================================================================
+// I-23 — origin move regenerates the grid (AC 4, 7)
+// ===========================================================================
+
+test('Grid: moving the origin regenerates the grid against the new frame', () => {
+  const { doc, toolbar, api, mockMap, state } = makeHarness({ terrain: TERRAIN });
+  const { root } = createCoordTools(toolbar, api, doc);
+  gridButtonOf(root)._fire('click');
+
+  const lngBefore = api.map.getSource('coord-tools:grid-axes').data.features.find(
+    (f) => f.geometry.coordinates.every((c) => Math.abs(c[0] - c[0]) < 1e-9 && f.properties.axis === 'x'),
+  );
+  const xAxisLng = lngBefore.geometry.coordinates[0][0];
+  assert.equal(xAxisLng, 133, 'X=0 axis initially at lng0=133');
+
+  // Move origin via the pick mode. The next map click is consumed by the pick.
+  originButtonOf(root)._fire('click');
+  mockMap._emit('click', pointerEvent(133.5, -24.5));
+  assert.deepEqual(state._coordTools().origin_lnglat, [133.5, -24.5]);
+
+  // The X=0 axis is now at lng=133.5 — proving the grid re-rendered.
+  const axesAfter = api.map.getSource('coord-tools:grid-axes').data.features;
+  const xAxisAfter = axesAfter.find((f) => f.properties.axis === 'x');
+  assert.ok(xAxisAfter, 'X=0 axis must still be present');
+  assert.ok(
+    Math.abs(xAxisAfter.geometry.coordinates[0][0] - 133.5) < 1e-9,
+    `X=0 axis must follow the new origin lng (got ${xAxisAfter.geometry.coordinates[0][0]})`,
+  );
+});
+
+// ===========================================================================
+// I-23 — spacing-input clamp + regeneration (AC 2, 7)
+// ===========================================================================
+
+test('Grid: changing the spacing regenerates the grid and the input value reflects the clamp', () => {
+  const { doc, toolbar, api } = makeHarness({ terrain: TERRAIN });
+  const { root } = createCoordTools(toolbar, api, doc);
+  gridButtonOf(root)._fire('click');
+  const spacing = spacingInputOf(root);
+
+  const before = api.map.getSource('coord-tools:grid').data.features.length;
+
+  // Increase the spacing 10x — line count must drop substantially.
+  spacing.value = '1000';
+  spacing._fire('change');
+  const after = api.map.getSource('coord-tools:grid').data.features.length;
+  assert.ok(after < before, `coarser spacing must reduce line count (before=${before}, after=${after})`);
+});
+
+test('Grid: a below-min spacing is corrected to MIN on commit (AC 2)', () => {
+  const { doc, toolbar, api } = makeHarness({ terrain: TERRAIN });
+  const { root } = createCoordTools(toolbar, api, doc);
+  const spacing = spacingInputOf(root);
+
+  spacing.value = '5'; // below MIN=10
+  spacing._fire('change');
+  assert.equal(spacing.value, String(GRID_SPACING_MIN_M));
+});
+
+test('Grid: an above-max spacing is corrected to MAX on commit (AC 2)', () => {
+  const { doc, toolbar, api } = makeHarness({ terrain: TERRAIN });
+  const { root } = createCoordTools(toolbar, api, doc);
+  const spacing = spacingInputOf(root);
+
+  spacing.value = '999999';
+  spacing._fire('change');
+  assert.equal(spacing.value, String(GRID_SPACING_MAX_M));
+});
+
+// ===========================================================================
+// I-23 — state writes coord_tools.grid_enabled / grid_spacing_m (AC 7)
+// ===========================================================================
+
+test('Grid: toggling and resizing write to coord_tools.grid_enabled and grid_spacing_m', () => {
+  const { doc, toolbar, api, state } = makeHarness({ terrain: TERRAIN });
+  const { root } = createCoordTools(toolbar, api, doc);
+  const btn = gridButtonOf(root);
+  const spacing = spacingInputOf(root);
+
+  assert.equal(state._coordTools().grid_enabled, false);
+
+  btn._fire('click');
+  assert.equal(state._coordTools().grid_enabled, true);
+  assert.equal(state._coordTools().grid_spacing_m, GRID_SPACING_DEFAULT_M);
+
+  spacing.value = '250';
+  spacing._fire('change');
+  assert.equal(state._coordTools().grid_spacing_m, 250);
+
+  btn._fire('click');
+  assert.equal(state._coordTools().grid_enabled, false);
+});
+
+// ===========================================================================
+// I-23 — terrain teardown (AC 5)
+// ===========================================================================
+
+test('Grid: clearing terrain disables the toggle and removes the grid', () => {
+  const { doc, toolbar, api, state } = makeHarness({ terrain: TERRAIN });
+  const { root } = createCoordTools(toolbar, api, doc);
+  gridButtonOf(root)._fire('click');
+  assert.ok(api.map.getSource('coord-tools:grid'));
+
+  state._setTerrain(null);
+
+  assert.equal(gridButtonOf(root).disabled, true, 'grid toggle disabled when terrain cleared');
+  assert.equal(spacingInputOf(root).disabled, true);
+  assert.equal(api.map.getSource('coord-tools:grid'), undefined, 'grid layers removed');
+  assert.equal(api.map.getSource('coord-tools:grid-axes'), undefined);
+});
+
+// ===========================================================================
+// I-23 — disposal (AC 6)
+// ===========================================================================
+
+test('dispose removes the coord-tools:grid and coord-tools:grid-axes layers and sources', () => {
+  const { doc, toolbar, api } = makeHarness({ terrain: TERRAIN });
+  const { root, dispose } = createCoordTools(toolbar, api, doc);
+  gridButtonOf(root)._fire('click');
+  assert.ok(api.map.getSource('coord-tools:grid'));
+  assert.ok(api.map.getSource('coord-tools:grid-axes'));
+
+  dispose();
+
+  assert.equal(api.map.getSource('coord-tools:grid'), undefined);
+  assert.equal(api.map.getSource('coord-tools:grid-axes'), undefined);
+  assert.equal(api.map.getLayer('coord-tools:grid'), undefined);
+  assert.equal(api.map.getLayer('coord-tools:grid-axes'), undefined);
+});
+
 

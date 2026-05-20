@@ -67,3 +67,25 @@
   color: #ffffff;
   border-color: #2266aa;
 }
+
+/* I-23 — numeric spacing input alongside the Grid toggle. */
+.coord-tools-input {
+  width: 70px;
+  background: #1a1a2e;
+  color: #d0d0e0;
+  border: 1px solid #252540;
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 12px;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+.coord-tools-input:focus-visible {
+  outline: 2px solid #4488cc;
+  outline-offset: 1px;
+}
+
+.coord-tools-input:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}

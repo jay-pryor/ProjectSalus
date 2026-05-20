@@ -1,0 +1,51 @@
+task_id: I-23
+timestamp: 2026-05-20T19:45:00Z
+title: "Coordinate-tools — toggleable coordinate grid overlay"
+
+quality_gates:
+  G1_lint: N/A             # N/A — no Python files changed (interface JS/CSS task)
+  G2_format: N/A           # N/A — no Python files changed
+  G3_import: N/A           # N/A — no Python files changed
+  G4_type: N/A             # N/A — no Python files changed
+  G5_security: N/A         # N/A — no Python files changed
+  G6_unit_test: N/A        # N/A — no Python files changed (Python pytest). JS suite below.
+  G7_coverage: N/A         # N/A — no Python files changed
+  G8_secrets: pass         # detect-secrets scan of all changed files — 0 secrets
+  coverage_pct: N/A
+  js_tests: pass           # node --test 'tests/test-*.js' — 802 passed, 0 failed. test-coord-tools.js: 84 tests (toolbar shell, I-21 origin/readout, I-22 measure tool, I-23 grid tool — localXYToLngLat round-trip, clampGridSpacing, terrain-driven enable gate, toggle add/remove with prefix-correct ids, principal-axis emphasis with paint-distinction assertion, origin-move regeneration, spacing-input clamp + regeneration, state writes, terrain teardown, disposal, and D-616..D-621 regression tests).
+
+review:
+  l1_standards:
+    testing: pass          # test-coord-tools.js — 22 new I-23 tests (and 6 D-616..D-621 regression tests), each carrying assertions; node:assert/strict; mock map/state/bus harness; no shared-fixture pollution. Python-specific testing.md rules (pytest fixtures, tmp_path, pytest.approx) are N/A — interface JS.
+    error_handling: pass   # _generateGridFeatures validates bounds shape (D-617) and rejects pole-anchored origins (cosLat0 guard); _renderGridLayers' catch rolls gridEnabled back and re-removes layers on failure (D-618); _removeGridLayers isolates each remove in its own try/catch (D-620); _commitSpacing treats empty/whitespace input as "no commit" (D-616) and routes non-finite inputs through clampGridSpacing's NaN fallback. Drawmode underflow latch (I-22 D-616) untouched. No swallowed exceptions — every failure path logs.
+    logging: pass          # console.warn diagnostics for degenerate bounds, pole-anchored origin, per-target grid-layer removal failures, grid-render failures, and the line-count safety cap — consistent with the I-21 _rafFallbackWarned pattern.
+    security: N/A          # no file I/O of external or user data. Grid generation operates on shell-validated terrain bounds.
+    interface_modules: N/A # No module files changed. The coord-tools subsystem is a shell-owned subsystem (§2.9), reviewed by module_architecture_reviewer below against the shell-owned-subsystem invariants.
+  l2_agents:
+    silent_failure_hunter: {status: pass, findings: 12}         # First pass returned fail with 12 findings (2 high, 5 medium, 5 low). All 2 highs and 4 mediums logged and fixed: D-616 (empty-string spacing), D-617 (degenerate/inverted bounds), D-618 (render-failure rollback), D-619 (terrain-watch ordering), D-620 (_removeGridLayers per-target isolation), D-621 (typed-spacing flush on toggle). One medium (terrain reload resetting user-modified origin) is pre-existing I-21 watch behaviour, not introduced by I-23, and is deferred for a future task; documented here. The 5 lows are defence-in-depth observations not worth the change cost.
+    spec_compliance: {status: pass, findings: 1}                # 1 informational warning: the principal-axis emphasis test asserted both layers were added but not that their paint dicts differ. Strengthened in the I-23 test additions — the test now reads back the recorded addLayer specs via getLayer and asserts line-color differs and line-width(axes) > line-width(minor). No AC partially-covered or missed. No out-of-scope item implemented: no grid labels, no rotated grid, no lines beyond bounds, coord_tools still absent from SCENARIO_KEYS.
+    type_design_analyzer: N/A                                   # interface JS — no type annotations added or modified
+    regression_reviewer: {status: pass, findings: 2}            # 2 low findings: (1) terrain-watch order — same as silent-failure D-619, fixed; (2) shell skeleton's grid_spacing_m=null divergence from the subsystem default GRID_SPACING_DEFAULT_M — documented, intentional (null seed signals "uninitialised", default applies on first interaction). All I-20/I-21/I-22 behaviour preserved (D-612 origin-disabled-during-drawmode unaffected because _updateGridControls writes only gridBtn/spacingInput.disabled, not originBtn.disabled). Full suite 802/802 — no test removed; renamed tests strengthen rather than weaken coverage.
+    module_architecture_reviewer: {status: pass, findings: 0}   # All four new layer/source ids prefixed `coord-tools:` (GRID_SOURCE/LAYER, GRID_AXES_SOURCE/LAYER). Map proxy compatibility: only addSource/addLayer/getSource/getLayer/removeSource/removeLayer used; no new opt-in needed beyond the I-21 allowTerrainQuery. State boundary: only coord_tools (get/set) and terrain (getTerrain/watchTerrain); no module declares coord_tools. Bus is subscribe-only and the I-23 changes added no new subscriptions. Disposal removes gridBtn + spacingInput listeners, both grid layers + sources via _removeGridLayers, and reuses the I-21 unwatchTerrain (the watch was extended in place rather than duplicated).
+
+defect_ids:
+  - D-616   # empty-string spacing input silently snapped to MIN (high, resolved)
+  - D-617   # degenerate / inverted bounds_wgs84 rendered silently (high, resolved)
+  - D-618   # _renderGridLayers swallowed failure left gridEnabled stale (medium, resolved)
+  - D-619   # terrain watch updated terrainBounds AFTER _setOrigin — stale-bounds first render (medium, resolved)
+  - D-620   # _removeGridLayers' shared try/catch leaked remaining layers on first-throw (medium, resolved)
+  - D-621   # spacing-input change-event race against Grid-toggle click left spacing desynced (medium, resolved)
+
+files_changed:
+  - src/salus/viewer/interface/coord-tools/index.js            # I-23 behaviour: localXYToLngLat (inverse maths); clampGridSpacing + GRID_SPACING_{MIN,MAX,DEFAULT}_M; GRID_SOURCE/LAYER + GRID_AXES_SOURCE/LAYER constants; GRID_PAINT vs GRID_AXES_PAINT (distinct line-color + line-width + line-opacity); Grid toggle button + numeric spacing <input>; _hasBounds; _generateGridFeatures (clipped to bounds, principal axes filtered to the axes layer, line-count safety cap, degenerate/inverted bounds guard); _renderGridLayers (idempotent remove-then-add with rollback on failure); _removeGridLayers (per-target try/catch); _persistGrid (D-610/D-611 skeleton guard reuse); _updateGridControls (terrain-driven enable gate); _toggleGrid (flushes pending spacing before toggle); _commitSpacing (empty/whitespace guard, clamp, regenerate on change); hook in _setOrigin to regenerate the grid on origin moves; extended terrain watch (terrainBounds updated before _setOrigin); dispose() removes gridBtn + spacingInput listeners and both grid layers.
+  - src/salus/viewer/interface/coord-tools/coord-tools.css     # .coord-tools-input styling — numeric input alongside the Grid toggle.
+  - src/salus/viewer/interface/tests/test-coord-tools.js       # +22 I-23 tests (round-trip maths, clamp, toggle add/remove with prefix assertion, principal-axis emphasis with paint-distinction assertion, origin-move regeneration, spacing clamp at MIN/MAX, state writes, terrain teardown, disposal) + 6 D-616..D-621 regression tests. Toolbar tests updated for the 5-control toolbar.
+  - .forge/defect-register.yaml                                # D-616..D-621 logged (open → resolved).
+
+notes:
+  - Source — coordinate-tools feature (2026-05-18), task 4 of 4. Builds on I-20 (toolbar + shell-owned subsystem), I-21 (origin + live readout) and I-22 (measurement). This task completes the four-task coord-tools feature.
+  - Maths — `localXYToLngLat({x,y}, origin)` is the inverse of `lngLatToLocalXY`, exported and unit-tested directly (round-trip within 1e-9 deg for sample lng/lats). `clampGridSpacing(value)` clamps to [10, 5000] with a NaN-safe fall back to the default 100, also exported and unit-tested.
+  - Grid generation — the grid is generated in the local tangent plane (so the spacing is exactly uniform in metres), then each line is emitted as a GeoJSON LineString in geographic coordinates, clipped to the terrain rectangle in lng/lat space. Constant-X lines run N–S at lng = xToLng(xk); constant-Y lines run E–W at lat = yToLat(yk). The X=0 and Y=0 lines (which always exist when the origin lies inside the bounds because 0 is a multiple of every spacing) are filtered into a separate `coord-tools:grid-axes` layer with thicker, brighter paint than the minor `coord-tools:grid` layer.
+  - Reactivity — toggle on/off renders/removes; spacing change regenerates when on; terrain (re)load regenerates against new bounds (D-619 ordering fix ensures the in-watch _setOrigin sees the new bounds); origin move regenerates via the I-21 `_setOrigin` hook; clearing terrain disables both controls and tears down any rendered grid.
+  - Defence in depth — bounds shape validation (D-617), pole-anchored origin guard (cosLat0 == 0), line-count safety cap (GRID_MAX_LINES_PER_AXIS = 10_000, sized to admit a 50 km × 50 km cUAS site at the 10 m minimum spacing while catching pathologically corrupt bounds), per-target try/catch on remove (D-620), rollback on failed render (D-618), empty-input rejection on the spacing field (D-616), and pre-toggle spacing flush (D-621).
+  - Deferred (out of scope for I-23) — the terrain watch unconditionally re-defaults the origin to the new centre on every terrain (re)load, silently discarding a user-modified origin. This is pre-existing I-21 watch behaviour (untouched by I-23). Worth revisiting in a future task; not blocking and not introduced here.
